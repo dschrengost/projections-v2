@@ -15,6 +15,7 @@ import {
     selectPortfolio,
     PortfolioSelectionResponse,
     PortfolioSelectionMode,
+    SiteCode,
 } from '../api/contest_sim'
 import {
     getSavedBuilds,
@@ -67,7 +68,12 @@ interface SetAndForgetSelection {
 }
 
 const DK_EDITOR_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL'] as const
+const FD_EDITOR_SLOTS = ['PG', 'PG', 'SG', 'SG', 'SF', 'SF', 'PF', 'PF', 'C'] as const
 type ContestSimEditorSlot = (typeof DK_EDITOR_SLOTS)[number]
+
+function getEditorSlotsForSite(site: SiteCode): readonly string[] {
+    return site === 'fd' ? FD_EDITOR_SLOTS : DK_EDITOR_SLOTS
+}
 
 function getContestSimSlotFlexDegree(player: PoolPlayer): number {
     const posSet = new Set((player.positions ?? []).map(pos => pos.trim().toUpperCase()))
@@ -796,8 +802,12 @@ function selectConstrainedLineups(
 export default function ContestSimPage() {
     // Date and slate selection (persisted in URL)
     const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
+    const [site, setSite] = useState<SiteCode>('dk')
     const [slates, setSlates] = useState<Slate[]>([])
     const [slatesLoading, setSlatesLoading] = useState(false)
+
+    // Site constants
+    const lineupSize = site === 'fd' ? 9 : 8
 
     // Saved builds
     const [savedBuilds, setSavedBuilds] = useState<SavedBuild[]>([])
@@ -898,12 +908,27 @@ export default function ContestSimPage() {
     }, [])
 
 
-    // Load slates when date changes
+    // Load stored site from localStorage
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const storedSite = window.localStorage.getItem('contestSim.site')
+        if (storedSite === 'dk' || storedSite === 'fd') {
+            setSite(storedSite)
+        }
+    }, [])
+
+    // Persist site to localStorage
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem('contestSim.site', site)
+    }, [site])
+
+    // Load slates when date or site changes
     useEffect(() => {
         const load = async () => {
             setSlatesLoading(true)
             try {
-                const data = await getSlates(selectedDate)
+                const data = await getSlates(selectedDate, 'all', site)
                 setSlates(data)
                 // If URL has a slate and it exists in the data, keep it; otherwise auto-select
                 const urlSlateExists = selectedSlate && data.some(s => s.draft_group_id === selectedSlate)
@@ -929,7 +954,7 @@ export default function ContestSimPage() {
             }
         }
         void load()
-    }, [selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [selectedDate, site]) // eslint-disable-line react-hooks/exhaustive-deps
 
     const slateOptions = useMemo(() => {
         const opts = [...slates]
@@ -964,7 +989,7 @@ export default function ContestSimPage() {
         const load = async () => {
             setBuildsLoading(true)
             try {
-                const builds = await getSavedBuilds(selectedDate, selectedSlate)
+                const builds = await getSavedBuilds(selectedDate, selectedSlate, site)
                 setSavedBuilds(builds)
                 setSelectedBuildId(builds[0]?.job_id ?? null)
             } catch {
@@ -974,14 +999,14 @@ export default function ContestSimPage() {
             }
         }
         void load()
-    }, [selectedDate, selectedSlate])
+    }, [selectedDate, selectedSlate, site])
 
-    // Load saved contest sim builds when date/slate changes
+    // Load saved contest sim builds when date/slate/site changes
     useEffect(() => {
         const load = async () => {
             setSimBuildsLoading(true)
             try {
-                const builds = await getSavedSimBuilds(selectedDate)
+                const builds = await getSavedSimBuilds(selectedDate, undefined, site)
                 setSavedSimBuilds(builds)
                 const scopedBuilds = selectedSlate
                     ? builds.filter(b => b.draft_group_id == null || b.draft_group_id === selectedSlate)
@@ -1007,9 +1032,9 @@ export default function ContestSimPage() {
             }
         }
         void load()
-    }, [selectedDate, selectedSlate])
+    }, [selectedDate, selectedSlate, site])
 
-    // Load cached field libraries when date/slate changes
+    // Load cached field libraries when date/slate/site changes
     useEffect(() => {
         if (!selectedSlate) {
             setFieldLibraries([])
@@ -1019,7 +1044,7 @@ export default function ContestSimPage() {
             setFieldLibrariesLoading(true)
             setFieldLibraryError(null)
             try {
-                const libs = await listFieldLibraries(selectedDate, selectedSlate)
+                const libs = await listFieldLibraries(selectedDate, selectedSlate, site)
                 setFieldLibraries(libs)
                 if (libs.length > 0 && !libs.some(l => l.version === fieldLibraryVersion)) {
                     setFieldLibraryVersion(libs[0].version)
@@ -1032,7 +1057,7 @@ export default function ContestSimPage() {
             }
         }
         void load()
-    }, [selectedDate, selectedSlate, fieldLibraryVersion])
+    }, [selectedDate, selectedSlate, fieldLibraryVersion, site])
 
     // Load player pool for name resolution
     useEffect(() => {
@@ -1046,6 +1071,7 @@ export default function ContestSimPage() {
                     selectedDate,
                     selectedSlate,
                     undefined,
+                    site,
                     { useStrategyOverrides },
                 )
                 setPool(data)
@@ -1054,7 +1080,7 @@ export default function ContestSimPage() {
             }
         }
         void load()
-    }, [selectedDate, selectedSlate, useStrategyOverrides])
+    }, [selectedDate, selectedSlate, useStrategyOverrides, site])
 
     // Load config on mount
     useEffect(() => {
@@ -1433,6 +1459,7 @@ export default function ContestSimPage() {
         try {
             const result = await runContestSim({
                 game_date: selectedDate,
+                site,
                 draft_group_id: selectedSlate ?? undefined,
                 lineups: lineupsToRun,
                 archetype,
@@ -1449,7 +1476,7 @@ export default function ContestSimPage() {
                 use_strategy_overrides: useStrategyOverrides,
             })
             setSimResult(result)
-            const builds = await getSavedSimBuilds(selectedDate)
+            const builds = await getSavedSimBuilds(selectedDate, undefined, site)
             setSavedSimBuilds(builds)
             setSelectedSimBuildId(result.build_id ?? builds.find(b => b.kind === 'run')?.build_id ?? null)
             setSelectedSimLineupId(null)
@@ -1485,6 +1512,7 @@ export default function ContestSimPage() {
         try {
             await buildFieldLibrary({
                 game_date: selectedDate,
+                site,
                 draft_group_id: selectedSlate,
                 version: fieldLibraryVersion,
                 k: fieldLibraryK,
@@ -1493,7 +1521,7 @@ export default function ContestSimPage() {
                 rebuild_candidates: fieldLibraryRebuildCandidates,
                 ownership_mode: ownershipMode,
             })
-            const libs = await listFieldLibraries(selectedDate, selectedSlate)
+            const libs = await listFieldLibraries(selectedDate, selectedSlate, site)
             setFieldLibraries(libs)
         } catch (err) {
             setFieldLibraryError((err as Error).message)
@@ -1604,6 +1632,7 @@ export default function ContestSimPage() {
                 simResult?.config ?? null,
                 simResult?.stats ?? null,
                 {
+                    site,
                     kind: 'lineups',
                     sourceBuildId: simResult?.build_id ?? null,
                     selectionMode: 'browse_select',
@@ -1617,7 +1646,7 @@ export default function ContestSimPage() {
                     },
                 },
             )
-            const builds = await getSavedSimBuilds(selectedDate)
+            const builds = await getSavedSimBuilds(selectedDate, undefined, site)
             setSavedSimBuilds(builds)
             setSelectedSimBuildId(null)
             setSelectedSimLineupId(saved.build_id)
@@ -1651,6 +1680,7 @@ export default function ContestSimPage() {
                 simResult?.config ?? null,
                 simResult?.stats ?? null,
                 {
+                    site,
                     kind: 'lineups',
                     sourceBuildId: simResult?.build_id ?? null,
                     selectionMode: 'browse_select',
@@ -1665,7 +1695,7 @@ export default function ContestSimPage() {
                     },
                 },
             )
-            const builds = await getSavedSimBuilds(selectedDate)
+            const builds = await getSavedSimBuilds(selectedDate, undefined, site)
             setSavedSimBuilds(builds)
             setSelectedSimBuildId(null)
             setSelectedSimLineupId(saved.build_id)
@@ -1697,6 +1727,7 @@ export default function ContestSimPage() {
         try {
             const response = await selectPortfolio({
                 game_date: selectedDate,
+                site,
                 draft_group_id: selectedSlate ?? undefined,
                 source_build_id: simResult.build_id,
                 mode: portfolioMode,
@@ -1752,6 +1783,7 @@ export default function ContestSimPage() {
                 simResult?.config ?? null,
                 simResult?.stats ?? null,
                 {
+                    site,
                     kind: 'portfolio',
                     sourceBuildId: portfolioResponse.source_build_id,
                     selectionMode: portfolioResponse.mode,
@@ -1776,7 +1808,7 @@ export default function ContestSimPage() {
                     warnings: portfolioResponse.warnings,
                 },
             )
-            const builds = await getSavedSimBuilds(selectedDate)
+            const builds = await getSavedSimBuilds(selectedDate, undefined, site)
             setSavedSimBuilds(builds)
             setSelectedSimBuildId(null)
             setSelectedSimLineupId(saved.build_id)
@@ -1788,8 +1820,8 @@ export default function ContestSimPage() {
     const handleDeleteSimBuild = async (buildId: string) => {
         if (!confirm('Delete this saved sim build?')) return
         try {
-            await deleteSavedSimBuild(selectedDate, buildId)
-            const builds = await getSavedSimBuilds(selectedDate)
+            await deleteSavedSimBuild(selectedDate, buildId, site)
+            const builds = await getSavedSimBuilds(selectedDate, undefined, site)
             setSavedSimBuilds(builds)
             if (selectedSimBuildId === buildId) {
                 setSelectedSimBuildId(null)
@@ -1859,6 +1891,7 @@ export default function ContestSimPage() {
                 selectedDate,
                 selectedSlate,
                 selectedPlayerIds,
+                site,
                 `contest_sim_${selectedDate}`
             )
             const url = URL.createObjectURL(blob)
@@ -2018,6 +2051,18 @@ export default function ContestSimPage() {
                             value={selectedDate}
                             onChange={e => setSelectedDate(e.target.value)}
                         />
+                    </label>
+                    <label>
+                        Site
+                        <Select value={site} onValueChange={v => setSite(v === 'fd' ? 'fd' : 'dk')}>
+                            <SelectTrigger className="contest-sim-select w-full">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="dk">DraftKings</SelectItem>
+                                <SelectItem value="fd">FanDuel</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </label>
                     <label>
                         Slate

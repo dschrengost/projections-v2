@@ -58,8 +58,11 @@ export interface ContestSimResponse {
     build_id?: string | null
 }
 
+export type SiteCode = 'dk' | 'fd'
+
 export interface ContestSimRequest {
     game_date: string
+    site?: SiteCode
     draft_group_id?: number | null
     lineups: string[][]
     field_mode?: 'self_play' | 'generated_field'
@@ -92,6 +95,7 @@ export interface FieldLibrarySummary {
 
 export interface BuildFieldLibraryRequest {
     game_date: string
+    site?: SiteCode
     draft_group_id: number
     version?: string
     k?: number
@@ -150,6 +154,7 @@ export interface PortfolioExposureBounds {
 
 export interface PortfolioSelectionRequest {
     game_date: string
+    site?: SiteCode
     draft_group_id?: number | null
     source_build_id: string
     mode: PortfolioSelectionMode
@@ -205,8 +210,8 @@ export async function getContestSimConfig(): Promise<ConfigResponse> {
     return resp.json()
 }
 
-export async function listFieldLibraries(date: string, draft_group_id: number): Promise<FieldLibrarySummary[]> {
-    const resp = await fetch(`${API_BASE}/field-libraries?date=${encodeURIComponent(date)}&draft_group_id=${draft_group_id}`)
+export async function listFieldLibraries(date: string, draft_group_id: number, site: SiteCode = 'dk'): Promise<FieldLibrarySummary[]> {
+    const resp = await fetch(`${API_BASE}/field-libraries?date=${encodeURIComponent(date)}&draft_group_id=${draft_group_id}&site=${site}`)
     if (!resp.ok) {
         throw new Error('Failed to load field libraries')
     }
@@ -229,8 +234,9 @@ export async function buildFieldLibrary(req: BuildFieldLibraryRequest): Promise<
 export async function getSavedSimBuilds(
     date: string,
     kind?: 'run' | 'lineups' | 'portfolio',
+    site: SiteCode = 'dk',
 ): Promise<SavedSimBuildSummary[]> {
-    const params = new URLSearchParams({ date })
+    const params = new URLSearchParams({ date, site })
     if (kind) params.set('kind', kind)
     const resp = await fetch(`${API_BASE}/saved-builds?${params.toString()}`)
     if (!resp.ok) {
@@ -242,8 +248,9 @@ export async function getSavedSimBuilds(
 export async function loadSavedSimBuild(
     date: string,
     buildId: string,
+    site: SiteCode = 'dk',
 ): Promise<SavedSimBuildDetail> {
-    const resp = await fetch(`${API_BASE}/saved-builds/${buildId}?date=${encodeURIComponent(date)}`)
+    const resp = await fetch(`${API_BASE}/saved-builds/${buildId}?date=${encodeURIComponent(date)}&site=${site}`)
     if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }))
         throw new Error(err.detail || 'Failed to load saved sim build')
@@ -260,6 +267,7 @@ export async function saveSimLineups(
     config?: ContestConfig | null,
     stats?: SummaryStats | null,
     options?: {
+        site?: SiteCode
         kind?: 'lineups' | 'portfolio'
         sourceBuildId?: string | null
         selectionMode?: string | null
@@ -273,6 +281,7 @@ export async function saveSimLineups(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             game_date: date,
+            site: options?.site ?? 'dk',
             draft_group_id: draftGroupId,
             name,
             lineups,
@@ -294,8 +303,8 @@ export async function saveSimLineups(
     return resp.json()
 }
 
-export async function deleteSavedSimBuild(date: string, buildId: string): Promise<void> {
-    const resp = await fetch(`${API_BASE}/saved-builds/${buildId}?date=${encodeURIComponent(date)}`, {
+export async function deleteSavedSimBuild(date: string, buildId: string, site: SiteCode = 'dk'): Promise<void> {
+    const resp = await fetch(`${API_BASE}/saved-builds/${buildId}?date=${encodeURIComponent(date)}&site=${site}`, {
         method: 'DELETE',
     })
     if (!resp.ok) {

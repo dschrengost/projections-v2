@@ -13,6 +13,7 @@ import {
     EntryFileState,
     EntryFileSummary,
     EntryAlternatives,
+    SiteCode,
 } from '../api/entry_manager'
 import { getSavedBuilds, getSlates, loadSavedBuild, SavedBuild, Slate } from '../api/optimizer'
 import { getSavedSimBuilds, loadSavedSimBuild, SavedSimBuildSummary } from '../api/contest_sim'
@@ -29,7 +30,12 @@ import {
 } from '@/components/ui/select'
 
 const DK_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL']
+const FD_SLOTS = ['PG', 'PG', 'SG', 'SG', 'SF', 'SF', 'PF', 'PF', 'C']
 const ENTRIES_PER_PAGE = 25
+
+function getSlotsForSite(site: SiteCode): string[] {
+    return site === 'fd' ? FD_SLOTS : DK_SLOTS
+}
 
 interface ContestSwapResult {
     contestId: string
@@ -110,8 +116,12 @@ const buildLineupStates = (
 
 export default function EntryManagerPage() {
     const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
+    const [site, setSite] = useState<SiteCode>('dk')
     const [slates, setSlates] = useState<Slate[]>([])
     const [slatesLoading, setSlatesLoading] = useState(false)
+
+    // Site constants
+    const slots = getSlotsForSite(site)
 
     const [entryFiles, setEntryFiles] = useState<EntryFileSummary[]>([])
     const [entriesLoading, setEntriesLoading] = useState(false)
@@ -151,11 +161,26 @@ export default function EntryManagerPage() {
     const [showApplyResultsPanel, setShowApplyResultsPanel] = useState(false)
     const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false)
 
+    // Load stored site from localStorage
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const storedSite = window.localStorage.getItem('entryManager.site')
+        if (storedSite === 'dk' || storedSite === 'fd') {
+            setSite(storedSite)
+        }
+    }, [])
+
+    // Persist site to localStorage
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem('entryManager.site', site)
+    }, [site])
+
     useEffect(() => {
         const loadSlates = async () => {
             setSlatesLoading(true)
             try {
-                const data = await getSlates(selectedDate)
+                const data = await getSlates(selectedDate, 'all', site)
                 setSlates(data)
                 // If URL has a slate and it exists in the data, keep it; otherwise auto-select
                 const urlSlateExists = selectedSlate && data.some(s => s.draft_group_id === selectedSlate)
@@ -171,14 +196,14 @@ export default function EntryManagerPage() {
             }
         }
         void loadSlates()
-    }, [selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [selectedDate, site]) // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         const loadEntries = async () => {
             setEntriesLoading(true)
             setEntryError(null)
             try {
-                const data = await listEntryFiles(selectedDate)
+                const data = await listEntryFiles(selectedDate, site)
                 setEntryFiles(data)
                 if (data.length && !selectedContestId) {
                     setSelectedContestId(data[0].contest_id)
@@ -192,7 +217,7 @@ export default function EntryManagerPage() {
             }
         }
         void loadEntries()
-    }, [selectedDate])
+    }, [selectedDate, site])
 
     useEffect(() => {
         if (!selectedContestId) {
@@ -203,7 +228,7 @@ export default function EntryManagerPage() {
         setEntryPage(1)
         const load = async () => {
             try {
-                const data = await getEntryFile(selectedDate, selectedContestId)
+                const data = await getEntryFile(selectedDate, selectedContestId, site)
                 setEntryFile(data)
                 if (data.draft_group_id && data.draft_group_id !== selectedSlate) {
                     setSelectedSlate(data.draft_group_id)
@@ -264,7 +289,7 @@ export default function EntryManagerPage() {
         }
         const load = async () => {
             try {
-                const builds = await getSavedBuilds(selectedDate, selectedSlate)
+                const builds = await getSavedBuilds(selectedDate, selectedSlate, site)
                 setSavedBuilds(builds)
                 setSelectedBuildId(builds[0]?.job_id ?? null)
             } catch {
@@ -272,12 +297,12 @@ export default function EntryManagerPage() {
             }
         }
         void load()
-    }, [selectedDate, selectedSlate])
+    }, [selectedDate, selectedSlate, site])
 
     useEffect(() => {
         const load = async () => {
             try {
-                const builds = await getSavedSimBuilds(selectedDate)
+                const builds = await getSavedSimBuilds(selectedDate, undefined, site)
                 const simBuilds = builds.filter(b => b.kind === 'lineups' || b.kind === 'portfolio')
                 setSavedSimBuilds(simBuilds)
             } catch {
@@ -285,7 +310,7 @@ export default function EntryManagerPage() {
             }
         }
         void load()
-    }, [selectedDate, selectedSlate])
+    }, [selectedDate, selectedSlate, site])
 
     useEffect(() => {
         const targetDraftGroupId = entryFile?.draft_group_id ?? selectedSlate ?? null
@@ -323,7 +348,7 @@ export default function EntryManagerPage() {
         setUploading(true)
         setEntryError(null)
         try {
-            const summaries = await uploadEntries(selectedDate, selectedSlate, file)
+            const summaries = await uploadEntries(selectedDate, selectedSlate, file, site)
             setEntryFiles(summaries)
             setContestOrder(summaries.map(s => s.contest_id))
             setSelectedContestId(summaries[0]?.contest_id ?? null)
@@ -341,7 +366,7 @@ export default function EntryManagerPage() {
         setRepairing(true)
         setEntryError(null)
         try {
-            const summaries = await repairEntryFileDraftGroups(selectedDate)
+            const summaries = await repairEntryFileDraftGroups(selectedDate, site)
             setEntryFiles(summaries)
             setContestOrder(summaries.map(s => s.contest_id))
             if (selectedContestId && !summaries.some(s => s.contest_id === selectedContestId)) {
@@ -359,8 +384,8 @@ export default function EntryManagerPage() {
         if (!confirmDelete) return
         setEntryError(null)
         try {
-            await deleteEntryFile(selectedDate, contestId)
-            const data = await listEntryFiles(selectedDate)
+            await deleteEntryFile(selectedDate, contestId, site)
+            const data = await listEntryFiles(selectedDate, site)
             setEntryFiles(data)
             setContestOrder(data.map(entry => entry.contest_id))
             setSelectedContestIds(prev => {
@@ -425,6 +450,7 @@ export default function EntryManagerPage() {
                         buildSource,
                         selectedBuildId,
                         slice,
+                        site,
                     ),
                 }
                 offset += entryCount
@@ -470,8 +496,8 @@ export default function EntryManagerPage() {
         if (targetIds.length === 0) return
         try {
             const blob = targetIds.length === 1
-                ? await exportEntryFile(selectedDate, targetIds[0])
-                : await exportEntriesBatch(selectedDate, targetIds)
+                ? await exportEntryFile(selectedDate, targetIds[0], undefined, site)
+                : await exportEntriesBatch(selectedDate, targetIds, site)
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a')
             a.href = url
@@ -490,8 +516,8 @@ export default function EntryManagerPage() {
         if (targetIds.length === 0) return
         try {
             const blob = targetIds.length === 1
-                ? await exportEntryFile(selectedDate, targetIds[0])
-                : await exportEntriesBatch(selectedDate, targetIds)
+                ? await exportEntryFile(selectedDate, targetIds[0], undefined, site)
+                : await exportEntriesBatch(selectedDate, targetIds, site)
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a')
             a.href = url
@@ -508,7 +534,7 @@ export default function EntryManagerPage() {
     const handleExportCurrentContest = async () => {
         if (!selectedContestId) return
         try {
-            const blob = await exportEntryFile(selectedDate, selectedContestId)
+            const blob = await exportEntryFile(selectedDate, selectedContestId, undefined, site)
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a')
             a.href = url
@@ -524,7 +550,7 @@ export default function EntryManagerPage() {
         if (!entryFile) return
         if (selectedLineupIds.length === 0) return
         try {
-            const blob = await exportEntryFile(selectedDate, entryFile.contest_id, selectedLineupIds)
+            const blob = await exportEntryFile(selectedDate, entryFile.contest_id, selectedLineupIds, site)
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a')
             a.href = url
@@ -564,7 +590,7 @@ export default function EntryManagerPage() {
                 const result = await runLateSwap(selectedDate, contestId, {
                     randomnessPct: randomnessPct > 0 ? randomnessPct : undefined,
                     onlyOutLineups,
-                })
+                }, site)
 
                 // Calculate stats for results panel
                 let swappedCount = 0
@@ -805,7 +831,7 @@ export default function EntryManagerPage() {
             <header className="app-header">
                 <div>
                     <h1>Entry Manager</h1>
-                    <p className="subtitle">Upload DK entries, apply builds, export CSV</p>
+                    <p className="subtitle">Upload {site === 'fd' ? 'FanDuel' : 'DK'} entries, apply builds, export CSV</p>
                 </div>
                 <div className="controls">
                     <label>
@@ -815,6 +841,18 @@ export default function EntryManagerPage() {
                             value={selectedDate}
                             onChange={e => setSelectedDate(e.target.value)}
                         />
+                    </label>
+                    <label>
+                        Site
+                        <Select value={site} onValueChange={v => setSite(v === 'fd' ? 'fd' : 'dk')}>
+                            <SelectTrigger className="w-[110px]">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="dk">DraftKings</SelectItem>
+                                <SelectItem value="fd">FanDuel</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </label>
                     <label>
                         Slate

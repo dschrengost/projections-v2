@@ -1,5 +1,7 @@
 import { apiUrl } from './client'
 
+export type SiteCode = 'dk' | 'fd'
+
 export type LateSwapMode =
     | 'preserve_targets'
     | 'best_ev'
@@ -200,12 +202,14 @@ export async function createLateSwapSession(
     date: string,
     contestIds: string[],
     policy: LateSwapPolicy,
+    site: SiteCode = 'dk',
 ): Promise<LateSwapSession> {
     const res = await fetch(apiUrl('/api/entry-manager/late-swap/sessions'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             date,
+            site,
             contest_ids: contestIds,
             policy,
         }),
@@ -213,8 +217,8 @@ export async function createLateSwapSession(
     return parseOrThrow(res, 'Failed to create late swap session')
 }
 
-export async function listLateSwapSessions(date: string): Promise<LateSwapSession[]> {
-    const res = await fetch(apiUrl(`/api/entry-manager/late-swap/sessions?date=${date}`))
+export async function listLateSwapSessions(date: string, site: SiteCode = 'dk'): Promise<LateSwapSession[]> {
+    const res = await fetch(apiUrl(`/api/entry-manager/late-swap/sessions?date=${date}&site=${site}`))
     return parseOrThrow(res, 'Failed to list late swap sessions')
 }
 

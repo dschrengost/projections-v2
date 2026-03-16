@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { listEntryFiles, EntryFileSummary } from '../api/entry_manager'
+import { listEntryFiles, EntryFileSummary, SiteCode } from '../api/entry_manager'
 import {
     LateSwapCandidate,
     LateSwapPolicy,
@@ -44,6 +44,7 @@ function downloadBlob(blob: Blob, filename: string) {
 
 export default function LateSwapPage() {
     const [selectedDate, setSelectedDate] = useSlateDate()
+    const [site, setSite] = useState<SiteCode>('dk')
     const [entryFiles, setEntryFiles] = useState<EntryFileSummary[]>([])
     const [sessions, setSessions] = useState<LateSwapSession[]>([])
     const [session, setSession] = useState<LateSwapSession | null>(null)
@@ -55,10 +56,25 @@ export default function LateSwapPage() {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
+    // Load stored site from localStorage
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const storedSite = window.localStorage.getItem('lateSwap.site')
+        if (storedSite === 'dk' || storedSite === 'fd') {
+            setSite(storedSite)
+        }
+    }, [])
+
+    // Persist site to localStorage
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem('lateSwap.site', site)
+    }, [site])
+
     const refreshEntryAndSessions = async () => {
         const [entries, sessionRows] = await Promise.all([
-            listEntryFiles(selectedDate),
-            listLateSwapSessions(selectedDate),
+            listEntryFiles(selectedDate, site),
+            listLateSwapSessions(selectedDate, site),
         ])
         setEntryFiles(entries)
         setSessions(sessionRows)
@@ -74,7 +90,7 @@ export default function LateSwapPage() {
             }
         }
         void load()
-    }, [selectedDate])
+    }, [selectedDate, site])
 
     const contestOptions = useMemo(
         () =>
@@ -144,7 +160,7 @@ export default function LateSwapPage() {
         setLoading(true)
         setError(null)
         try {
-            const created = await createLateSwapSession(selectedDate, contestIds, policy)
+            const created = await createLateSwapSession(selectedDate, contestIds, policy, site)
             setSession(created)
             await refreshEntryAndSessions()
             const preview = await previewLateSwapSession(created.session_id, {}, created.game_date)
@@ -258,6 +274,8 @@ export default function LateSwapPage() {
             <LateSwapHeader
                 date={selectedDate}
                 onDateChange={setSelectedDate}
+                site={site}
+                onSiteChange={setSite}
                 selectedContestCount={selectedContestIds.size}
                 selectedEntryCount={selectedEntryCount}
                 session={session}

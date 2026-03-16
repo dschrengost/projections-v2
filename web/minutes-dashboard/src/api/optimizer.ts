@@ -28,7 +28,9 @@ export interface PoolPlayer {
     positions: string[]
     salary: number
     proj: number
+    site_id?: string
     dk_id?: string
+    fd_id?: string
     own_proj?: number | null
     stddev?: number | null
     p90?: number | null
@@ -127,8 +129,12 @@ export interface LineupsResponse {
 
 // API Functions
 
-export async function getSlates(date: string, slateType = 'all'): Promise<Slate[]> {
-    const res = await fetch(apiUrl(`/api/optimizer/slates?date=${date}&slate_type=${slateType}`))
+export async function getSlates(date: string, slateType = 'all', site = 'dk'): Promise<Slate[]> {
+    const res = await fetch(
+        apiUrl(
+            `/api/optimizer/slates?date=${encodeURIComponent(date)}&slate_type=${encodeURIComponent(slateType)}&site=${encodeURIComponent(site)}`
+        )
+    )
     if (!res.ok) throw new Error(`Failed to fetch slates: ${res.status}`)
     return res.json()
 }
@@ -137,10 +143,12 @@ export async function getPlayerPool(
     date: string,
     draftGroupId: number,
     runId?: string | null,
+    site = 'dk',
     options?: { useStrategyOverrides?: boolean },
 ): Promise<PoolPlayer[]> {
     let url = apiUrl(`/api/optimizer/pool?date=${date}&draft_group_id=${draftGroupId}`)
     if (runId) url += `&run_id=${encodeURIComponent(runId)}`
+    url += `&site=${encodeURIComponent(site)}`
     if (options?.useStrategyOverrides) url += '&use_strategy_overrides=true'
     const res = await fetch(url)
     if (!res.ok) {
@@ -197,6 +205,7 @@ export async function exportCustomLineupsCSV(
     date: string,
     draftGroupId: number,
     lineups: string[][],
+    site = 'dk',
     filenamePrefix?: string,
 ): Promise<Blob> {
     const res = await fetch(apiUrl('/api/optimizer/export'), {
@@ -205,7 +214,7 @@ export async function exportCustomLineupsCSV(
         body: JSON.stringify({
             date,
             draft_group_id: draftGroupId,
-            site: 'dk',
+            site,
             filename_prefix: filenamePrefix ?? null,
             lineups,
         }),
@@ -238,16 +247,16 @@ export interface SavedBuild {
     lineups?: LineupRow[]
 }
 
-export async function getSavedBuilds(date: string, draftGroupId?: number): Promise<SavedBuild[]> {
-    let url = apiUrl(`/api/optimizer/saved-builds?date=${date}`)
+export async function getSavedBuilds(date: string, draftGroupId?: number, site: string = 'dk'): Promise<SavedBuild[]> {
+    let url = apiUrl(`/api/optimizer/saved-builds?date=${date}&site=${site}`)
     if (draftGroupId) url += `&draft_group_id=${draftGroupId}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`Failed to get saved builds: ${res.status}`)
     return res.json()
 }
 
-export async function loadSavedBuild(date: string, jobId: string): Promise<SavedBuild> {
-    const res = await fetch(apiUrl(`/api/optimizer/saved-builds/${jobId}?date=${date}`))
+export async function loadSavedBuild(date: string, jobId: string, site: string = 'dk'): Promise<SavedBuild> {
+    const res = await fetch(apiUrl(`/api/optimizer/saved-builds/${jobId}?date=${date}&site=${site}`))
     if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.detail || `Failed to load build: ${res.status}`)

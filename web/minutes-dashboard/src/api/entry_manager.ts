@@ -1,5 +1,7 @@
 import { apiUrl } from './client'
 
+export type SiteCode = 'dk' | 'fd'
+
 export interface EntryFileSummary {
     contest_id: string
     contest_name: string
@@ -85,9 +87,9 @@ export interface ValidationResult {
     empty_slot_count: number
 }
 
-export async function validateEntries(date: string, contestId: string): Promise<ValidationResult> {
+export async function validateEntries(date: string, contestId: string, site: SiteCode = 'dk'): Promise<ValidationResult> {
     const res = await fetch(
-        apiUrl(`/api/entry-manager/entries/${contestId}/validate?date=${date}`),
+        apiUrl(`/api/entry-manager/entries/${contestId}/validate?date=${date}&site=${site}`),
     )
     if (!res.ok) {
         const body = await res.json().catch(() => ({}))
@@ -100,10 +102,11 @@ export async function uploadEntries(
     date: string,
     draftGroupId: number | null | undefined,
     file: File,
+    site: SiteCode = 'dk',
 ): Promise<EntryFileSummary[]> {
     const form = new FormData()
     form.append('file', file)
-    let url = apiUrl(`/api/entry-manager/entries/upload?date=${date}`)
+    let url = apiUrl(`/api/entry-manager/entries/upload?date=${date}&site=${site}`)
     if (draftGroupId !== null && draftGroupId !== undefined) {
         url += `&draft_group_id=${draftGroupId}`
     }
@@ -121,8 +124,8 @@ export async function uploadEntries(
     return res.json()
 }
 
-export async function listEntryFiles(date: string): Promise<EntryFileSummary[]> {
-    const res = await fetch(apiUrl(`/api/entry-manager/entries?date=${date}`))
+export async function listEntryFiles(date: string, site: SiteCode = 'dk'): Promise<EntryFileSummary[]> {
+    const res = await fetch(apiUrl(`/api/entry-manager/entries?date=${date}&site=${site}`))
     if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.detail || `Failed to load entries: ${res.status}`)
@@ -130,8 +133,8 @@ export async function listEntryFiles(date: string): Promise<EntryFileSummary[]> 
     return res.json()
 }
 
-export async function repairEntryFileDraftGroups(date: string): Promise<EntryFileSummary[]> {
-    const res = await fetch(apiUrl(`/api/entry-manager/entries/repair-dg?date=${date}`), {
+export async function repairEntryFileDraftGroups(date: string, site: SiteCode = 'dk'): Promise<EntryFileSummary[]> {
+    const res = await fetch(apiUrl(`/api/entry-manager/entries/repair-dg?date=${date}&site=${site}`), {
         method: 'POST',
     })
     if (!res.ok) {
@@ -141,9 +144,9 @@ export async function repairEntryFileDraftGroups(date: string): Promise<EntryFil
     return res.json()
 }
 
-export async function getEntryFile(date: string, contestId: string): Promise<EntryFileState> {
+export async function getEntryFile(date: string, contestId: string, site: SiteCode = 'dk'): Promise<EntryFileState> {
     const res = await fetch(
-        apiUrl(`/api/entry-manager/entries/${contestId}?date=${date}`),
+        apiUrl(`/api/entry-manager/entries/${contestId}?date=${date}&site=${site}`),
     )
     if (!res.ok) {
         const body = await res.json().catch(() => ({}))
@@ -152,9 +155,9 @@ export async function getEntryFile(date: string, contestId: string): Promise<Ent
     return res.json()
 }
 
-export async function deleteEntryFile(date: string, contestId: string): Promise<void> {
+export async function deleteEntryFile(date: string, contestId: string, site: SiteCode = 'dk'): Promise<void> {
     const res = await fetch(
-        apiUrl(`/api/entry-manager/entries/${contestId}?date=${date}`),
+        apiUrl(`/api/entry-manager/entries/${contestId}?date=${date}&site=${site}`),
         { method: 'DELETE' },
     )
     if (!res.ok) {
@@ -169,9 +172,10 @@ export async function applyBuildToEntries(
     buildSource: 'optimizer' | 'contest-sim',
     buildId: string,
     lineups?: string[][],
+    site: SiteCode = 'dk',
 ): Promise<EntryFileState> {
     const res = await fetch(
-        apiUrl(`/api/entry-manager/entries/${contestId}/apply-build?date=${date}`),
+        apiUrl(`/api/entry-manager/entries/${contestId}/apply-build?date=${date}&site=${site}`),
         {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -193,9 +197,10 @@ export async function exportEntryFile(
     date: string,
     contestId: string,
     entryIds?: string[],
+    site: SiteCode = 'dk',
 ): Promise<Blob> {
     const res = await fetch(
-        apiUrl(`/api/entry-manager/entries/${contestId}/export?date=${date}`),
+        apiUrl(`/api/entry-manager/entries/${contestId}/export?date=${date}&site=${site}`),
         entryIds && entryIds.length > 0
             ? {
                 method: 'POST',
@@ -211,8 +216,8 @@ export async function exportEntryFile(
     return res.blob()
 }
 
-export async function exportEntriesBatch(date: string, contestIds: string[]): Promise<Blob> {
-    const res = await fetch(apiUrl(`/api/entry-manager/entries/export?date=${date}`), {
+export async function exportEntriesBatch(date: string, contestIds: string[], site: SiteCode = 'dk'): Promise<Blob> {
+    const res = await fetch(apiUrl(`/api/entry-manager/entries/export?date=${date}&site=${site}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contest_ids: contestIds }),
@@ -235,9 +240,10 @@ export async function runLateSwap(
         randomnessPct?: number
         onlyOutLineups?: boolean
     },
+    site: SiteCode = 'dk',
 ): Promise<LateSwapResult> {
     const res = await fetch(
-        apiUrl(`/api/entry-manager/entries/${contestId}/late-swap?date=${date}`),
+        apiUrl(`/api/entry-manager/entries/${contestId}/late-swap?date=${date}&site=${site}`),
         {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -264,9 +270,10 @@ export async function selectLateSwapAlternative(
     entryId: string,
     alternativeIdx: number,
     slotValues: Record<string, string>,
+    site: SiteCode = 'dk',
 ): Promise<EntryFileState> {
     const res = await fetch(
-        apiUrl(`/api/entry-manager/entries/${contestId}/select-alternative?date=${date}`),
+        apiUrl(`/api/entry-manager/entries/${contestId}/select-alternative?date=${date}&site=${site}`),
         {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

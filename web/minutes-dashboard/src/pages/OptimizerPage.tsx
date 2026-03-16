@@ -44,6 +44,8 @@ const DK_SLOT_PRIORITY = DK_SLOT_ORDER.reduce<Record<string, number>>((acc, slot
 }, {} as Record<string, number>)
 const DK_BASE_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C'] as const
 const DK_ALL_SLOTS = [...DK_SLOT_ORDER] as const
+const FD_SLOT_ORDER = ['PG', 'PG', 'SG', 'SG', 'SF', 'SF', 'PF', 'PF', 'C'] as const
+type SiteCode = 'dk' | 'fd'
 
 type SortKey =
     | 'name'
@@ -87,8 +89,15 @@ const getNormalizedPositions = (positions: string[] = []): string[] =>
         .flatMap(pos => pos.toUpperCase().split(/[^A-Z]/))
         .filter(Boolean)
 
-const getLineupSlotOrder = (positions: string[] = []): number => {
+const getLineupSlotOrder = (positions: string[] = [], site: SiteCode = 'dk'): number => {
     const normalized = getNormalizedPositions(positions)
+    if (site === 'fd') {
+        const order = ['PG', 'SG', 'SF', 'PF', 'C']
+        for (let idx = 0; idx < order.length; idx += 1) {
+            if (normalized.includes(order[idx])) return idx
+        }
+        return order.length
+    }
     for (const slot of DK_SLOT_ORDER) {
         if (normalized.includes(slot)) return DK_SLOT_PRIORITY[slot]
     }
@@ -120,7 +129,50 @@ const isEligibleForDkSlot = (positions: string[] = [], slot: (typeof DK_ALL_SLOT
 const getDisplaySlotByAssignment = (
     playerIds: string[],
     map: Map<string, PoolPlayer>,
+    site: SiteCode = 'dk',
 ): { playerId: string; slot: (typeof DK_SLOT_ORDER)[number] }[] | null => {
+    if (site === 'fd') {
+        if (playerIds.length !== 9) return null
+        const unique = Array.from(new Set(playerIds))
+        if (unique.length !== 9) return null
+
+        const positionsByPlayer = new Map<string, Set<string>>()
+        for (const playerId of unique) {
+            const p = map.get(playerId)
+            if (!p || !p.positions || p.positions.length === 0) return null
+            positionsByPlayer.set(playerId, new Set(getNormalizedPositions(p.positions)))
+        }
+
+        const remaining = new Set(unique)
+        const assigned: { playerId: string; slot: (typeof DK_SLOT_ORDER)[number] }[] = []
+        const slots = [...FD_SLOT_ORDER]
+
+        const backtrack = (slotIdx: number): boolean => {
+            if (slotIdx >= slots.length) return true
+            const slot = slots[slotIdx]
+            const candidates = Array.from(remaining).filter((pid) => {
+                const positions = positionsByPlayer.get(pid)
+                return positions ? positions.has(slot) : false
+            })
+            candidates.sort((a, b) => {
+                const aLen = positionsByPlayer.get(a)?.size ?? 99
+                const bLen = positionsByPlayer.get(b)?.size ?? 99
+                if (aLen !== bLen) return aLen - bLen
+                return a.localeCompare(b)
+            })
+            for (const pid of candidates) {
+                remaining.delete(pid)
+                assigned.push({ playerId: pid, slot: slot as (typeof DK_SLOT_ORDER)[number] })
+                if (backtrack(slotIdx + 1)) return true
+                assigned.pop()
+                remaining.add(pid)
+            }
+            return false
+        }
+
+        return backtrack(0) ? assigned : null
+    }
+
     if (playerIds.length !== 8) return null
     const unique = Array.from(new Set(playerIds))
     if (unique.length !== 8) return null
@@ -229,6 +281,7 @@ const getDisplaySlotByAssignment = (
 export default function OptimizerPage() {
     // Date and slate selection (persisted in URL)
     const [selectedDate, setSelectedDate, selectedSlate, setSelectedSlate] = useSlateDateAndSlate()
+    const [site, setSite] = useState<SiteCode>('dk')
     const [slates, setSlates] = useState<Slate[]>([])
     const [slatesLoading, setSlatesLoading] = useState(false)
     const [slatesError, setSlatesError] = useState<string | null>(null)
@@ -268,6 +321,8 @@ export default function OptimizerPage() {
     const [randomnessPct, setRandomnessPct] = useState(0)
     const [lateSwapEnabled, setLateSwapEnabled] = useState(false)
     const [worldSampleEnabled, setWorldSampleEnabled] = useState(false)
+    const salaryCap = site === 'fd' ? 60000 : 50000
+    const lineupSize = site === 'fd' ? 9 : 8
 
     // Job state
     const [currentJob, setCurrentJob] = useState<JobStatus | null>(null)
@@ -389,6 +444,10 @@ export default function OptimizerPage() {
 
     useEffect(() => {
         if (typeof window === 'undefined') return
+        const storedSite = window.localStorage.getItem('optimizer.site')
+        if (storedSite === 'dk' || storedSite === 'fd') {
+            setSite(storedSite)
+        }
         const stored = window.localStorage.getItem('optimizer.useStrategyOverrides')
         if (stored != null) {
             setUseStrategyOverrides(stored === 'true')
@@ -397,8 +456,27 @@ export default function OptimizerPage() {
 
     useEffect(() => {
         if (typeof window === 'undefined') return
+        window.localStorage.setItem('optimizer.site', site)
+    }, [site])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
         window.localStorage.setItem('optimizer.useStrategyOverrides', String(useStrategyOverrides))
     }, [useStrategyOverrides])
+
+    useEffect(() => {
+        setMinSalary((prev) => {
+            if (prev == null) return prev
+            return site === 'fd' ? Math.min(prev, 60000) : Math.min(prev, 50000)
+        })
+        setMaxSalary((prev) => {
+            if (prev == null) return site === 'fd' ? 60000 : 50000
+            if (site === 'fd' && prev <= 50000) return 60000
+            if (site === 'dk' && prev > 50000) return 50000
+            return prev
+        })
+        setSelectedSlate(null)
+    }, [site, setSelectedSlate])
 
     useEffect(() => {
         setExcludedGames(new Set())
@@ -411,7 +489,7 @@ export default function OptimizerPage() {
             setSlatesLoading(true)
             setSlatesError(null)
             try {
-                const data = await getSlates(selectedDate)
+                const data = await getSlates(selectedDate, 'all', site)
                 setSlates(data)
                 const urlSlateExists = selectedSlate && data.some(s => s.draft_group_id === selectedSlate)
                 if (!urlSlateExists) {
@@ -427,7 +505,7 @@ export default function OptimizerPage() {
             }
         }
         void loadSlates()
-    }, [selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [selectedDate, site]) // eslint-disable-line react-hooks/exhaustive-deps
 
     const loadPool = useCallback(async () => {
         if (!selectedSlate) {
@@ -441,6 +519,7 @@ export default function OptimizerPage() {
                 selectedDate,
                 selectedSlate,
                 undefined,
+                site,
                 { useStrategyOverrides },
             )
             setPool(data)
@@ -452,7 +531,7 @@ export default function OptimizerPage() {
         } finally {
             setPoolLoading(false)
         }
-    }, [selectedDate, selectedSlate, useStrategyOverrides])
+    }, [selectedDate, selectedSlate, site, useStrategyOverrides])
 
     // Load player pool when slate changes
     useEffect(() => {
@@ -620,7 +699,7 @@ export default function OptimizerPage() {
         setSavedBuildsLoading(true)
         try {
             const builds = await getSavedBuilds(selectedDate, selectedSlate)
-            setSavedBuilds(builds)
+            setSavedBuilds(builds.filter(b => (b.site || 'dk') === site))
         } catch (err) {
             console.error('Failed to load saved builds:', err)
             setSavedBuilds([])
@@ -631,7 +710,7 @@ export default function OptimizerPage() {
 
     useEffect(() => {
         void refreshSavedBuilds()
-    }, [selectedDate, selectedSlate])
+    }, [selectedDate, selectedSlate, site])
 
     const handleLoadSavedBuild = async (jobId: string) => {
         try {
@@ -693,7 +772,7 @@ export default function OptimizerPage() {
                     unique.push({ ...lu, lineup_id: unique.length })
                 }
             }
-            await saveCustomBuild(selectedDate, selectedSlate, unique, buildName)
+            await saveCustomBuild(selectedDate, selectedSlate, unique, buildName, site)
             setLineups(unique)
             setCurrentJob(null)
             setSelectedBuildIds(new Set())
@@ -793,7 +872,7 @@ export default function OptimizerPage() {
             const request: QuickBuildRequest = {
                 date: selectedDate,
                 draft_group_id: selectedSlate,
-                site: 'dk',
+                site,
                 max_pool: maxPool,
                 builds,
                 per_build: Math.ceil(maxPool / builds) + 500,
@@ -906,7 +985,7 @@ export default function OptimizerPage() {
         const payload = exportLineups.map(lu => lu.player_ids)
         if (payload.length === 0) return
         try {
-            const blob = await exportCustomLineupsCSV(selectedDate, selectedSlate, payload, filenamePrefix)
+            const blob = await exportCustomLineupsCSV(selectedDate, selectedSlate, payload, site, filenamePrefix)
             downloadCSVBlob(
                 blob,
                 `${safeFilenamePart(filenamePrefix)}_${selectedDate}_${payload.length}.csv`,
@@ -1093,6 +1172,18 @@ export default function OptimizerPage() {
                         />
                     </div>
                     <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Site</span>
+                        <Select value={site} onValueChange={v => setSite((v === 'fd' ? 'fd' : 'dk'))}>
+                            <SelectTrigger className="w-[110px]">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="dk">DraftKings</SelectItem>
+                                <SelectItem value="fd">FanDuel</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
                         <span className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Slate</span>
                         <Select
                             value={selectedSlate?.toString() ?? ''}
@@ -1164,7 +1255,7 @@ export default function OptimizerPage() {
                             value={minUniq}
                             onChange={e => setMinUniq(Number(e.target.value))}
                             min={0}
-                            max={8}
+                            max={lineupSize}
                         />
                     </div>
 
@@ -1199,7 +1290,9 @@ export default function OptimizerPage() {
                             onChange={e => setNearDupJaccard(Number(e.target.value))}
                             className="w-full accent-[hsl(var(--primary))]"
                         />
-                        <p className="text-xs text-[hsl(var(--muted-foreground))]">0.75 ≈ 7/8 overlap for 8-man DK; 0 disables</p>
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                            {site === 'fd' ? '0.75 is strict for 9-man FD; 0 disables' : '0.75 ≈ 7/8 overlap for 8-man DK; 0 disables'}
+                        </p>
                     </div>
 
                     <div className="space-y-1">
@@ -1222,7 +1315,7 @@ export default function OptimizerPage() {
                                 onChange={e => setMinSalary(e.target.value ? Number(e.target.value) : null)}
                                 placeholder="No min"
                                 min={0}
-                                max={50000}
+                                max={salaryCap}
                                 step={100}
                             />
                         </div>
@@ -1234,7 +1327,7 @@ export default function OptimizerPage() {
                                 onChange={e => setMaxSalary(e.target.value ? Number(e.target.value) : null)}
                                 placeholder="No max"
                                 min={0}
-                                max={50000}
+                                max={salaryCap}
                                 step={100}
                             />
                         </div>
@@ -1999,13 +2092,13 @@ export default function OptimizerPage() {
                                     const totalOwn = lu.player_ids.reduce((sum, id) => sum + (playerMap.get(id)?.own_proj ?? 0), 0)
                                     const isSelected = selectedLineupIds.has(lu.lineup_id)
                                     const filterValue = lineupFilter.trim().toLowerCase()
-                                    const assignedSlots = getDisplaySlotByAssignment(lu.player_ids, playerMap)
+                                    const assignedSlots = getDisplaySlotByAssignment(lu.player_ids, playerMap, site)
                                     const orderedPlayers = assignedSlots
-                                        ? assignedSlots.map(({ playerId, slot }) => ({
+                                        ? assignedSlots.map(({ playerId, slot }, slotIdx) => ({
                                             playerId,
                                             p: playerMap.get(playerId),
                                             slot,
-                                            slotOrder: DK_SLOT_PRIORITY[slot],
+                                            slotOrder: slotIdx,
                                         }))
                                         : lu.player_ids
                                             .map((id, index) => {
@@ -2013,7 +2106,7 @@ export default function OptimizerPage() {
                                                 return {
                                                     playerId: id,
                                                     p,
-                                                    slotOrder: getLineupSlotOrder(p?.positions),
+                                                    slotOrder: getLineupSlotOrder(p?.positions, site),
                                                     slot: 'N/A',
                                                     index,
                                                     sortName: p?.name?.toLowerCase() ?? '',
