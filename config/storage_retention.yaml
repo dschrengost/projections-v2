@@ -1,0 +1,28 @@
+version: 1
+
+# Emergency operating defaults for two-SSD mode.
+guard:
+  hot_warn_free_gb: 150
+  hot_warn_free_pct: 15
+  hot_hard_free_gb: 100
+  hot_hard_free_pct: 10
+  root_hard_free_gb: 50
+
+retention:
+  lead_time_minutes: 2
+  start_time_bucket_minutes: 30
+  keep_latest_debug_runs: 1
+  protect_current_day: true
+
+reduced_persistence:
+  enabled: true
+  # When reduced persistence is enabled, sim_v2 can skip large worlds matrices
+  # unless explicitly requested by env override.
+  sim_write_worlds_matrix: false
+  sim_write_minutes_matrix: false
+  # Cap GTV2 world count for temporary two-SSD operation.
+  gtv2_max_worlds: 10000
+
+families:
+  - gtv2_worlds
+  - sim_v2_worlds_fpts_v2

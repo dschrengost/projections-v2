@@ -15,6 +15,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from projections.paths import data_path
+from projections.pipeline import control_plane
 
 from .payouts import compute_expected_user_payouts_vectorized
 from .payout_generator import generate_payout_tiers, load_config, get_field_size
@@ -74,24 +75,16 @@ def _resolve_worlds_root(
 
 
 def _resolve_worlds_dir(root_dir: Path, run_id: str | None) -> Path:
-    import json
-
     if run_id:
         candidate = root_dir / f"run={run_id}"
         if candidate.exists():
             return candidate
 
-    pointer = root_dir / "latest_run.json"
-    if pointer.exists():
-        try:
-            payload = json.loads(pointer.read_text(encoding="utf-8"))
-            latest = payload.get("run_id")
-        except Exception:
-            latest = None
-        if latest:
-            candidate = root_dir / f"run={latest}"
-            if candidate.exists():
-                return candidate
+    promoted = control_plane.read_promoted_run_id(root_dir)
+    if promoted:
+        candidate = root_dir / f"run={promoted}"
+        if candidate.exists():
+            return candidate
 
     run_dirs = sorted(
         [p for p in root_dir.iterdir() if p.is_dir() and p.name.startswith("run=")],

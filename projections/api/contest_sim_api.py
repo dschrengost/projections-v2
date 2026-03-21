@@ -14,7 +14,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from projections import paths
-from projections.api.optimizer_service import build_player_pool, load_projections_for_date
+from projections.api.optimizer_service import (
+    build_player_pool,
+    get_slates_for_date,
+    load_projections_for_date,
+)
 from projections.contest_sim.contest_sim_service import load_worlds_matrix, run_contest_simulation
 from projections.contest_sim.field_library import load_field_library, list_field_library_paths
 from projections.contest_sim.field_library_manager import load_or_build_field_library
@@ -233,6 +237,131 @@ def _normalize_lineups_for_site(
             )
         )
     return normalized
+
+
+def _sample_lineup_player_ids(
+    lineups: Sequence[Sequence[str]],
+    *,
+    max_lineups: int = 3,
+) -> List[str]:
+    sampled: List[str] = []
+    seen: Set[str] = set()
+    for lineup in lineups[:max_lineups]:
+        for raw_pid in lineup:
+            pid = str(raw_pid).strip()
+            if not pid or pid in seen:
+                continue
+            sampled.append(pid)
+            seen.add(pid)
+    return sampled
+
+
+def _resolve_draft_group_id_for_lineups(
+    *,
+    game_date: str,
+    lineups: Sequence[Sequence[str]],
+    site: str,
+    run_id: str | None,
+    requested_draft_group_id: int | None,
+) -> tuple[int | None, Dict[str, object]]:
+    """Resolve slate draft group from lineups when request metadata is stale.
+
+    This is primarily for DK where UI state can drift from the lineup source slate.
+    """
+    site_norm = _normalize_site(site)
+    if site_norm != "dk":
+        return requested_draft_group_id, {}
+
+    sample_player_ids = _sample_lineup_player_ids(lineups)
+    if not sample_player_ids:
+        return requested_draft_group_id, {}
+
+    coverage_cache: Dict[int, int] = {}
+
+    def coverage_for_dg(dg: int) -> int:
+        if dg in coverage_cache:
+            return coverage_cache[dg]
+        lookup = _build_positions_lookup(
+            game_date=game_date,
+            draft_group_id=int(dg),
+            site=site_norm,
+            run_id=run_id,
+        )
+        matched = sum(1 for pid in sample_player_ids if pid in lookup)
+        coverage_cache[int(dg)] = matched
+        return matched
+
+    requested_match = None
+    if requested_draft_group_id is not None:
+        requested_match = coverage_for_dg(int(requested_draft_group_id))
+        if requested_match == len(sample_player_ids):
+            return int(requested_draft_group_id), {
+                "requested_draft_group_id": int(requested_draft_group_id),
+                "effective_draft_group_id": int(requested_draft_group_id),
+                "sample_player_count": len(sample_player_ids),
+                "requested_match_count": int(requested_match),
+                "inferred_from_lineups": False,
+            }
+
+    try:
+        slates = get_slates_for_date(game_date, slate_type="all", site=site_norm)
+    except Exception as exc:
+        logger.warning(
+            "Failed to enumerate slates for draft_group resolution (%s %s): %s",
+            game_date,
+            site_norm,
+            exc,
+        )
+        slates = []
+
+    def _rank(slate: Dict[str, object]) -> tuple[int, int, int, str]:
+        slate_type = str(slate.get("slate_type") or "").strip().lower()
+        games = slate.get("games") if isinstance(slate.get("games"), list) else []
+        n_games = len(games)
+        n_contests = int(slate.get("n_contests") or 0)
+        earliest = str(slate.get("earliest_start") or "")
+        return (0 if slate_type == "main" else 1, -n_games, -n_contests, earliest)
+
+    candidate_dgs: List[int] = []
+    for slate in sorted(slates, key=_rank):
+        raw_dg = slate.get("draft_group_id")
+        if raw_dg is None:
+            continue
+        dg = int(raw_dg)
+        if dg not in candidate_dgs:
+            candidate_dgs.append(dg)
+
+    best_dg: int | None = None
+    best_match = -1
+    for dg in candidate_dgs:
+        matched = coverage_for_dg(dg)
+        if matched > best_match:
+            best_match = matched
+            best_dg = dg
+        if matched == len(sample_player_ids):
+            break
+
+    if best_dg is not None and best_match == len(sample_player_ids):
+        effective = int(best_dg)
+        requested = int(requested_draft_group_id) if requested_draft_group_id is not None else None
+        return effective, {
+            "requested_draft_group_id": requested,
+            "effective_draft_group_id": effective,
+            "sample_player_count": len(sample_player_ids),
+            "requested_match_count": int(requested_match) if requested_match is not None else None,
+            "best_match_count": int(best_match),
+            "inferred_from_lineups": requested != effective,
+        }
+
+    return requested_draft_group_id, {
+        "requested_draft_group_id": int(requested_draft_group_id) if requested_draft_group_id is not None else None,
+        "effective_draft_group_id": int(requested_draft_group_id) if requested_draft_group_id is not None else None,
+        "sample_player_count": len(sample_player_ids),
+        "requested_match_count": int(requested_match) if requested_match is not None else None,
+        "best_match_count": int(best_match) if best_match >= 0 else None,
+        "best_match_draft_group_id": int(best_dg) if best_dg is not None else None,
+        "inferred_from_lineups": False,
+    }
 
 
 def _normalize_ownership_mode(mode: str | None) -> str:
@@ -869,7 +998,23 @@ async def run_simulation(request: ContestSimRequest):
         if ownership_mode == "off":
             rank_mode = "tail_only"
 
-        if request.use_strategy_overrides and request.draft_group_id is None:
+        effective_draft_group_id, draft_group_resolution = _resolve_draft_group_id_for_lineups(
+            game_date=request.game_date,
+            lineups=request.lineups,
+            site=site_norm,
+            run_id=request.run_id,
+            requested_draft_group_id=request.draft_group_id,
+        )
+        if draft_group_resolution.get("inferred_from_lineups"):
+            logger.warning(
+                "Contest sim inferred draft_group_id %s from lineups (requested=%s, date=%s, site=%s)",
+                draft_group_resolution.get("effective_draft_group_id"),
+                draft_group_resolution.get("requested_draft_group_id"),
+                request.game_date,
+                site_norm,
+            )
+
+        if request.use_strategy_overrides and effective_draft_group_id is None:
             raise HTTPException(
                 status_code=400,
                 detail="draft_group_id is required when use_strategy_overrides=true",
@@ -878,25 +1023,25 @@ async def run_simulation(request: ContestSimRequest):
         use_dupe_ownership = ownership_mode in {"full", "dupe_only"}
         use_field_ownership = ownership_mode in {"full", "field_only"}
 
+        normalized_user_lineups = _normalize_lineups_for_site(
+            request.lineups,
+            game_date=request.game_date,
+            draft_group_id=effective_draft_group_id,
+            site=site_norm,
+            run_id=request.run_id,
+            context="lineups",
+        )
+
         # Load ownership data for dupe penalty calculation (only when enabled)
         player_ownership = (
             _load_player_ownership(
                 request.game_date,
                 site=site_norm,
                 run_id=request.run_id,
-                draft_group_id=request.draft_group_id,
+                draft_group_id=effective_draft_group_id,
             )
             if use_dupe_ownership
             else {}
-        )
-
-        normalized_user_lineups = _normalize_lineups_for_site(
-            request.lineups,
-            game_date=request.game_date,
-            draft_group_id=request.draft_group_id,
-            site=site_norm,
-            run_id=request.run_id,
-            context="lineups",
         )
 
         field_lineups = None
@@ -906,7 +1051,7 @@ async def run_simulation(request: ContestSimRequest):
             raise HTTPException(status_code=400, detail=f"Invalid field_mode: {request.field_mode}")
 
         if request.field_mode == "generated_field":
-            if request.draft_group_id is None:
+            if effective_draft_group_id is None:
                 raise HTTPException(
                     status_code=400,
                     detail="draft_group_id is required when field_mode=generated_field",
@@ -920,7 +1065,7 @@ async def run_simulation(request: ContestSimRequest):
 
             library, lib_path, built_now = load_or_build_field_library(
                 game_date=request.game_date,
-                draft_group_id=int(request.draft_group_id),
+                draft_group_id=int(effective_draft_group_id),
                 site=site_norm,
                 version=version,
                 k=int(request.field_library_k),
@@ -932,7 +1077,7 @@ async def run_simulation(request: ContestSimRequest):
             field_lineups = _normalize_lineups_for_site(
                 library.lineups,
                 game_date=request.game_date,
-                draft_group_id=request.draft_group_id,
+                draft_group_id=effective_draft_group_id,
                 site=site_norm,
                 run_id=request.run_id,
                 context="field_lineups",
@@ -956,7 +1101,7 @@ async def run_simulation(request: ContestSimRequest):
             user_lineups=normalized_user_lineups,
             game_date=request.game_date,
             site=site_norm,
-            draft_group_id=request.draft_group_id,
+            draft_group_id=effective_draft_group_id,
             run_id=request.run_id,
             archetype=request.archetype,
             field_size_bucket=request.field_size_bucket,
@@ -983,12 +1128,14 @@ async def run_simulation(request: ContestSimRequest):
                     "worlds_source": request.worlds_source,
                 }
             )
+        if draft_group_resolution:
+            result.stats.debug["draft_group_resolution"] = draft_group_resolution
 
         build_data = {
             "build_id": str(uuid4()),
             "game_date": request.game_date,
             "site": site_norm,
-            "draft_group_id": request.draft_group_id,
+            "draft_group_id": effective_draft_group_id,
             "created_at": datetime.utcnow().isoformat(),
             "lineups_count": len(normalized_user_lineups),
             "kind": "run",

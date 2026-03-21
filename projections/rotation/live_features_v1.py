@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 
 from projections.features.dnp_history import (
@@ -65,6 +66,21 @@ class RotationSetMinutesV1FeatureSpec:
 def _season_for_date(day: pd.Timestamp) -> int:
     # Match the convention used elsewhere in the repo (Aug–Jul season boundary).
     return int(day.year) if int(day.month) >= 8 else int(day.year) - 1
+
+
+def _label_season_candidates(season: int) -> list[int]:
+    """Candidate label partitions for a season-start year.
+
+    Primary partition is season-start year (e.g. 2025 for 2025-26).
+    Some historical backfills landed in calendar-year partitions, so include
+    season+1 as a resilience fallback.
+    """
+
+    out = [int(season)]
+    spillover = int(season) + 1
+    if spillover not in out:
+        out.append(spillover)
+    return out
 
 
 def _required_prior_windows(feature_columns: Iterable[str]) -> set[int]:
@@ -145,6 +161,149 @@ def _is_regular_season_game_id(game_id: str) -> bool:
     return gid.startswith("002")
 
 
+def _load_boxscore_labels_for_season(data_root: Path, season: int) -> pd.DataFrame:
+    """Load and de-duplicate box score labels for a season start year."""
+    label_frames: list[pd.DataFrame] = []
+    for candidate in _label_season_candidates(int(season)):
+        labels_path = data_root / "labels" / f"season={candidate}" / "boxscore_labels.parquet"
+        if not labels_path.exists():
+            continue
+        try:
+            label_frames.append(pd.read_parquet(labels_path))
+        except Exception:
+            continue
+    if not label_frames:
+        return pd.DataFrame()
+
+    labels = pd.concat(label_frames, ignore_index=True, sort=False)
+    if labels.empty:
+        return labels
+
+    labels["player_id"] = pd.to_numeric(labels.get("player_id"), errors="coerce").astype("Int64")
+    labels["team_id"] = pd.to_numeric(labels.get("team_id"), errors="coerce").astype("Int64")
+    labels["game_date"] = pd.to_datetime(labels.get("game_date"), errors="coerce")
+    if "minutes" not in labels.columns:
+        labels["minutes"] = 0.0
+    labels["minutes"] = pd.to_numeric(labels.get("minutes"), errors="coerce").fillna(0.0).astype("float64")
+    if "starter_flag_label" not in labels.columns:
+        labels["starter_flag_label"] = 0
+    labels["starter_flag_label"] = (
+        pd.to_numeric(labels.get("starter_flag_label"), errors="coerce").fillna(0.0).astype("float64")
+    )
+
+    # Keep one row per (player, game), preferring the latest record in file order.
+    if "game_id" in labels.columns:
+        labels["game_id"] = labels["game_id"].astype("string")
+        labels = labels.dropna(subset=["player_id", "game_id", "game_date"])
+        labels = labels.drop_duplicates(subset=["player_id", "game_id"], keep="last")
+    else:
+        labels = labels.dropna(subset=["player_id", "game_date"])
+        labels = labels.drop_duplicates(subset=["player_id", "game_date"], keep="last")
+    return labels
+
+
+def _approx_num_stints_from_minutes(minutes: pd.Series) -> pd.Series:
+    mins = pd.to_numeric(minutes, errors="coerce").fillna(0.0).astype("float64")
+    bins = np.select(
+        [mins <= 0.0, mins < 14.0, mins < 28.0, mins < 40.0],
+        [0.0, 1.0, 2.0, 3.0],
+        default=4.0,
+    )
+    return pd.Series(bins, index=mins.index, dtype="float64")
+
+
+def _synthesize_player_prior_payload(player_labels: pd.DataFrame, *, person_id: int) -> dict[str, object]:
+    """Synthesize rotation-prior payload from recent labels for one player."""
+    out: dict[str, object] = {"person_id": int(person_id)}
+    if player_labels.empty:
+        return out
+
+    work = player_labels.sort_values("game_date", ascending=False, kind="stable").copy()
+    latest = work.iloc[0]
+    out["team_id"] = int(latest["team_id"]) if pd.notna(latest.get("team_id")) else pd.NA
+    latest_gid = str(latest.get("game_id") or "")
+    out["game_id"] = latest_gid
+    out["game_id_norm"] = latest_gid.zfill(10) if latest_gid else ""
+    out["game_date"] = latest.get("game_date")
+
+    for window in (5, 10, 20):
+        recent = work.head(window).copy()
+        n_games = int(len(recent))
+        out[f"player_prior_n_games_{window}"] = n_games
+        out[f"player_prior_source_max_game_date_{window}"] = (
+            recent["game_date"].max() if n_games > 0 else pd.NaT
+        )
+
+        started = pd.to_numeric(recent.get("starter_flag_label"), errors="coerce").fillna(0.0)
+        minutes = pd.to_numeric(recent.get("minutes"), errors="coerce").fillna(0.0)
+        num_stints = _approx_num_stints_from_minutes(minutes)
+        first_in = pd.Series(
+            np.where(minutes <= 0.0, 0.0, np.where(started >= 0.5, 0.0, 6.0)),
+            index=minutes.index,
+            dtype="float64",
+        )
+        last_out = (first_in + minutes).clip(lower=0.0, upper=48.0)
+        safe_stints = num_stints.replace(0.0, 1.0)
+        max_stint = (minutes / safe_stints).clip(lower=0.0, upper=24.0)
+
+        miss = 0 if n_games > 0 else 1
+        out[f"started_proxy_rate_prior_{window}"] = float(started.mean()) if n_games > 0 else 0.0
+        out[f"started_proxy_rate_prior_{window}_missing"] = miss
+
+        for base_col, series in (
+            ("minutes_from_stints", minutes),
+            ("num_stints", num_stints),
+            ("first_in_minute", first_in),
+            ("last_out_minute", last_out),
+            ("max_stint_minutes", max_stint),
+        ):
+            out[f"{base_col}_prior_{window}"] = float(series.mean()) if n_games > 0 else 0.0
+            out[f"{base_col}_prior_{window}_missing"] = miss
+            out[f"{base_col}_std_prior_{window}"] = float(series.std(ddof=0)) if n_games > 0 else 0.0
+            out[f"{base_col}_std_prior_{window}_missing"] = miss
+
+    out["role_change_starter_5v20"] = float(
+        out["started_proxy_rate_prior_5"] - out["started_proxy_rate_prior_20"]
+    )
+    out["role_change_starter_5v10"] = float(
+        out["started_proxy_rate_prior_5"] - out["started_proxy_rate_prior_10"]
+    )
+    out["role_change_minutes_5v20"] = float(
+        out["minutes_from_stints_prior_5"] - out["minutes_from_stints_prior_20"]
+    )
+    out["role_change_minutes_5v10"] = float(
+        out["minutes_from_stints_prior_5"] - out["minutes_from_stints_prior_10"]
+    )
+    return out
+
+
+def _synthesize_player_priors_from_labels(
+    *,
+    labels: pd.DataFrame,
+    player_ids: Iterable[int],
+) -> pd.DataFrame:
+    """Build synthetic player priors for IDs missing from rotation_priors_v1."""
+    if labels.empty:
+        return pd.DataFrame()
+
+    ids = [int(pid) for pid in player_ids]
+    if not ids:
+        return pd.DataFrame()
+
+    use = labels[labels["player_id"].isin(ids)].copy()
+    if use.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    for pid, frame in use.groupby("player_id", sort=False):
+        payload = _synthesize_player_prior_payload(frame, person_id=int(pid))
+        if payload:
+            rows.append(payload)
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows)
+
+
 def _update_player_priors_with_latest_labels(
     player_priors: pd.DataFrame,
     data_root: Path,
@@ -163,58 +322,29 @@ def _update_player_priors_with_latest_labels(
     if player_priors.empty:
         return player_priors
 
-    # Load box score labels
-    labels_path = data_root / "labels" / f"season={season}" / "boxscore_labels.parquet"
-    if not labels_path.exists():
+    labels = _load_boxscore_labels_for_season(data_root, season)
+    if labels.empty:
         return player_priors
 
-    try:
-        labels = pd.read_parquet(labels_path)
-    except Exception:
-        return player_priors
-
-    labels["player_id"] = pd.to_numeric(labels["player_id"], errors="coerce").astype("Int64")
-    labels["game_date"] = pd.to_datetime(labels["game_date"], errors="coerce")
-
-    # For each player, get their latest game from priors and check if labels
-    # have that game's results
     updated = player_priors.copy()
     updated["person_id"] = pd.to_numeric(updated["person_id"], errors="coerce").astype("Int64")
-
-    # Get the game_id that each prior was computed for
-    if "game_id" not in updated.columns:
-        return player_priors
+    if updated.empty:
+        return updated
 
     for idx, row in updated.iterrows():
-        person_id = row["person_id"]
-        prior_game_id = row.get("game_id") or row.get("game_id_norm")
-        if pd.isna(person_id) or pd.isna(prior_game_id):
+        person_id = row.get("person_id")
+        if pd.isna(person_id):
             continue
-
-        # Get this player's labels, sorted by date descending
-        player_labels = labels[labels["player_id"] == int(person_id)].copy()
+        player_labels = labels[labels["player_id"] == int(person_id)]
         if player_labels.empty:
             continue
-
-        player_labels = player_labels.sort_values("game_date", ascending=False)
-
-        # Get the last 5 games including the prior game
-        # The prior was computed BEFORE prior_game_id, so we need to include it
-        last5 = player_labels.head(5)
-        if last5.empty:
-            continue
-
-        # Update started_proxy_rate_prior_5 using starter_flag_label
-        if "starter_flag_label" in last5.columns and "started_proxy_rate_prior_5" in updated.columns:
-            new_start_rate = last5["starter_flag_label"].mean()
-            if not pd.isna(new_start_rate):
-                updated.at[idx, "started_proxy_rate_prior_5"] = new_start_rate
-
-        # Update minutes_from_stints_prior_5 using minutes
-        if "minutes" in last5.columns and "minutes_from_stints_prior_5" in updated.columns:
-            new_minutes = last5["minutes"].mean()
-            if not pd.isna(new_minutes):
-                updated.at[idx, "minutes_from_stints_prior_5"] = new_minutes
+        payload = _synthesize_player_prior_payload(player_labels, person_id=int(person_id))
+        for col, val in payload.items():
+            if col == "person_id":
+                continue
+            if col not in updated.columns:
+                updated[col] = pd.NA
+            updated.at[idx, col] = val
 
     return updated
 
@@ -337,6 +467,37 @@ def load_latest_rotation_priors_by_entity(
     # Update player priors with latest box score results
     # This fixes the "pre-game vs post-game" prior staleness issue
     player_priors = _update_player_priors_with_latest_labels(player_priors, data_root, season)
+
+    # If requested player IDs are still missing from rotation_priors_v1, synthesize
+    # conservative priors from recent labels so live scoring is not forced into
+    # blanket "missing prior" behavior for those players.
+    if player_filter:
+        if player_priors.empty or "person_id" not in player_priors.columns:
+            present_players: set[int] = set()
+        else:
+            present_players = set(
+                pd.to_numeric(player_priors["person_id"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .tolist()
+            )
+        missing_players = sorted(player_filter - present_players)
+        if missing_players:
+            labels = _load_boxscore_labels_for_season(data_root, season)
+            synth = _synthesize_player_priors_from_labels(
+                labels=labels,
+                player_ids=missing_players,
+            )
+            if not synth.empty:
+                player_priors = (
+                    pd.concat([player_priors, synth], ignore_index=True, sort=False)
+                    if not player_priors.empty
+                    else synth
+                )
+                _logger.warning(
+                    "Synthesized label-based priors for %d missing players.",
+                    int(len(synth)),
+                )
 
     return team_priors, player_priors
 

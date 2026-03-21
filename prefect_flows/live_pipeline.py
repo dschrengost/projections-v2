@@ -581,7 +581,12 @@ def run_boxscores_task(
         effective_start = start_date
         
     effective_end = end_date or effective_start
-    effective_season = season or datetime.now().strftime("%Y")
+    if season:
+        effective_season = season
+    else:
+        start_ts = pd.Timestamp(effective_start)
+        season_start_year = int(start_ts.year) if int(start_ts.month) >= 8 else int(start_ts.year) - 1
+        effective_season = str(season_start_year)
 
     # Build command
     cmd = [
