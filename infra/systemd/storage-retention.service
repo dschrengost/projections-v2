@@ -1,0 +1,25 @@
+[Unit]
+Description=Storage Retention Planner (dry-run by default)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/daniel/prod/projections-v2
+Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+Environment=PROJECTIONS_PROD_ROOT=/home/daniel/prod/projections-v2
+
+# Safety: keep this as dry-run unless explicitly changed.
+Environment=PROJECTIONS_RETENTION_EXECUTE=0
+
+# Default knobs (override by editing the unit or exporting env vars for manual runs).
+Environment=PROJECTIONS_RETENTION_FAMILIES=gtv2_worlds
+Environment=PROJECTIONS_RETENTION_LOOKBACK_DAYS=30
+Environment=PROJECTIONS_RETENTION_MIN_AGE_HOURS=24
+Environment=PROJECTIONS_RETENTION_MAX_DELETE_BYTES=50000000000
+
+ExecStart=/home/daniel/prod/projections-v2/scripts/storage/run_storage_retention.sh
+
+[Install]
+WantedBy=default.target
+

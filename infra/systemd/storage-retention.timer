@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly Storage Retention Planner
+
+[Timer]
+# Run once per day. Keep this comfortably away from the live pipeline window.
+OnCalendar=*-*-* 05:25:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
