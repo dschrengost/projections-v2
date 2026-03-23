@@ -204,12 +204,21 @@ mkdir -p "$RUNTIME_SELECTOR_DIR"
 
 sync_selector() {
     local selector_file="$1"
-    local src="$PROD_REPO/config/$selector_file"
+    local src_prod="$PROD_REPO/config/$selector_file"
+    local src_dev="$DEV_REPO/config/$selector_file"
+    local src="$src_prod"
     local dst="$RUNTIME_SELECTOR_DIR/$selector_file"
 
-    if [[ ! -f "$src" ]]; then
-        echo "[deploy] WARNING: selector source missing, skipping: $src"
-        return
+    # If we preserve PROD pointers, the config files may be excluded from rsync.
+    # Seed from DEV only when the PROD file is missing (fresh bootstrap scenario).
+    if [[ ! -f "$src_prod" ]]; then
+        if [[ -f "$src_dev" ]]; then
+            src="$src_dev"
+            echo "[deploy] NOTE: prod selector missing; seeding from DEV: $src_dev"
+        else
+            echo "[deploy] WARNING: selector source missing, skipping: $src_prod"
+            return
+        fi
     fi
 
     if [[ "$SYNC_POINTERS" -eq 1 ]]; then
@@ -399,13 +408,7 @@ else
     echo "[deploy] WARNING: frontend package.json not found at $FRONTEND_DIR"
 fi
 
-if [[ "$RESTART_DASHBOARD" -eq 1 ]]; then
-    _restart_dashboard_service_clean "$DASHBOARD_SERVICE" "$DASHBOARD_PORT"
-else
-    echo "[deploy] Skipping dashboard restart (--skip-dashboard-restart)"
-fi
-
-# --- Write deploy marker ---
+# --- Write deploy marker (before restarts so services report correct stamp) ---
 DEPLOY_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 cat > "$PROD_REPO/.deploy_info" <<EOF
 {
@@ -416,6 +419,12 @@ cat > "$PROD_REPO/.deploy_info" <<EOF
   "source_repo": "$DEV_REPO"
 }
 EOF
+
+if [[ "$RESTART_DASHBOARD" -eq 1 ]]; then
+    _restart_dashboard_service_clean "$DASHBOARD_SERVICE" "$DASHBOARD_PORT"
+else
+    echo "[deploy] Skipping dashboard restart (--skip-dashboard-restart)"
+fi
 
 # --- Print runtime stamp from PROD ---
 echo ""
