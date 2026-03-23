@@ -525,8 +525,12 @@ def _resolve_home_away_team_ids(game_df: pd.DataFrame | pd.Series) -> tuple[int 
     # upstream indexing was constructed. Normalize to a 1-row DataFrame.
     if isinstance(game_df, pd.Series):
         game_df = game_df.to_frame().T
-    home_series = pd.to_numeric(game_df.get("home_team_id"), errors="coerce").dropna().astype("int64")
-    away_series = pd.to_numeric(game_df.get("away_team_id"), errors="coerce").dropna().astype("int64")
+
+    # Explicit home/away ids are optional in some inference feature frames.
+    home_raw = game_df["home_team_id"] if "home_team_id" in game_df.columns else pd.Series([], dtype="float64")
+    away_raw = game_df["away_team_id"] if "away_team_id" in game_df.columns else pd.Series([], dtype="float64")
+    home_series = pd.to_numeric(home_raw, errors="coerce").dropna().astype("int64")
+    away_series = pd.to_numeric(away_raw, errors="coerce").dropna().astype("int64")
     home_id = int(home_series.mode().iloc[0]) if not home_series.empty else None
     away_id = int(away_series.mode().iloc[0]) if not away_series.empty else None
     if home_id is not None and away_id is not None and home_id != away_id:
