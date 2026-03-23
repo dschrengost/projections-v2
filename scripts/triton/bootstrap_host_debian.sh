@@ -51,7 +51,10 @@ apt_update() {
     return 0
   fi
   echo "[bootstrap] WARNING: apt update failed; retrying with AllowWeakRepositories=1"
-  apt-get -o Acquire::AllowWeakRepositories=true update -y
+  if apt-get -o Acquire::AllowWeakRepositories=true update -y; then
+    return 0
+  fi
+  return 1
 }
 
 apt_install() {
@@ -60,7 +63,10 @@ apt_install() {
     return 0
   fi
   echo "[bootstrap] WARNING: apt install failed; retrying with AllowWeakRepositories=1"
-  apt-get -o Acquire::AllowWeakRepositories=true install -y --no-install-recommends "$@"
+  if apt-get -o Acquire::AllowWeakRepositories=true install -y --no-install-recommends "$@"; then
+    return 0
+  fi
+  return 1
 }
 
 echo "[bootstrap] apt update"
@@ -120,8 +126,19 @@ cat >"${CUDA_LIST_PATH}" <<EOF
 deb [signed-by=${CUDA_KEYRING_PATH}] ${CUDA_REPO_BASE}/ /
 EOF
 
-apt_update
-apt_install nvidia-container-toolkit
+if ! apt_update; then
+  echo "[bootstrap] WARNING: NVIDIA repo signature rejected by apt policy."
+  echo "[bootstrap] WARNING: falling back to trusted=yes for one-time toolkit install."
+  cat >"${CUDA_LIST_PATH}" <<EOF
+deb [trusted=yes] ${CUDA_REPO_BASE}/ /
+EOF
+  apt-get update -y
+fi
+
+if ! apt_install nvidia-container-toolkit; then
+  echo "[bootstrap] error: failed to install nvidia-container-toolkit" >&2
+  exit 1
+fi
 
 if command -v nvidia-ctk >/dev/null 2>&1; then
   echo "[bootstrap] configuring docker runtime for nvidia-container-toolkit"
