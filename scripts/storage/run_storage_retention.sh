@@ -44,7 +44,7 @@ select_out="$("$PY" -m projections.cli.storage_select_canonical \
   --write-decisions)"
 echo "$select_out"
 
-canonical_map="$(echo "$select_out" | sed -nE 's/.* map=([^ ]+).*/\\1/p' | tail -n 1)"
+canonical_map="$(echo "$select_out" | sed -nE 's/.* map=([^ ]+).*/\1/p' | tail -n 1)"
 if [[ -z "$canonical_map" ]]; then
   echo "[retention] error: failed to parse canonical map path from output" >&2
   exit 1
@@ -68,4 +68,3 @@ else
 fi
 
 "$PY" "${prune_args[@]}"
-
