@@ -21,6 +21,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _compute_per_game_input_digests,
     _detect_stale_authoritative_inputs,
     _merge_parquet_for_target_games,
+    _resample_extreme_game_worlds,
     _run_python_module,
     _report_window_status,
     _repair_world_frame_contract_fields,
@@ -1197,6 +1198,84 @@ def test_sanitize_frame_to_expected_keys_handles_sparse_large_index_labels() -> 
     assert report["dropped_unexpected_key_rows"] == 1
     assert cleaned["game_id"].tolist() == [1, 1, 1]
     assert cleaned["team_id"].tolist() == [10, 20, 20]
+
+
+def test_sanitize_frame_to_expected_keys_avoids_multiindex_membership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_keys = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 20],
+            "player_id": [100, 200],
+        }
+    )
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 1],
+            "game_id": [1, 99, 1],
+            "team_id": [10, 10, 20],
+            "player_id": [100, 100, 200],
+            "minutes": [240.0, 20.0, 240.0],
+        }
+    )
+
+    def _raise_if_called(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("MultiIndex.from_frame should not be used")
+
+    monkeypatch.setattr(pd.MultiIndex, "from_frame", _raise_if_called)
+
+    cleaned, report = _sanitize_frame_to_expected_keys(
+        worlds,
+        expected_keys_df=expected_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="unit-test no-multiindex",
+    )
+
+    assert report["rows_in"] == 3
+    assert report["rows_out"] == 2
+    assert report["dropped_unexpected_key_rows"] == 1
+    assert cleaned["game_id"].tolist() == [1, 1]
+    assert cleaned["team_id"].tolist() == [10, 20]
+
+
+def test_resample_extreme_game_worlds_avoids_pandas_multiindex_factorize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 0, 0, 1, 1, 1, 1],
+            "game_id": [22500999] * 8,
+            "team_id": [10, 10, 20, 20] * 2,
+            "player_id": [101, 102, 201, 202] * 2,
+            "minutes": [5.0, 40.0, 40.0, 40.0, 32.0, 32.0, 32.0, 32.0],
+            "pts": [20.0, 5.0, 5.0, 5.0, 8.0, 7.0, 6.0, 5.0],
+            "dk_fpts": [45.0, 12.0, 11.0, 10.0, 26.0, 24.0, 22.0, 20.0],
+        }
+    )
+
+    def _raise_if_called(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("pandas MultiIndex/factorize path should not be used")
+
+    monkeypatch.setattr(pd.MultiIndex, "from_arrays", _raise_if_called)
+    monkeypatch.setattr(pd, "factorize", _raise_if_called)
+
+    replaced, report = _resample_extreme_game_worlds(
+        worlds,
+        random_seed=7,
+        max_passes=1,
+        short_minutes_threshold=12.0,
+        short_minutes_dk_threshold=35.0,
+        game_pts_max=200.0,
+        game_pts_min=0.0,
+    )
+
+    assert bool(report["applied"]) is True
+    assert int(report["total_replaced_pairs"]) == 1
+    world0 = replaced.loc[replaced["world_idx"] == 0].sort_values(["team_id", "player_id"])
+    world1 = replaced.loc[replaced["world_idx"] == 1].sort_values(["team_id", "player_id"])
+    assert world0["minutes"].tolist() == pytest.approx(world1["minutes"].tolist())
+    assert world0["dk_fpts"].tolist() == pytest.approx(world1["dk_fpts"].tolist())
 
 
 def test_coerce_world_game_date_normalizes_noncanonical_values() -> None:

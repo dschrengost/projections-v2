@@ -1772,6 +1772,8 @@ def _stream_validate_parquet(
             "unexpected end of stream" in text
             or "end of stream" in text
             or "corrupt snappy compressed data" in text
+            or "corrupt data page" in text
+            or "invalid number of bytes" in text
             or "page was smaller than expected" in text
         )
 
@@ -1799,7 +1801,7 @@ def _stream_validate_parquet(
         row_count = 0
         try:
             parquet_file = pq.ParquetFile(path)
-            for batch in parquet_file.iter_batches(batch_size=65536):
+            for batch in parquet_file.iter_batches(batch_size=65536, use_threads=False):
                 row_count += int(batch.num_rows)
             break
         except Exception as exc:
@@ -2015,15 +2017,21 @@ def _sanitize_frame_to_expected_keys(
             },
         )
 
-    # NOTE: Avoid dataframe merge here. Large-key merges have intermittently
-    # triggered low-level pandas segmentation faults in production workers.
-    expected_key_index = pd.MultiIndex.from_frame(
-        expected.loc[:, key_cols_list], names=key_cols_list
+    # NOTE: Avoid dataframe merge and MultiIndex membership checks here. Both
+    # paths have intermittently triggered low-level pandas crashes in
+    # production workers on very large world matrices.
+    expected_key_matrix = np.ascontiguousarray(
+        expected.loc[:, key_cols_list].to_numpy(dtype=np.int64, copy=False)
     )
-    work_key_index = pd.MultiIndex.from_frame(
-        work_keys.loc[:, key_cols_list], names=key_cols_list
+    work_key_matrix = np.ascontiguousarray(
+        work_keys.loc[:, key_cols_list].to_numpy(dtype=np.int64, copy=False)
     )
-    keep_mask = np.asarray(work_key_index.isin(expected_key_index), dtype=bool)
+    structured_key_dtype = np.dtype(
+        [(f"k{i}", np.int64) for i in range(len(key_cols_list))]
+    )
+    expected_key_struct = expected_key_matrix.view(structured_key_dtype).reshape(-1)
+    work_key_struct = work_key_matrix.view(structured_key_dtype).reshape(-1)
+    keep_mask = np.isin(work_key_struct, expected_key_struct, assume_unique=False)
     dropped_unexpected_key_rows = int(np.count_nonzero(~keep_mask))
     # Use positional masking to avoid pandas indexer edge cases on sparse/high
     # integer labels observed in long-running worker processes.
@@ -2977,16 +2985,21 @@ def _resample_extreme_game_worlds(
         pd.to_numeric(out["player_id"], errors="coerce").fillna(-1).to_numpy(dtype=np.int64, copy=False)
     )
 
-    pair_index = pd.MultiIndex.from_arrays(
-        [world_idx_arr, game_id_arr],
-        names=["world_idx", "game_id"],
+    # Avoid pandas MultiIndex factorization on large live frames; this has
+    # intermittently segfaulted on long-running workers.
+    pair_codes, pair_unique_arrays = _factorize_int_key_arrays_preserve_order(
+        world_idx_arr,
+        game_id_arr,
     )
-    pair_codes, pair_uniques = pd.factorize(pair_index, sort=False)
-    n_pairs = int(len(pair_uniques))
+    n_pairs = int(len(pair_unique_arrays[0])) if pair_unique_arrays else 0
     if n_pairs <= 0:
         return out, {"applied": False, "reason": "no_pairs"}
 
-    pair_game_id = np.asarray(pair_uniques.get_level_values(1), dtype=np.int64)
+    pair_game_id = (
+        np.asarray(pair_unique_arrays[1], dtype=np.int64)
+        if len(pair_unique_arrays) >= 2
+        else np.array([], dtype=np.int64)
+    )
     pair_in_scope = (
         np.isin(pair_game_id, target_games)
         if target_games is not None
@@ -3004,13 +3017,11 @@ def _resample_extreme_game_worlds(
     team_sorted = team_id_arr[row_order]
     player_sorted = player_id_arr[row_order]
 
-    game_codes, _ = pd.factorize(pair_game_id, sort=False)
+    game_codes, _ = _factorize_int_key_arrays_preserve_order(pair_game_id)
     game_pair_order = np.argsort(game_codes, kind="mergesort")
     sorted_game_codes = game_codes[game_pair_order]
     game_starts = np.flatnonzero(np.r_[True, sorted_game_codes[1:] != sorted_game_codes[:-1]])
     game_ends = np.r_[game_starts[1:], len(sorted_game_codes)]
-    replace_cols = [c for c in out.columns if c != "world_idx"]
-
     for pass_idx in range(max_iter):
         minutes = (
             pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
@@ -3075,11 +3086,15 @@ def _resample_extreme_game_worlds(
                     continue
                 replacements.append((target_start, target_end, donor_start, donor_end))
 
-        for col in replace_cols:
-            values = out[col].to_numpy(copy=True)
+        if replacements:
+            row_sources = np.arange(len(out), dtype=np.int64)
             for target_start, target_end, donor_start, donor_end in replacements:
-                values[row_order[target_start:target_end]] = values[row_order[donor_start:donor_end]]
-            out[col] = values
+                row_sources[row_order[target_start:target_end]] = row_order[
+                    donor_start:donor_end
+                ]
+            world_idx_original = out["world_idx"].to_numpy(copy=False)
+            out = out.take(row_sources).reset_index(drop=True)
+            out["world_idx"] = world_idx_original
 
         replaced_this_pass = len(replacements)
 
