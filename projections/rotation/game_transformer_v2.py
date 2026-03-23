@@ -520,7 +520,11 @@ def _numeric_frame_with_nans_for_missing(df: pd.DataFrame, cols: list[str]) -> p
     return pd.concat(parts, axis=1)
 
 
-def _resolve_home_away_team_ids(game_df: pd.DataFrame) -> tuple[int | None, int | None]:
+def _resolve_home_away_team_ids(game_df: pd.DataFrame | pd.Series) -> tuple[int | None, int | None]:
+    # Some callers may pass a single-row slice (Series) depending on how the
+    # upstream indexing was constructed. Normalize to a 1-row DataFrame.
+    if isinstance(game_df, pd.Series):
+        game_df = game_df.to_frame().T
     home_series = pd.to_numeric(game_df.get("home_team_id"), errors="coerce").dropna().astype("int64")
     away_series = pd.to_numeric(game_df.get("away_team_id"), errors="coerce").dropna().astype("int64")
     home_id = int(home_series.mode().iloc[0]) if not home_series.empty else None
