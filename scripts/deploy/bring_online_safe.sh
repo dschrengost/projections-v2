@@ -26,14 +26,14 @@ echo "[bring-online] installing/updating systemd user units"
 echo "[bring-online] configuring Tailscale Serve (https ports 4200 + 8501)"
 if command -v tailscale >/dev/null 2>&1; then
   # These commands configure tailscaled; they persist across reboots.
-  if ! tailscale serve --yes --https 4200 http://127.0.0.1:4200 >/dev/null 2>&1; then
+  if ! tailscale serve --bg --yes --https 4200 http://127.0.0.1:4200 >/dev/null 2>&1; then
     echo "[bring-online] WARNING: tailscale serve denied. Run once:" >&2
     echo "  sudo tailscale set --operator=${USER}" >&2
   fi
-  if ! tailscale serve --yes --https 8501 http://127.0.0.1:8501 >/dev/null 2>&1; then
+  if ! tailscale serve --bg --yes --https 8501 http://127.0.0.1:8501 >/dev/null 2>&1; then
     echo "[bring-online] WARNING: tailscale serve denied. After setting operator, run:" >&2
-    echo "  tailscale serve --yes --https 4200 http://127.0.0.1:4200" >&2
-    echo "  tailscale serve --yes --https 8501 http://127.0.0.1:8501" >&2
+    echo "  tailscale serve --bg --yes --https 4200 http://127.0.0.1:4200" >&2
+    echo "  tailscale serve --bg --yes --https 8501 http://127.0.0.1:8501" >&2
   fi
 else
   echo "[bring-online] WARNING: tailscale not found; skipping tailscale serve config" >&2
