@@ -73,11 +73,24 @@ apt-get install -y nvidia-driver nvidia-smi
 CUDA_REPO_SUITE="${CUDA_REPO_SUITE:-debian12}"
 CUDA_REPO_ARCH="${CUDA_REPO_ARCH:-x86_64}"
 CUDA_REPO_BASE="https://developer.download.nvidia.com/compute/cuda/repos/${CUDA_REPO_SUITE}/${CUDA_REPO_ARCH}"
-CUDA_KEY_URL="${CUDA_REPO_BASE}/3bf863cc.pub"
 CUDA_LIST_PATH="/etc/apt/sources.list.d/nvidia-cuda.list"
 CUDA_KEYRING_PATH="/usr/share/keyrings/nvidia-cuda-archive-keyring.gpg"
 
 echo "[bootstrap] configuring nvidia container toolkit apt repo (suite=${CUDA_REPO_SUITE})"
+# Key filename differs across suites; try known candidates.
+CUDA_KEY_URL=""
+for candidate in 3bf863cc.pub 8793F200.pub; do
+  if curl -fsSI "${CUDA_REPO_BASE}/${candidate}" >/dev/null 2>&1; then
+    CUDA_KEY_URL="${CUDA_REPO_BASE}/${candidate}"
+    break
+  fi
+done
+if [[ -z "${CUDA_KEY_URL}" ]]; then
+  echo "[bootstrap] error: could not locate CUDA repo key under ${CUDA_REPO_BASE}" >&2
+  echo "[bootstrap] try setting CUDA_REPO_SUITE=debian12 explicitly." >&2
+  exit 1
+fi
+echo "[bootstrap] using CUDA repo key: ${CUDA_KEY_URL}"
 curl -fsSL "${CUDA_KEY_URL}" | gpg --dearmor -o "${CUDA_KEYRING_PATH}"
 chmod 0644 "${CUDA_KEYRING_PATH}"
 cat >"${CUDA_LIST_PATH}" <<EOF
@@ -106,4 +119,3 @@ echo "  docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-sm
 echo "  /home/daniel/prod/projections-v2/scripts/triton/check_prereqs.sh"
 echo ""
 echo "[bootstrap] If you added ${TARGET_USER} to the docker group, you must re-login or reboot."
-
