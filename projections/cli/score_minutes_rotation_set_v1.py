@@ -530,13 +530,7 @@ def _load_rotation_historical_features_for_dnp(
     if lookback_days is None:
         label_paths = sorted((data_root / "labels").glob("season=*/boxscore_labels.parquet"))
     else:
-        # Primary convention is season-start year (e.g. 2025 for 2025-26), but
-        # some recovery backfills have landed in calendar-year partitions.
-        candidates = [int(season), int(season) + 1]
-        label_paths = [
-            data_root / "labels" / f"season={candidate}" / "boxscore_labels.parquet"
-            for candidate in candidates
-        ]
+        label_paths = [data_root / "labels" / f"season={int(season)}" / "boxscore_labels.parquet"]
     label_paths = [p for p in label_paths if p.exists()]
     if not label_paths:
         return pd.DataFrame()
@@ -546,18 +540,13 @@ def _load_rotation_historical_features_for_dnp(
         try:
             frame = pd.read_parquet(
                 labels_path,
-                columns=["game_date", "game_id", "team_id", "player_id", "minutes", "label_frozen_ts"],
+                columns=["game_date", "team_id", "player_id", "minutes"],
             )
         except Exception:  # noqa: BLE001
             frame = pd.read_parquet(labels_path)
             if not {"game_date", "team_id", "player_id", "minutes"}.issubset(frame.columns):
                 continue
-            cols = ["game_date", "team_id", "player_id", "minutes"]
-            if "game_id" in frame.columns:
-                cols.append("game_id")
-            if "label_frozen_ts" in frame.columns:
-                cols.append("label_frozen_ts")
-            frame = frame.loc[:, cols]
+            frame = frame.loc[:, ["game_date", "team_id", "player_id", "minutes"]]
         label_frames.append(frame)
     if not label_frames:
         return pd.DataFrame()
@@ -572,17 +561,7 @@ def _load_rotation_historical_features_for_dnp(
     labels["player_id"] = pd.to_numeric(labels["player_id"], errors="coerce").astype(
         "Int64"
     )
-    if "game_id" in labels.columns:
-        labels["game_id"] = pd.to_numeric(labels["game_id"], errors="coerce").astype("Int64")
-    if "label_frozen_ts" in labels.columns:
-        labels["label_frozen_ts"] = pd.to_datetime(labels["label_frozen_ts"], utc=True, errors="coerce")
-
     labels = labels.dropna(subset=["game_date", "team_id", "player_id"]).copy()
-    dedupe_keys = ["game_date", "team_id", "player_id"]
-    if "game_id" in labels.columns:
-        dedupe_keys = ["game_id", "team_id", "player_id"]
-    order_cols = dedupe_keys + (["label_frozen_ts"] if "label_frozen_ts" in labels.columns else [])
-    labels = labels.sort_values(order_cols, kind="mergesort").drop_duplicates(subset=dedupe_keys, keep="last")
     if labels.empty:
         return pd.DataFrame()
 

@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Union
 
 PROJECTIONS_DATA_ENV = "PROJECTIONS_DATA_ROOT"
-PROJECTIONS_HOT_ENV = "PROJECTIONS_HOT_ROOT"
-PROJECTIONS_ARCHIVE_ENV = "PROJECTIONS_ARCHIVE_ROOT"
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 Pathish = Union[str, PathLike[str]]
@@ -38,23 +36,3 @@ def get_data_root() -> Path:
 def data_path(*parts: Pathish) -> Path:
     """Join the canonical data root with the provided path segments."""
     return get_data_root().joinpath(*parts)
-
-
-def get_hot_root() -> Path:
-    """Return hot storage root (defaults to PROJECTIONS_DATA_ROOT)."""
-    env_value = os.environ.get(PROJECTIONS_HOT_ENV)
-    if env_value:
-        return Path(env_value).expanduser().resolve()
-    return get_data_root()
-
-
-def get_archive_root(*, required: bool = False) -> Path | None:
-    """Return archive root when configured via PROJECTIONS_ARCHIVE_ROOT."""
-    env_value = os.environ.get(PROJECTIONS_ARCHIVE_ENV)
-    if env_value:
-        return Path(env_value).expanduser().resolve()
-    if required:
-        raise RuntimeError(
-            f"{PROJECTIONS_ARCHIVE_ENV} is required for this operation but is not set"
-        )
-    return None

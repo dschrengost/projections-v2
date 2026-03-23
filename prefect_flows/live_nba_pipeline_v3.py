@@ -64,8 +64,6 @@ from projections.runtime_stamp import (
     enforce_prod_sanity,
     log_runtime_stamp,
 )
-from projections.storage_retention.config import load_storage_retention_policy
-from projections.storage_retention.guard import evaluate_storage_guard
 
 
 PROJECT_ROOT = paths.get_project_root()
@@ -1154,30 +1152,6 @@ def _source_digest_payload(source_payload: dict[str, Any]) -> dict[str, Any]:
         "latest_as_of_ts": latest_as_of_ts,
         "source_used": source.get("source_used"),
         "content_digest": content_digest,
-    }
-
-
-def _build_manifest_slate_metadata(
-    source_freshness: dict[str, Any] | None,
-) -> dict[str, Any]:
-    per_game = dict((source_freshness or {}).get("per_game", {}))
-    tip_rows: list[tuple[str, str | None]] = []
-    first_tip: pd.Timestamp | None = None
-    for game_id, row in per_game.items():
-        if not isinstance(row, dict):
-            continue
-        game_id_str = str(row.get("game_id") if row.get("game_id") is not None else game_id)
-        tip_ts = pd.to_datetime(row.get("tip_ts"), utc=True, errors="coerce")
-        tip_iso = None if pd.isna(tip_ts) else pd.Timestamp(tip_ts).isoformat()
-        tip_rows.append((game_id_str, tip_iso))
-        if tip_iso is not None and (first_tip is None or tip_ts < first_tip):
-            first_tip = pd.Timestamp(tip_ts)
-    tip_rows = sorted(set(tip_rows))
-    return {
-        "game_count": int(len(tip_rows)),
-        "first_tip_ts": None if first_tip is None else first_tip.isoformat(),
-        "slate_signature": _stable_digest(tip_rows),
-        "game_tips": [{"game_id": gid, "tip_ts": tip} for gid, tip in tip_rows],
     }
 
 
@@ -4764,7 +4738,7 @@ def freeze_run_inputs_task(
         minutes_current_run_path=minutes_selector_path,
         rates_current_run_path=rates_selector_path,
         ownership_current_run_path=ownership_selector_path,
-        slate=_build_manifest_slate_metadata(source_freshness),
+        slate={},
     )
 
     bundle_hash = _bundle_artifact_hash(bundle_dir)
@@ -6519,7 +6493,6 @@ def nba_live_pipeline_v3_flow(
 ) -> dict[str, str]:
     logger = get_run_logger()
     data_root = paths.get_data_root()
-    storage_policy = load_storage_retention_policy()
     resolved_game_date = _resolve_game_date(game_date)
     run_id = run_id_override or control_plane.canonical_run_id()
     minutes_selector_path = model_selectors.active_minutes_selector_path(
@@ -6605,17 +6578,6 @@ def nba_live_pipeline_v3_flow(
         clip_suffix = f"_clip{resolved_flow_scale_clip_override:.1f}".replace(".", "p")
         run_id = run_id + clip_suffix
         logger.info("Experimental run_id with clip suffix: %s", run_id)
-
-    effective_sim_worlds = int(sim_worlds)
-    if storage_policy.reduced_persistence.enabled:
-        max_worlds = storage_policy.reduced_persistence.gtv2_max_worlds
-        if max_worlds is not None and effective_sim_worlds > int(max_worlds):
-            logger.warning(
-                "Reduced persistence enabled: capping sim_worlds from %s to %s",
-                effective_sim_worlds,
-                int(max_worlds),
-            )
-            effective_sim_worlds = int(max_worlds)
 
     # Runtime stamp for reproducibility and incident triage.
     enforce_clean_tree()
@@ -6948,28 +6910,6 @@ def nba_live_pipeline_v3_flow(
             random_seed=int(gtv2_seed),
         )
 
-        guard_result = evaluate_storage_guard(
-            hot_root=data_root,
-            guard_policy=storage_policy.guard,
-            root_path=Path("/"),
-        )
-        guard_payload = dict(guard_result.payload)
-        guard_payload["ok"] = bool(guard_result.ok)
-        guard_payload["hard_stop"] = bool(guard_result.hard_stop)
-        guard_payload["reduced_persistence_enabled"] = bool(
-            storage_policy.reduced_persistence.enabled
-        )
-        (v3_run_dir / "storage_guard_pre_worlds.json").write_text(
-            json.dumps(guard_payload, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-        if guard_result.warnings:
-            logger.warning("Storage guard warning before worlds generation: %s", list(guard_result.warnings))
-        if guard_result.hard_stop:
-            raise RuntimeError(
-                "storage guard blocked worlds generation: " + "; ".join(guard_result.failures)
-            )
-
         worlds_outputs = generate_worlds_gtv2_live_task(
             game_date=resolved_game_date,
             run_id=run_id,
@@ -6978,7 +6918,7 @@ def nba_live_pipeline_v3_flow(
             scores_path=scores_path,
             bundle_dir=bundle_dir,
             data_root=data_root,
-            sim_worlds=int(effective_sim_worlds),
+            sim_worlds=int(sim_worlds),
             placeholder_mode=bool(placeholder_mode),
             inference_backend=str(resolved_inference_backend),
             triton_endpoint=str(resolved_triton_cfg.endpoint),

@@ -601,21 +601,6 @@ def _season_label(season_start: int) -> str:
     return f"{season_start}-{(season_start + 1) % 100:02d}"
 
 
-def _label_season_partition_candidates(season_start: int) -> list[int]:
-    """Return season partitions to scan for labels.
-
-    Primary convention is season-start year (e.g. 2025 for 2025-26).
-    Some backfills have historically landed in calendar-year partitions
-    (e.g. season=2026 for Mar 2026). Include season+1 as a resilience fallback.
-    """
-
-    out = [int(season_start)]
-    spillover = int(season_start) + 1
-    if spillover not in out:
-        out.append(spillover)
-    return out
-
-
 def _normalize_run_timestamp(value: datetime | None) -> pd.Timestamp:
     if value is None:
         base = datetime.now(tz=UTC)
@@ -1030,36 +1015,21 @@ def _load_label_sources(
 
     frames: list[pd.DataFrame] = []
     sources: list[str] = []
-    candidates = _label_season_partition_candidates(int(season_value))
-    scanned_gold: list[str] = []
-    scanned_legacy: list[str] = []
+    gold_dir = data_root / "gold" / "labels_minutes_v1" / f"season={season_value}"
+    legacy_path = data_root / "labels" / f"season={season_value}" / "boxscore_labels.parquet"
 
-    for candidate in candidates:
-        gold_dir = data_root / "gold" / "labels_minutes_v1" / f"season={candidate}"
-        scanned_gold.append(str(gold_dir))
-        if not gold_dir.exists():
-            continue
+    if gold_dir.exists():
         try:
             frames.append(_read_parquet_tree(gold_dir))
             sources.append(str(gold_dir))
         except FileNotFoundError:
             warnings.append(f"Gold label directory {gold_dir} is empty; falling back to legacy labels.")
-
-    for candidate in candidates:
-        legacy_path = data_root / "labels" / f"season={candidate}" / "boxscore_labels.parquet"
-        scanned_legacy.append(str(legacy_path))
-        if legacy_path.exists():
-            frames.append(pd.read_parquet(legacy_path))
-            sources.append(str(legacy_path))
-
+    if legacy_path.exists():
+        frames.append(pd.read_parquet(legacy_path))
+        sources.append(str(legacy_path))
     if not frames:
         raise FileNotFoundError(
-            "No label sources found. Expected one of: "
-            f"gold={scanned_gold} legacy={scanned_legacy}."
-        )
-    if any(candidate != int(season_value) for candidate in candidates if f"season={candidate}" in " + ".join(sources)):
-        warnings.append(
-            f"[labels] loaded supplemental season partition(s) for season={season_value}; sources={sources}"
+            f"No label sources found. Expected gold labels at {gold_dir} or legacy labels at {legacy_path}."
         )
 
     labels = pd.concat(frames, ignore_index=True, sort=False)
@@ -1806,9 +1776,7 @@ def _build_minutes_live_logic(
 
                     # Apply lineup status in roster_df based on Rotowire.
                     if not roster_df.empty and "player_name" in roster_df.columns:
-                        # Ensure clean string input to avoid segfaults in pandas .map() with mixed types
-                        player_names = roster_df["player_name"].fillna("").astype(str)
-                        name_normalized = player_names.map(_normalize_name_for_matching)
+                        name_normalized = roster_df["player_name"].map(_normalize_name_for_matching)
                         tracked_names = rotowire_confirmed_names | rotowire_projected_names | rotowire_out_names
                         rotowire_match = name_normalized.isin(tracked_names)
                         slate_mask = pd.Series(True, index=roster_df.index, dtype=bool)

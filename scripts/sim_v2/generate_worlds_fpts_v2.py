@@ -19,7 +19,6 @@ from projections.fpts_v2.scoring import compute_dk_fpts
 from projections.minutes import PLAY_THRESHOLD_MINUTES, ROTATION_THRESHOLD_MINUTES
 from projections.ops.overrides import overrides_path
 from projections.paths import data_path, get_project_root
-from projections.storage_retention.config import load_storage_retention_policy
 from projections.overrides.minutes_overrides_v2 import (
     MinutesOverrideV2Policy,
     apply_minutes_overrides_v2,
@@ -61,41 +60,6 @@ DEFAULT_MAX_ROTATION_SIZE = 10
 TEAM_MINUTES_TARGET = 240.0
 MINUTES_CAP_SIM_V3 = 41.0
 MIN_TEAM_SIZE_FOR_TEAM_MINUTES_RECONCILE = 5
-
-
-def _truthy_env(name: str) -> bool | None:
-    value = os.environ.get(name)
-    if value is None:
-        return None
-    return value.strip().lower() in {"1", "true", "yes", "y"}
-
-
-def _resolve_reduced_persistence_flags() -> tuple[bool, bool]:
-    """Return (write_worlds_matrix, write_minutes_matrix)."""
-    worlds_env = _truthy_env("PROJECTIONS_SIM_WRITE_WORLDS_MATRIX")
-    minutes_env = _truthy_env("PROJECTIONS_SIM_WRITE_MINUTES_MATRIX")
-    if worlds_env is not None and minutes_env is not None:
-        return bool(worlds_env), bool(minutes_env)
-
-    policy = load_storage_retention_policy()
-    rp = policy.reduced_persistence
-    if worlds_env is None:
-        write_worlds = (
-            bool(rp.sim_write_worlds_matrix)
-            if bool(rp.enabled)
-            else True
-        )
-    else:
-        write_worlds = bool(worlds_env)
-    if minutes_env is None:
-        write_minutes = (
-            bool(rp.sim_write_minutes_matrix)
-            if bool(rp.enabled)
-            else False
-        )
-    else:
-        write_minutes = bool(minutes_env)
-    return write_worlds, write_minutes
 
 
 def _build_implied_team_points(
@@ -4737,18 +4701,15 @@ def main(
                 except Exception as exc:
                     typer.echo(f"[sim_v2] warning: failed to write sim_diagnostics.json ({exc})", err=True)
 
-                write_worlds_matrix, write_minutes_matrix = _resolve_reduced_persistence_flags()
-                typer.echo(
-                    "[sim_v2] persistence mode "
-                    f"worlds_matrix={'on' if write_worlds_matrix else 'off'} "
-                    f"minutes_matrix={'on' if write_minutes_matrix else 'off'}"
-                )
-
                 # Also persist the full per-player worlds matrix for downstream consumers
-                # (e.g., contest simulation) when enabled by persistence policy.
-                if write_worlds_matrix and world_fpts_samples:
+                # (e.g., contest simulation). This is much smaller than writing one parquet
+                # per world and keeps the fast in-memory aggregation path.
+                # NOTE: We use the sanitized `all_fpts` which has inf/nan values replaced with 0.0,
+                # rather than re-stacking `world_fpts_samples` which contains raw unsanitized values.
+                if world_fpts_samples:
                     try:
                         player_ids = mu_df["player_id"].astype(str).tolist()
+                        # Use sanitized all_fpts (already stacked and inf-sanitized) instead of raw samples
                         worlds_matrix = all_fpts.astype(np.float32, copy=True)
                         worlds_path = out_dir / "worlds_matrix.parquet"
                         pd.DataFrame(worlds_matrix, columns=player_ids).to_parquet(worlds_path, index=False)
@@ -4756,7 +4717,12 @@ def main(
                         typer.echo(f"[sim_v2] warning: failed to write worlds_matrix.parquet ({exc})", err=True)
 
                 # Optional: persist minutes worlds matrix for audits/invariant checks.
-                if write_minutes_matrix and all_minutes is not None:
+                # Kept behind an env var to avoid expanding default artifact footprints.
+                if all_minutes is not None and os.environ.get("PROJECTIONS_SIM_WRITE_MINUTES_MATRIX", "0").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                }:
                     try:
                         player_ids = mu_df["player_id"].astype(str).tolist()
                         minutes_matrix = all_minutes.astype(np.float32, copy=True)

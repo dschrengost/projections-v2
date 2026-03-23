@@ -136,49 +136,40 @@ def _label_partition_path(root: Path, day: pd.Timestamp) -> Path:
 
 
 def _load_labels(data_root: Path, season: int, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    candidates = _season_partition_candidates(season)
-    gold_roots = [data_root / "gold" / "labels_minutes_v1" / f"season={candidate}" for candidate in candidates]
-    legacy_paths = [data_root / "labels" / f"season={candidate}" / LEGACY_LABEL_FILENAME for candidate in candidates]
+    gold_root = data_root / "gold" / "labels_minutes_v1" / f"season={season}"
+    legacy_path = data_root / "labels" / f"season={season}" / LEGACY_LABEL_FILENAME
 
     frames: list[pd.DataFrame] = []
     missing_dates: list[str] = []
 
-    # Prefer granular gold partitions; fall back to legacy if any requested day is absent.
-    any_gold_root = any(root.exists() for root in gold_roots)
-    if any_gold_root:
+    if gold_root.exists():
+        # Prefer granular gold partitions; fall back to legacy if any requested day is absent.
         for day in iter_days(start, end):
-            found_for_day = False
-            for gold_root in gold_roots:
-                path = _label_partition_path(gold_root, day)
-                if not path.exists():
-                    continue
-                frames.append(pd.read_parquet(path))
-                found_for_day = True
-            if not found_for_day:
+            path = _label_partition_path(gold_root, day)
+            if not path.exists():
                 missing_dates.append(day.date().isoformat())
+                continue
+            frames.append(pd.read_parquet(path))
 
-    existing_legacy_paths = [path for path in legacy_paths if path.exists()]
-    if missing_dates and existing_legacy_paths:
+    if missing_dates and legacy_path.exists():
         # Warn (via echo) but carry on with legacy labels to keep pipeline unblocked.
         typer.echo(
-            "[features] warning: missing gold labels for "
-            f"{', '.join(sorted(missing_dates))}; using legacy labels at {existing_legacy_paths}",
+            f"[features] warning: missing gold labels for {', '.join(sorted(missing_dates))}; using legacy labels at {legacy_path}",
             err=True,
         )
-        frames = [pd.read_parquet(path) for path in existing_legacy_paths]
+        frames = [pd.read_parquet(legacy_path)]
         missing_dates = []
-    elif any_gold_root and missing_dates:
+    elif gold_root.exists() and missing_dates:
         raise FileNotFoundError(
-            "Missing label partitions for dates: "
-            f"{', '.join(sorted(missing_dates))} under any of {gold_roots}"
+            f"Missing label partitions for dates: {', '.join(sorted(missing_dates))} under {gold_root}"
         )
 
     if not frames:
-        if existing_legacy_paths:
-            frames = [pd.read_parquet(path) for path in existing_legacy_paths]
+        if legacy_path.exists():
+            frames = [pd.read_parquet(legacy_path)]
         else:
             raise FileNotFoundError(
-                f"No label source found at gold roots {gold_roots} or legacy paths {legacy_paths}"
+                f"No label source found at {gold_root} or legacy path {legacy_path}"
             )
 
     labels = pd.concat(frames, ignore_index=True)
@@ -319,16 +310,6 @@ def _season_partition_candidates(season: int | str) -> list[str]:
         start = label.split("-", 1)[0]
         if start and start not in parts:
             parts.append(start)
-    # Resilience fallback: some recovery backfills were written to calendar-year
-    # partitions (season+1) while downstream consumers expect season-start year.
-    try:
-        numeric = int(parts[0])
-    except ValueError:
-        numeric = None
-    if numeric is not None:
-        spillover = str(numeric + 1)
-        if spillover not in parts:
-            parts.append(spillover)
     return parts
 
 
