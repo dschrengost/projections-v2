@@ -31,6 +31,9 @@ MIN_FPTS_FOR_FPPM = 1.0
 DK_LINEUP_SIZE = 8
 FLOOR_MINUTES = 1.0
 FLOOR_FPTS = 1.0
+OWNERSHIP_REBALANCE_MIN_RATIO = 0.15
+OWNERSHIP_REBALANCE_MAX_RATIO = 6.0
+OWNERSHIP_REBALANCE_EXPONENT = 1.0
 
 
 def _normalize_player_id(value: object) -> str:
@@ -270,6 +273,47 @@ def compute_fppm(
     return DEFAULT_FPPM, True
 
 
+def _rebalance_effective_ownership(
+    df: pd.DataFrame,
+    *,
+    lineup_size: int = DK_LINEUP_SIZE,
+) -> pd.DataFrame:
+    """Shift ownership by effective-vs-model FPTS while preserving slate mass."""
+    del lineup_size  # Preserve observed slate mass instead of forcing an external target.
+
+    model_own = pd.to_numeric(df.get("model_own"), errors="coerce").fillna(0.0).clip(lower=0.0)
+    model_total = float(model_own.sum())
+    if model_total <= 0.0:
+        return df
+
+    model_fpts = pd.to_numeric(df.get("model_fpts"), errors="coerce").fillna(0.0).clip(lower=0.0)
+    effective_fpts = pd.to_numeric(df.get("effective_fpts"), errors="coerce").fillna(0.0).clip(lower=0.0)
+
+    ratio = np.ones(len(df), dtype=np.float64)
+    model_vals = model_fpts.to_numpy(dtype=np.float64)
+    effective_vals = effective_fpts.to_numpy(dtype=np.float64)
+
+    stable_mask = model_vals > FLOOR_FPTS
+    ratio[stable_mask] = effective_vals[stable_mask] / model_vals[stable_mask]
+
+    # When baseline FPTS is near zero, treat effective_fpts as an absolute lift proxy.
+    low_baseline_mask = (~stable_mask) & (effective_vals > 0.0)
+    ratio[low_baseline_mask] = effective_vals[low_baseline_mask] / FLOOR_FPTS
+
+    ratio = np.clip(ratio, OWNERSHIP_REBALANCE_MIN_RATIO, OWNERSHIP_REBALANCE_MAX_RATIO)
+    if OWNERSHIP_REBALANCE_EXPONENT != 1.0:
+        ratio = np.power(ratio, OWNERSHIP_REBALANCE_EXPONENT)
+
+    weighted_own = model_own.to_numpy(dtype=np.float64) * ratio
+    weighted_total = float(np.nansum(weighted_own))
+    if not np.isfinite(weighted_total) or weighted_total <= 0.0:
+        return df
+
+    scale = model_total / weighted_total
+    df["effective_own"] = weighted_own * scale
+    return df
+
+
 def summarize_worlds(
     *,
     fpts_matrix: np.ndarray,
@@ -401,8 +445,6 @@ def apply_strategy_overrides(
     `adjusted_summaries` should come from adjusted worlds when available.
     Without worlds, a mean-based fallback is used.
     """
-    del ownership_mode, lineup_size  # strategy overrides do not mutate ownership in v1
-
     df = player_df.copy()
 
     fpts_col = _find_col(
@@ -530,6 +572,12 @@ def apply_strategy_overrides(
         df.loc[idx, "effective_fpts"] = max(0.0, float(effective_fpts))
         df.loc[idx, "used_fppm_fallback"] = bool(minutes_delta is not None and used_fallback)
         df.loc[idx, "strategy_override_source"] = "fallback"
+
+    ownership_mode_n = str(ownership_mode or "renormalize").strip().lower()
+    if ownership_mode_n not in {"raw", "renormalize"}:
+        ownership_mode_n = "renormalize"
+    if ownership_mode_n == "renormalize" and bool(df["has_override"].any()):
+        df = _rebalance_effective_ownership(df, lineup_size=lineup_size)
 
     df["fppm"] = df.apply(
         lambda row: row["effective_fpts"] / row["effective_minutes"] if float(row["effective_minutes"]) > 0 else DEFAULT_FPPM,

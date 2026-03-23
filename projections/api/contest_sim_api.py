@@ -497,6 +497,7 @@ def _load_player_ownership(
     site: str = "dk",
     run_id: str | None = None,
     draft_group_id: int | None = None,
+    use_strategy_overrides: bool = False,
 ) -> Dict[str, float]:
     """Load player_id -> ownership % mapping for contest-sim dupe penalties."""
     if draft_group_id is not None:
@@ -508,7 +509,7 @@ def _load_player_ownership(
                 site=site_norm,
                 run_id=run_id,
                 data_root=paths.data_path(),
-                use_user_overrides=False,
+                use_user_overrides=bool(use_strategy_overrides),
                 ownership_mode="renormalize",
             )
             result = {
@@ -1132,6 +1133,7 @@ async def run_simulation(request: ContestSimRequest):
                 site=site_norm,
                 run_id=request.run_id,
                 draft_group_id=effective_draft_group_id,
+                use_strategy_overrides=bool(request.use_strategy_overrides),
             )
             if use_dupe_ownership
             else {}
@@ -1539,6 +1541,7 @@ async def select_portfolio(request: PortfolioSelectionRequest):
         site=source_site,
         run_id=str(source_run_id) if source_run_id else None,
         draft_group_id=int(draft_group_id) if draft_group_id is not None else None,
+        use_strategy_overrides=bool(run_request.get("use_strategy_overrides", False)),
     )
 
     results = _backfill_tail_metrics([dict(r) for r in raw_results])

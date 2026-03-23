@@ -31,6 +31,27 @@ def test_load_player_ownership_uses_slate_player_pool(monkeypatch) -> None:
     assert captured["game_date"] == "2026-02-28"
     assert captured["draft_group_id"] == 222222
     assert captured["run_id"] == "20260228T180002Z"
+    assert captured["use_user_overrides"] is False
+    assert ownership == {"2": 42.5}
+
+
+def test_load_player_ownership_uses_strategy_overrides_when_enabled(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_build_player_pool(**kwargs):
+        captured.update(kwargs)
+        return [{"player_id": "2", "own_proj": 42.5}]
+
+    monkeypatch.setattr(contest_sim_api, "build_player_pool", fake_build_player_pool)
+
+    ownership = contest_sim_api._load_player_ownership(
+        "2026-02-28",
+        run_id="20260228T180002Z",
+        draft_group_id=222222,
+        use_strategy_overrides=True,
+    )
+
+    assert captured["use_user_overrides"] is True
     assert ownership == {"2": 42.5}
 
 

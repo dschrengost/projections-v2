@@ -1323,7 +1323,8 @@ def build_player_pool(
         include_games: If set, only include players from these games (e.g., ["MIN@DAL", "LAL@GSW"])
         exclude_games: If set, exclude players from these games
         use_user_overrides: Legacy flag name for strategy overrides
-        ownership_mode: Included for backwards compatibility; ownership is unchanged in v1
+        ownership_mode: "raw" keeps model ownership; "renormalize" rebalances ownership
+            when strategy overrides are enabled.
         include_unmatched_salaries: If True, keep salary rows even when projections don't match.
         allow_zero_projections: If True, include players with missing/zero projection (proj=0.0).
         exclude_inactive_players: Legacy flag; strategy overrides do not mark players out.

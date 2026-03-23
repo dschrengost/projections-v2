@@ -184,3 +184,58 @@ def test_apply_strategy_overrides_to_worlds_matches_float_like_player_index() ->
     assert adjusted_minutes is not None
     np.testing.assert_allclose(adjusted_minutes[:, 0], np.array([15.0, 25.0, 0.0]))
     assert diagnostics["matched_override_count"] == 1
+
+
+def test_apply_strategy_overrides_rebalances_ownership_when_renormalize() -> None:
+    overrides = strategy_overrides.SlateStrategyOverrides(
+        game_date="2026-03-01",
+        draft_group_id=123,
+        overrides={
+            "1": strategy_overrides.PlayerStrategyOverride(
+                player_id="1",
+                fpts_delta=12.0,
+            )
+        },
+    )
+    df = pd.DataFrame(
+        [
+            {"player_id": "1", "proj_fpts": 12.0, "minutes": 24.0, "pred_own_pct": 25.0},
+            {"player_id": "2", "proj_fpts": 24.0, "minutes": 32.0, "pred_own_pct": 30.0},
+            {"player_id": "3", "proj_fpts": 18.0, "minutes": 28.0, "pred_own_pct": 35.0},
+        ]
+    )
+
+    out = strategy_overrides.apply_strategy_overrides(df, overrides, ownership_mode="renormalize")
+
+    own_before = float(out["model_own"].sum())
+    own_after = float(out["effective_own"].sum())
+    assert abs(own_after - own_before) < 1e-9
+    assert float(out.loc[out["player_id"] == "1", "effective_own"].iloc[0]) > 25.0
+    assert float(out.loc[out["player_id"] == "2", "effective_own"].iloc[0]) < 30.0
+    assert float(out.loc[out["player_id"] == "3", "effective_own"].iloc[0]) < 35.0
+
+
+def test_apply_strategy_overrides_keeps_ownership_raw_mode() -> None:
+    overrides = strategy_overrides.SlateStrategyOverrides(
+        game_date="2026-03-01",
+        draft_group_id=123,
+        overrides={
+            "1": strategy_overrides.PlayerStrategyOverride(
+                player_id="1",
+                fpts_delta=12.0,
+            )
+        },
+    )
+    df = pd.DataFrame(
+        [
+            {"player_id": "1", "proj_fpts": 12.0, "minutes": 24.0, "pred_own_pct": 25.0},
+            {"player_id": "2", "proj_fpts": 24.0, "minutes": 32.0, "pred_own_pct": 30.0},
+            {"player_id": "3", "proj_fpts": 18.0, "minutes": 28.0, "pred_own_pct": 35.0},
+        ]
+    )
+
+    out = strategy_overrides.apply_strategy_overrides(df, overrides, ownership_mode="raw")
+    np.testing.assert_allclose(
+        out["effective_own"].to_numpy(dtype=float),
+        out["model_own"].to_numpy(dtype=float),
+    )
