@@ -32,10 +32,10 @@ deployments:
     promote_pointers: true
     replay_mode: false
     gtv2_props_uplift_scope: all_players
-    # Recovery default: run locally (CPU) unless Triton is explicitly re-enabled.
-    # When Triton is back online, set gtv2_inference_backend=triton and gtv2_device=cuda:0.
+    # Default: auto-select inference backend; `config/gtv2_inference_server.json`
+    # controls whether Triton is considered enabled.
     gtv2_inference_backend: auto
-    gtv2_device: cpu
+    gtv2_device: cuda:0
     gtv2_triton_timeout_seconds: 600.0
     gtv2_world_chunk_size: 5000
     gtv2_make_model_mode: beta_binomial_all
