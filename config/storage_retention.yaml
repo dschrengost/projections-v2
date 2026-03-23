@@ -25,4 +25,4 @@ reduced_persistence:
 
 families:
   - gtv2_worlds
-  - sim_v2_worlds_fpts_v2
+  # sim_v2 is legacy; keep it out of retention automation by default.

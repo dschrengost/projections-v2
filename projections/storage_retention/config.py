@@ -44,7 +44,8 @@ class StorageRetentionPolicy:
     guard: GuardPolicy = GuardPolicy()
     retention: RetentionPolicy = RetentionPolicy()
     reduced_persistence: ReducedPersistencePolicy = ReducedPersistencePolicy()
-    families: tuple[str, ...] = ("gtv2_worlds", "sim_v2_worlds_fpts_v2")
+    # sim_v2 is legacy; keep defaults focused on the active GTV2 worlds family.
+    families: tuple[str, ...] = ("gtv2_worlds",)
 
 
 def _to_bool(value: Any, default: bool) -> bool:
@@ -73,14 +74,14 @@ def load_storage_retention_policy(config_path: Path | None = None) -> StorageRet
     guard_raw = payload.get("guard") or {}
     retention_raw = payload.get("retention") or {}
     rp_raw = payload.get("reduced_persistence") or {}
-    families_raw = payload.get("families") or ["gtv2_worlds", "sim_v2_worlds_fpts_v2"]
+    families_raw = payload.get("families") or ["gtv2_worlds"]
     families: tuple[str, ...]
     if isinstance(families_raw, list):
         families = tuple(str(v).strip() for v in families_raw if str(v).strip())
     else:
-        families = ("gtv2_worlds", "sim_v2_worlds_fpts_v2")
+        families = ("gtv2_worlds",)
     if not families:
-        families = ("gtv2_worlds", "sim_v2_worlds_fpts_v2")
+        families = ("gtv2_worlds",)
 
     guard = GuardPolicy(
         hot_warn_free_gb=float(guard_raw.get("hot_warn_free_gb", 150.0)),

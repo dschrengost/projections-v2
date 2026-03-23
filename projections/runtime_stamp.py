@@ -40,6 +40,32 @@ DEFAULT_CONFIG_PATHS: dict[str, str] = {
 PROD_REPO_PATH = Path("/home/daniel/prod/projections-v2")
 
 
+def _try_read_deploy_info(*, prod_repo: Path) -> dict[str, Any] | None:
+    """Best-effort load of PROD .deploy_info (DEV->PROD rsync provenance).
+
+    PROD does not include `.git`, so runtime stamps should fall back to this file
+    when present to avoid reporting `git_sha=unknown`.
+    """
+
+    path = prod_repo / ".deploy_info"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        resolved = path.expanduser().resolve()
+        root_resolved = root.expanduser().resolve()
+        return resolved == root_resolved or resolved.is_relative_to(root_resolved)
+    except (ValueError, OSError):
+        return False
+
+
 @dataclass
 class RuntimeStamp:
     """Immutable snapshot of runtime environment at startup."""
@@ -254,8 +280,18 @@ def collect_runtime_stamp(
     Returns:
         RuntimeStamp with all captured info.
     """
-    # Find git repo root
+    # Find git repo root (DEV) or infer deployed SHA via .deploy_info (PROD).
     repo_root = _find_git_repo_root(project_root)
+
+    deploy_info: dict[str, Any] | None = None
+    if repo_root is None:
+        root_hint = (
+            Path(project_root).expanduser().resolve()
+            if project_root is not None
+            else Path.cwd()
+        )
+        if _is_under(root_hint, PROD_REPO_PATH) or _is_under(Path.cwd(), PROD_REPO_PATH):
+            deploy_info = _try_read_deploy_info(prod_repo=PROD_REPO_PATH)
 
     # Resolve config paths
     resolved_configs: dict[str, Path] = {}
@@ -274,10 +310,28 @@ def collect_runtime_stamp(
             env_flags[key] = val
 
     return RuntimeStamp(
-        git_sha=_git_sha(repo_root) if repo_root else "unknown",
-        git_dirty=_git_dirty(repo_root) if repo_root else False,
-        git_repo_root=str(repo_root) if repo_root else None,
-        git_branch=_git_branch(repo_root) if repo_root else "unknown",
+        git_sha=(
+            str(deploy_info.get("source_sha") or "unknown")
+            if repo_root is None and deploy_info is not None
+            else (_git_sha(repo_root) if repo_root else "unknown")
+        ),
+        git_dirty=(
+            bool(deploy_info.get("source_dirty", False))
+            if repo_root is None and deploy_info is not None
+            else (_git_dirty(repo_root) if repo_root else False)
+        ),
+        git_repo_root=(
+            str(deploy_info.get("source_repo") or "")
+            if repo_root is None
+            and deploy_info is not None
+            and str(deploy_info.get("source_repo") or "").strip()
+            else (str(repo_root) if repo_root else None)
+        ),
+        git_branch=(
+            str(deploy_info.get("source_branch") or "unknown")
+            if repo_root is None and deploy_info is not None
+            else (_git_branch(repo_root) if repo_root else "unknown")
+        ),
         python_executable=sys.executable,
         python_version=sys.version.split()[0],
         cwd=os.getcwd(),

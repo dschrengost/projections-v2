@@ -86,6 +86,33 @@ class TestCollectRuntimeStamp:
         assert "test_config" in stamp.config_paths
         assert str(config_file) == stamp.config_paths["test_config"]
 
+    def test_prod_deploy_info_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify PROD stamps fall back to .deploy_info when .git is absent."""
+        prod_root = tmp_path / "prod" / "projections-v2"
+        prod_root.mkdir(parents=True)
+        (prod_root / ".deploy_info").write_text(
+            json.dumps(
+                {
+                    "deployed_at": "2026-03-23T03:28:19Z",
+                    "source_sha": "deadbeef123",
+                    "source_branch": "main",
+                    "source_dirty": False,
+                    "source_repo": "/home/daniel/projects/projections-v2",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        # Patch module constant so we don't depend on the real /home/daniel/prod path.
+        monkeypatch.setattr("projections.runtime_stamp.PROD_REPO_PATH", prod_root)
+        monkeypatch.chdir(prod_root)
+
+        stamp = collect_runtime_stamp(entrypoint="test", project_root=prod_root)
+        assert stamp.git_sha == "deadbeef123"
+        assert stamp.git_branch == "main"
+        assert stamp.git_dirty is False
+        assert stamp.git_repo_root == "/home/daniel/projects/projections-v2"
+
 
 class TestEnforceCleanTree:
     """Tests for enforce_clean_tree function."""
