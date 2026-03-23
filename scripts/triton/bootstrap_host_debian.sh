@@ -35,38 +35,52 @@ need_cmd() {
 
 need_cmd apt-get
 need_cmd curl
-need_cmd gpg
 
 echo "[bootstrap] host=$(hostname) distro=$( . /etc/os-release; echo ${PRETTY_NAME} )"
 echo "[bootstrap] target_user=${TARGET_USER}"
 
-apt_update() {
-  # Debian 13 (apt 3.x + sqv) rejects some third-party repos whose signing keys
-  # rely on SHA1 certifications. NVIDIA's debian12 CUDA repo currently hits this.
+cleanup_nvidia_apt_sources() {
+  # If a previous bootstrap attempt left NVIDIA/CUDA repo stubs behind, apt (3.x +
+  # sqv) can fail hard during `apt-get update` before we even get to the install
+  # steps. Remove them by default so the script can be rerun safely.
   #
-  # We keep a best-effort strict update first, then retry allowing weak repos only
-  # when necessary. This preserves normal security posture for Debian repos while
-  # still enabling one-time installation of nvidia-container-toolkit.
-  if apt-get update -y; then
+  # Set KEEP_NVIDIA_APT_REPO=1 to keep any existing NVIDIA-related repo entries.
+  if [[ "${KEEP_NVIDIA_APT_REPO:-0}" == "1" ]]; then
     return 0
   fi
-  echo "[bootstrap] WARNING: apt update failed; retrying with AllowWeakRepositories=1"
-  if apt-get -o Acquire::AllowWeakRepositories=true update -y; then
+
+  local f base
+  shopt -s nullglob
+  for f in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    base="$(basename "$f")"
+    if [[ "$base" =~ (nvidia|cuda|libnvidia|triton) ]]; then
+      rm -f "$f" || true
+      continue
+    fi
+    if grep -Eq 'developer\.download\.nvidia\.com|nvidia\.github\.io|libnvidia-container|compute/cuda/repos' "$f" 2>/dev/null; then
+      rm -f "$f" || true
+      continue
+    fi
+  done
+  for f in /etc/apt/preferences.d/*nvidia* /etc/apt/preferences.d/*cuda*; do
+    rm -f "$f" || true
+  done
+  shopt -u nullglob
+}
+
+cleanup_nvidia_apt_sources
+
+apt_update() {
+  # Keep the normal security posture for Debian repos. If this fails, it's
+  # typically because there is still a broken third-party repo configured.
+  if apt-get update -y; then
     return 0
   fi
   return 1
 }
 
 apt_install() {
-  # Use the same weak-repo retry strategy for installs.
-  if apt-get install -y --no-install-recommends "$@"; then
-    return 0
-  fi
-  echo "[bootstrap] WARNING: apt install failed; retrying with AllowWeakRepositories=1"
-  if apt-get -o Acquire::AllowWeakRepositories=true install -y --no-install-recommends "$@"; then
-    return 0
-  fi
-  return 1
+  apt-get install -y --no-install-recommends "$@"
 }
 
 echo "[bootstrap] apt update"
@@ -96,44 +110,30 @@ echo "[bootstrap] installing nvidia driver + nvidia-smi (debian non-free)"
 apt_install nvidia-driver nvidia-smi
 
 # NVIDIA Container Toolkit:
-# GitHub pages repo endpoints are unreliable in some environments; use the
-# CUDA repo. Debian 13 repo may not always carry container toolkit packages,
-# so we default to the Debian 12 CUDA repo which is known to include them.
+# Debian (including trixie) does not ship `nvidia-container-toolkit` in the main
+# archive, so we install it from NVIDIA's CUDA repo.
+#
+# Debian 13 (apt 3.x + sqv) rejects the CUDA repo signing key chain due to SHA1
+# certifications (policy cutoff 2026-02-01). To keep the host's default security
+# posture, we:
+# 1) Run a strict `apt-get update` against Debian repos (above).
+# 2) Temporarily add the NVIDIA repo as `trusted=yes` for a one-time install.
+# 3) Remove the repo list entry after install (unless KEEP_NVIDIA_APT_REPO=1).
 CUDA_REPO_SUITE="${CUDA_REPO_SUITE:-debian12}"
 CUDA_REPO_ARCH="${CUDA_REPO_ARCH:-x86_64}"
 CUDA_REPO_BASE="https://developer.download.nvidia.com/compute/cuda/repos/${CUDA_REPO_SUITE}/${CUDA_REPO_ARCH}"
 CUDA_LIST_PATH="/etc/apt/sources.list.d/nvidia-cuda.list"
-CUDA_KEYRING_PATH="/usr/share/keyrings/nvidia-cuda-archive-keyring.gpg"
 
 echo "[bootstrap] configuring nvidia container toolkit apt repo (suite=${CUDA_REPO_SUITE})"
-# Key filename differs across suites; try known candidates.
-CUDA_KEY_URL=""
-for candidate in 3bf863cc.pub 8793F200.pub; do
-  if curl -fsSI "${CUDA_REPO_BASE}/${candidate}" >/dev/null 2>&1; then
-    CUDA_KEY_URL="${CUDA_REPO_BASE}/${candidate}"
-    break
-  fi
-done
-if [[ -z "${CUDA_KEY_URL}" ]]; then
-  echo "[bootstrap] error: could not locate CUDA repo key under ${CUDA_REPO_BASE}" >&2
-  echo "[bootstrap] try setting CUDA_REPO_SUITE=debian12 explicitly." >&2
-  exit 1
-fi
-echo "[bootstrap] using CUDA repo key: ${CUDA_KEY_URL}"
-curl -fsSL "${CUDA_KEY_URL}" | gpg --dearmor -o "${CUDA_KEYRING_PATH}"
-chmod 0644 "${CUDA_KEYRING_PATH}"
 cat >"${CUDA_LIST_PATH}" <<EOF
-deb [signed-by=${CUDA_KEYRING_PATH}] ${CUDA_REPO_BASE}/ /
-EOF
-
-if ! apt_update; then
-  echo "[bootstrap] WARNING: NVIDIA repo signature rejected by apt policy."
-  echo "[bootstrap] WARNING: falling back to trusted=yes for one-time toolkit install."
-  cat >"${CUDA_LIST_PATH}" <<EOF
 deb [trusted=yes] ${CUDA_REPO_BASE}/ /
 EOF
-  apt-get update -y
-fi
+
+echo "[bootstrap] apt update (allowing insecure repo for NVIDIA toolkit install only)"
+apt-get \
+  -o Acquire::AllowInsecureRepositories=true \
+  -o Acquire::AllowDowngradeToInsecureRepositories=true \
+  update -y
 
 if ! apt_install nvidia-container-toolkit; then
   echo "[bootstrap] error: failed to install nvidia-container-toolkit" >&2
