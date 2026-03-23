@@ -5715,6 +5715,14 @@ def generate_worlds_gtv2_live_task(
                 "Dropped invalid world rows after repairs before publish: %s",
                 world_key_report_post,
             )
+        worlds_df, world_contract_repair_report_post_sanitize = (
+            _repair_world_frame_contract_fields(worlds_df)
+        )
+        if bool(world_contract_repair_report_post_sanitize.get("applied")):
+            logger.warning(
+                "Applied post-sanitize world contract repair safety pass before publish: %s",
+                world_contract_repair_report_post_sanitize,
+            )
         _atomic_write_validated_parquet(
             worlds_df,
             worlds_path,
@@ -5761,6 +5769,9 @@ def generate_worlds_gtv2_live_task(
             "props_uplift_calibration": props_uplift_report,
             "world_realism_controls": world_realism_report,
             "world_contract_field_repair": world_contract_repair_report,
+            "world_contract_field_repair_post_sanitize": (
+                world_contract_repair_report_post_sanitize
+            ),
             "created_at": _utc_now_iso(),
         }
         if backend == "triton":
@@ -6215,6 +6226,9 @@ def materialize_unified_run_artifacts_task(
             random_seed=int(random_seed),
         )
     )
+    merged_worlds, world_contract_repair_report_post_sanitize = _repair_world_frame_contract_fields(
+        merged_worlds
+    )
     _atomic_write_validated_parquet(
         merged_worlds,
         worlds_dir / f"run={run_id}" / "worlds.parquet",
@@ -6290,6 +6304,9 @@ def materialize_unified_run_artifacts_task(
         "props_uplift_calibration": props_uplift_report,
         "world_realism_controls": world_realism_report,
         "world_contract_field_repair": world_contract_repair_report,
+        "world_contract_field_repair_post_sanitize": (
+            world_contract_repair_report_post_sanitize
+        ),
         "created_at": _utc_now_iso(),
     }
     world_summary_path.write_text(
