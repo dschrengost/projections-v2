@@ -2314,15 +2314,15 @@ def _factorize_int_key_arrays_preserve_order(
         empty_uniques = [np.array([], dtype=np.int64) for _ in key_arrays]
         return empty_codes, empty_uniques
 
-    sorted_codes = np.cumsum(unique_mask, dtype=np.int64) - 1
+    group_ends = np.r_[group_starts[1:], row_count]
     first_positions = np.minimum.reduceat(sort_order, group_starts)
     first_seen_order = np.argsort(first_positions, kind="mergesort")
 
-    remap = np.empty(len(group_starts), dtype=np.int64)
-    remap[first_seen_order] = np.arange(len(group_starts), dtype=np.int64)
-
     inverse = np.empty(row_count, dtype=np.int64)
-    inverse[sort_order] = remap[sorted_codes]
+    for new_code, sorted_group_idx in enumerate(first_seen_order):
+        start = int(group_starts[sorted_group_idx])
+        end = int(group_ends[sorted_group_idx])
+        inverse[sort_order[start:end]] = int(new_code)
 
     unique_key_arrays = [
         sorted_arrays[idx][group_starts][first_seen_order].astype(np.int64, copy=False)

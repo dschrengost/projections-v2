@@ -1819,6 +1819,24 @@ def test_factorize_int_key_arrays_preserve_order_stress_codes_stay_in_bounds() -
         assert int(codes[idx]) == first_seen[key]
 
 
+def test_factorize_int_key_arrays_preserve_order_many_groups() -> None:
+    group_count = 50_475
+    world_idx = np.arange(group_count, dtype=np.int64)
+    game_id = np.where(world_idx % 2 == 0, 22500922, 22500963).astype(np.int64, copy=False)
+
+    world_idx_arr = np.repeat(world_idx, 2)
+    game_id_arr = np.repeat(game_id, 2)
+
+    codes, uniques = _factorize_int_key_arrays_preserve_order(world_idx_arr, game_id_arr)
+
+    assert len(codes) == len(world_idx_arr)
+    assert len(uniques) == 2
+    assert len(uniques[0]) == group_count
+    assert int(codes.min()) == 0
+    assert int(codes.max()) == group_count - 1
+    assert codes[:6].tolist() == [0, 0, 1, 1, 2, 2]
+
+
 def test_repair_world_frame_contract_fields_normalizes_game_id_and_makes() -> None:
     worlds = pd.DataFrame(
         {
