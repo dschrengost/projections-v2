@@ -6145,8 +6145,8 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     )
     scope_report["target_row_count_after"] = int(len(target_worlds))
 
-    merged_worlds = pd.concat(
-        [untouched_worlds, target_worlds], ignore_index=True, sort=False
+    merged_worlds = _concat_frames_without_pandas_concat(
+        [untouched_worlds, target_worlds]
     )
     merged_worlds = _sort_for_stable_write(merged_worlds)
 
@@ -6287,6 +6287,22 @@ def materialize_unified_run_artifacts_task(
     merged_worlds, world_contract_repair_report_post_sanitize = _repair_world_frame_contract_fields(
         merged_worlds
     )
+    merged_worlds, world_key_report_postprocess = _sanitize_frame_to_expected_keys(
+        merged_worlds,
+        expected_keys_df=expected_feature_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="merged worlds postprocess",
+    )
+    if (
+        world_key_report_postprocess["dropped_null_key_rows"] > 0
+        or world_key_report_postprocess["dropped_unexpected_key_rows"] > 0
+    ):
+        logger.warning(
+            "materialize postprocess world key sanitize dropped rows: "
+            "null_key_rows=%d unexpected_key_rows=%d",
+            int(world_key_report_postprocess["dropped_null_key_rows"]),
+            int(world_key_report_postprocess["dropped_unexpected_key_rows"]),
+        )
     _atomic_write_validated_parquet(
         merged_worlds,
         worlds_dir / f"run={run_id}" / "worlds.parquet",
@@ -6401,6 +6417,7 @@ def materialize_unified_run_artifacts_task(
         "key_sanitization": {
             "scores": score_key_report,
             "worlds": world_key_report,
+            "worlds_postprocess": world_key_report_postprocess,
             "world_projections": world_projection_key_report,
             "unified_projections": final_projection_key_report,
         },
