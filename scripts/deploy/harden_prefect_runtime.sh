@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 API_URL="${PREFECT_API_URL:-http://127.0.0.1:4200/api}"
 
+PREFECT_ENV_DIR="${HOME}/.config/projections"
+PREFECT_ENV_FILE="${PREFECT_ENV_DIR}/prefect-server.env"
+
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "[prefect-harden] missing required command: $1" >&2
@@ -15,6 +18,61 @@ need_cmd() {
 need_cmd curl
 need_cmd systemctl
 need_cmd uv
+
+maybe_enable_postgres() {
+  # If Docker is available, prefer Postgres over SQLite for Prefect metadata.
+  if ! command -v docker >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "[prefect-harden] docker found but daemon not ready; skipping postgres bootstrap"
+    return 0
+  fi
+
+  local container="prefect-postgres"
+  local pg_user="prefect"
+  local pg_password="prefect"
+  local pg_db="prefect"
+  local pg_port="55432"
+  local pg_url="postgresql+asyncpg://${pg_user}:${pg_password}@127.0.0.1:${pg_port}/${pg_db}"
+
+  echo "[prefect-harden] ensuring ${container} container is running..."
+  if docker ps -a --format '{{.Names}}' | grep -qx "${container}"; then
+    docker start "${container}" >/dev/null
+  else
+    docker run -d \
+      --name "${container}" \
+      --restart unless-stopped \
+      -e "POSTGRES_USER=${pg_user}" \
+      -e "POSTGRES_PASSWORD=${pg_password}" \
+      -e "POSTGRES_DB=${pg_db}" \
+      -p "127.0.0.1:${pg_port}:5432" \
+      -v prefect-postgres-data:/var/lib/postgresql/data \
+      postgres:16-alpine >/dev/null
+  fi
+
+  for _ in $(seq 1 60); do
+    if docker exec "${container}" pg_isready -U "${pg_user}" -d "${pg_db}" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  if ! docker exec "${container}" pg_isready -U "${pg_user}" -d "${pg_db}" >/dev/null 2>&1; then
+    echo "[prefect-harden] WARNING: postgres readiness check failed; keeping existing DB config"
+    return 0
+  fi
+
+  echo "[prefect-harden] writing ${PREFECT_ENV_FILE} (Postgres)"
+  install -d -m 0755 "${PREFECT_ENV_DIR}"
+  cat >"${PREFECT_ENV_FILE}" <<EOF
+PREFECT_API_DATABASE_CONNECTION_URL=${pg_url}
+PREFECT_API_DATABASE_TIMEOUT=30.0
+PREFECT_API_DATABASE_CONNECTION_TIMEOUT=30.0
+EOF
+  chmod 0600 "${PREFECT_ENV_FILE}"
+}
+
+maybe_enable_postgres
 
 echo "[prefect-harden] restarting prefect-server.service (user unit)..."
 systemctl --user daemon-reload
