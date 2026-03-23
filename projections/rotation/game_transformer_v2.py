@@ -769,7 +769,9 @@ def build_game_level_examples(
     examples: list[GameLevelExample] = []
     grouped = df.groupby(["game_id_norm", "game_date"], sort=False).indices
     for (game_id_norm, game_date), idx in grouped.items():
-        idx_arr = np.asarray(idx, dtype=np.int64)
+        # Pandas may return a scalar index for singleton groups (version-dependent).
+        # Ensure we always index with a 1-D array so `df.iloc[...]` returns a DataFrame.
+        idx_arr = np.atleast_1d(np.asarray(idx, dtype=np.int64))
         game_df = df.iloc[idx_arr]
         home_id, away_id = _resolve_home_away_team_ids(game_df)
 

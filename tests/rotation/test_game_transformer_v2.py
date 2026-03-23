@@ -80,6 +80,42 @@ def _toy_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def test_build_game_level_examples_singleton_group_does_not_crash() -> None:
+    # Singleton game groups can appear in inference when the input features are
+    # malformed or heavily filtered. Pandas may represent `.groupby(...).indices`
+    # values as scalars for singleton groups depending on version, so the
+    # example builder must not assume an array-like index.
+    df = pd.DataFrame(
+        [
+            {
+                "game_id": 123,
+                "team_id": 10,
+                "player_id": 999,
+                "game_date": "2026-03-22",
+                "home_team_id": 10,
+                "away_team_id": 20,
+                "home_flag": 1,
+                "lineup_available": 1,
+                "f1": 1.0,
+                "minutes_label": 0.0,
+            }
+        ]
+    )
+    # Not enough rows to build a valid (home+away) game example. The important
+    # behavior is that we fail cleanly (ValueError) rather than crashing due to
+    # singleton group indexing behavior.
+    with pytest.raises(ValueError, match="No game-level examples were built"):
+        build_game_level_examples(
+            df,
+            feature_columns=["f1"],
+            feature_mean=np.array([0.0], dtype=np.float32),
+            feature_std=np.array([1.0], dtype=np.float32),
+            game_feature_columns=[],
+            team_feature_columns=[],
+            minutes_label_col="minutes_label",
+        )
+
+
 def test_build_game_level_examples_and_collate_shapes() -> None:
     df = _toy_frame()
     feature_columns = ["f1", "f2"]
