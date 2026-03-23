@@ -193,8 +193,8 @@ Services live in `infra/systemd/` and are installed to `~/.config/systemd/user/`
 
 Production stability assumes:
 
-1. Prefect metadata DB is Postgres (`prefect-postgres` on `127.0.0.1:55432`), not default SQLite.
-2. Server runtime resolves to PROD checkout and Python 3.11 (`/home/daniel/prod/projections-v2/.venv311`).
+1. Preferred: Prefect metadata DB is Postgres. Recovery baseline: SQLite on the data volume is acceptable temporarily.
+2. Server runtime resolves to PROD checkout and uses the PROD venv (`/home/daniel/prod/projections-v2/.venv`).
 3. Worker concurrency remains `1` with deployment collision strategy `CANCEL_NEW`.
 4. Live deployment schedule runs every 15 minutes (not 5 minutes).
 

@@ -98,11 +98,11 @@ rsync -av --delete $DRY_RUN \
     --exclude='*.egg-info' \
     --exclude='node_modules' \
     --exclude='web/minutes-dashboard/dist' \
-    --exclude='artifacts' \
-    --exclude='reports' \
-    --exclude='mlruns' \
-    --exclude='runs' \
-    --exclude='scratch' \
+    --exclude='/artifacts' \
+    --exclude='/reports' \
+    --exclude='/mlruns' \
+    --exclude='/runs' \
+    --exclude='/scratch' \
     --exclude='nohup.out' \
     --exclude='*.log' \
     --exclude='.DS_Store' \
@@ -128,8 +128,14 @@ _restart_dashboard_service_clean() {
     local port="$2"
 
     if ! systemctl --user cat "$service" >/dev/null 2>&1; then
-        echo "[deploy] WARNING: $service not found in user systemd; skipping dashboard restart."
-        return 0
+        echo "[deploy] WARNING: $service not found in user systemd."
+        if [[ -x "$DEV_REPO/scripts/deploy/install_minutes_dashboard_unit.sh" ]] && [[ "$service" == "$DASHBOARD_SERVICE" ]]; then
+            echo "[deploy] Installing $service from repo template..."
+            "$DEV_REPO/scripts/deploy/install_minutes_dashboard_unit.sh" >/dev/null
+        else
+            echo "[deploy] Skipping dashboard restart."
+            return 0
+        fi
     fi
 
     echo "[deploy] Restarting $service with orphan cleanup (port ${port})..."

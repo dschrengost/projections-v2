@@ -28,6 +28,7 @@ pip-wheel-metadata/
 .idea/
 .vscode/
 .serena/
+.claude/
 
 # -------------------------
 # Jupyter

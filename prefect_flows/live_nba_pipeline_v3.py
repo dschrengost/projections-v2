@@ -6608,6 +6608,41 @@ def nba_live_pipeline_v3_flow(
     )
     v3_run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Fail-closed storage guard to prevent runaway writes after incidents.
+    try:
+        from projections.storage_retention.config import load_storage_retention_policy
+        from projections.storage_retention.guard import ensure_storage_headroom_or_raise
+
+        storage_policy = load_storage_retention_policy()
+        guard_payload = ensure_storage_headroom_or_raise(
+            hot_root=data_root,
+            guard_policy=storage_policy.guard,
+        )
+        (v3_run_dir / "storage_guard.json").write_text(
+            json.dumps(guard_payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+        if (
+            storage_policy.reduced_persistence.enabled
+            and storage_policy.reduced_persistence.gtv2_max_worlds is not None
+            and int(sim_worlds) > int(storage_policy.reduced_persistence.gtv2_max_worlds)
+        ):
+            capped = int(storage_policy.reduced_persistence.gtv2_max_worlds)
+            logger.warning(
+                "Reduced persistence is enabled: capping sim_worlds from %s to %s",
+                int(sim_worlds),
+                capped,
+            )
+            sim_worlds = capped
+    except Exception as exc:  # noqa: BLE001
+        # Storage guard should hard-stop only when thresholds are violated.
+        # If policy loading/writes fail, keep the run going but record the incident.
+        (v3_run_dir / "storage_guard_error.txt").write_text(
+            f"{type(exc).__name__}: {exc}\n",
+            encoding="utf-8",
+        )
+
     try:
         writer_lock = writer_guard.PipelineWriterLock(data_root=data_root, run_id=run_id)
         writer_lock.__enter__()

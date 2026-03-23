@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "backend": "triton",
   "triton_endpoint": "localhost:18000",
   "model_name": "gtv2_scorer",
