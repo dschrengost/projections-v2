@@ -63,6 +63,37 @@ def _normalize_site(site: str | None) -> str:
         raise ValueError(f"Unsupported site '{site}'. Expected one of: {sorted(SUPPORTED_SITES)}")
     return value
 
+
+def _canonicalize_player_id(raw: object) -> str | None:
+    """Normalize player identifiers to stable string form (e.g. 1627742.0 -> '1627742')."""
+    if raw is None or pd.isna(raw):
+        return None
+
+    if isinstance(raw, (int, np.integer)):
+        return str(int(raw))
+
+    if isinstance(raw, (float, np.floating)):
+        value = float(raw)
+        if np.isnan(value):
+            return None
+        if value.is_integer():
+            return str(int(value))
+        return format(value, "f").rstrip("0").rstrip(".")
+
+    text = str(raw).strip()
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return None
+
+    if re.fullmatch(r"[+-]?\d+", text):
+        return str(int(text))
+    if re.fullmatch(r"[+-]?\d+\.0+", text):
+        try:
+            return str(int(float(text)))
+        except Exception:
+            return text
+
+    return text
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -1084,9 +1115,9 @@ def _overlay_ownership_columns(
                 own["_own_join_team"] = own[own_team_col].apply(_normalize_team)
                 join_cols.append("_own_join_team")
         elif "player_id" in base.columns and "player_id" in own.columns:
-            base["player_id"] = base["player_id"].astype(str)
-            own["player_id"] = own["player_id"].astype(str)
-            join_cols = ["player_id"]
+            base["_own_join_player_id"] = base["player_id"].map(_canonicalize_player_id)
+            own["_own_join_player_id"] = own["player_id"].map(_canonicalize_player_id)
+            join_cols = ["_own_join_player_id"]
         else:
             return pool_df
 
@@ -1119,7 +1150,12 @@ def _overlay_ownership_columns(
         merged = merged.drop(columns=["pred_own_pct__own"])
 
     return merged.drop(
-        columns=["_own_join_dk_player_id", "_own_join_name", "_own_join_team"],
+        columns=[
+            "_own_join_dk_player_id",
+            "_own_join_name",
+            "_own_join_team",
+            "_own_join_player_id",
+        ],
         errors="ignore",
     )
 
@@ -1202,7 +1238,10 @@ def _build_model_value_maps(
     if base.empty:
         return {}, {}
 
-    base["player_id"] = base["player_id"].astype(str)
+    base["_canonical_player_id"] = base["player_id"].map(_canonicalize_player_id)
+    base = base.loc[base["_canonical_player_id"].notna()].copy()
+    if base.empty:
+        return {}, {}
     fpts_col = _projection_fpts_col(base, site=site)
     minutes_col = _projection_minutes_col(base)
 
@@ -1210,10 +1249,10 @@ def _build_model_value_maps(
     model_minutes_by_player: Dict[str, float] = {}
     if fpts_col:
         fpts_series = pd.to_numeric(base[fpts_col], errors="coerce").fillna(0.0)
-        model_fpts_by_player = dict(zip(base["player_id"], fpts_series.astype(float)))
+        model_fpts_by_player = dict(zip(base["_canonical_player_id"], fpts_series.astype(float)))
     if minutes_col:
         minutes_series = pd.to_numeric(base[minutes_col], errors="coerce").fillna(0.0)
-        model_minutes_by_player = dict(zip(base["player_id"], minutes_series.astype(float)))
+        model_minutes_by_player = dict(zip(base["_canonical_player_id"], minutes_series.astype(float)))
     return model_fpts_by_player, model_minutes_by_player
 
 
@@ -1609,10 +1648,10 @@ def build_player_pool(
 
     for _, row in merged.iterrows():
         # Get player_id (prefer projection's player_id, fall back to site player id)
-        player_id = row.get("player_id")
-        if player_id is None or pd.isna(player_id):
-            player_id = row.get(site_player_id_col) if site_player_id_col else None
-        if player_id is None or pd.isna(player_id):
+        player_id = _canonicalize_player_id(row.get("player_id"))
+        if player_id is None and site_player_id_col:
+            player_id = _canonicalize_player_id(row.get(site_player_id_col))
+        if player_id is None:
             logger.debug("Skipping row with no player_id or site id (site=%s)", site_norm)
             continue
 
@@ -1705,7 +1744,7 @@ def build_player_pool(
                 fd_id = str(fd_player_id)
 
         player = {
-            "player_id": str(player_id),
+            "player_id": player_id,
             "name": (row.get(sal_name_col) if pd.notna(row.get(sal_name_col)) else None)
             or (row.get(proj_name_col) if pd.notna(row.get(proj_name_col)) else None)
             or str(player_id),

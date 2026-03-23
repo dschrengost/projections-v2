@@ -99,3 +99,53 @@ def test_build_player_pool_derives_is_out_and_is_active_without_overrides(
 
     assert by_id["p3"]["is_out"] is False
     assert by_id["p3"]["is_active"] is False
+
+
+def test_build_player_pool_canonicalizes_numeric_player_ids(monkeypatch) -> None:
+    proj_df = pd.DataFrame(
+        [
+            {
+                "player_id": 1627742.0,
+                "player_name": "Brandon Ingram",
+                "team_tricode": "TOR",
+                "proj_fpts": 40.0,
+            }
+        ]
+    )
+    sal_df = pd.DataFrame(
+        [
+            {
+                "dk_player_id": 887665,
+                "display_name": "Brandon Ingram",
+                "positions": ["SG"],
+                "salary": 7800,
+                "team_abbrev": "TOR",
+                "status": None,
+                "is_disabled": False,
+                "game_matchup": "TOR@UTA",
+                "game_start_utc": datetime(2026, 3, 23, 1, 0, tzinfo=timezone.utc),
+            }
+        ]
+    )
+
+    monkeypatch.setattr(
+        optimizer_service,
+        "load_projections_for_date",
+        lambda *args, **kwargs: proj_df,
+    )
+    monkeypatch.setattr(
+        optimizer_service,
+        "load_salaries_for_date",
+        lambda *args, **kwargs: sal_df,
+    )
+
+    pool = optimizer_service.build_player_pool(
+        game_date="2026-03-23",
+        draft_group_id=144063,
+        site="dk",
+        use_user_overrides=False,
+        exclude_inactive_players=False,
+    )
+
+    assert len(pool) == 1
+    assert pool[0]["player_id"] == "1627742"

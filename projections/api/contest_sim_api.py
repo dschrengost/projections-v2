@@ -50,6 +50,35 @@ def _normalize_site(site: str | None) -> str:
     return site_norm
 
 
+def _canonicalize_player_id(raw: object) -> str | None:
+    """Normalize player identifiers to stable string form (e.g. 1627742.0 -> '1627742')."""
+    if raw is None:
+        return None
+
+    if isinstance(raw, (int, np.integer)):
+        return str(int(raw))
+
+    if isinstance(raw, (float, np.floating)):
+        value = float(raw)
+        if np.isnan(value):
+            return None
+        if value.is_integer():
+            return str(int(value))
+        return format(value, "f").rstrip("0").rstrip(".")
+
+    text = str(raw).strip()
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return None
+    if "." in text:
+        try:
+            value = float(text)
+            if np.isfinite(value) and value.is_integer():
+                return str(int(value))
+        except Exception:
+            pass
+    return text
+
+
 def _parse_position_tokens(raw: object) -> Set[str]:
     tokens: List[str] = []
     if isinstance(raw, (list, tuple, set)):
@@ -101,7 +130,11 @@ def _assign_lineup_slots(
 ) -> List[str]:
     slots = _slots_for_site(site)
     expected_size = len(slots)
-    players = [str(pid).strip() for pid in lineup if str(pid).strip()]
+    players: List[str] = []
+    for pid in lineup:
+        canonical = _canonicalize_player_id(pid)
+        if canonical:
+            players.append(canonical)
 
     if len(players) != expected_size:
         raise ValueError(
@@ -179,12 +212,17 @@ def _build_positions_lookup(
     )
     out: Dict[str, Set[str]] = {}
     for player in player_pool:
-        pid = str(player.get("player_id") or "").strip()
+        pid = _canonicalize_player_id(player.get("player_id"))
         if not pid:
             continue
         positions = _parse_position_tokens(player.get("positions"))
         if positions:
             out[pid] = positions
+            # Accept site identifiers as aliases when lineups are site-id keyed.
+            for alias_field in ("site_id", "dk_id", "fd_id"):
+                alias = _canonicalize_player_id(player.get(alias_field))
+                if alias:
+                    out.setdefault(alias, positions)
     return out
 
 
@@ -203,7 +241,7 @@ def _normalize_lineups_for_site(
     slots = _slots_for_site(site)
     expected_size = len(slots)
     for idx, lineup in enumerate(lineups):
-        n_players = len([str(pid).strip() for pid in lineup if str(pid).strip()])
+        n_players = len([pid for pid in (_canonicalize_player_id(raw) for raw in lineup) if pid])
         if n_players != expected_size:
             raise ValueError(
                 f"{context}[{idx}] must contain {expected_size} players for site={site}; got {n_players}"
@@ -213,7 +251,12 @@ def _normalize_lineups_for_site(
         if site == "fd":
             raise ValueError("draft_group_id is required for site=fd to validate FanDuel slot compliance")
         # For DK, preserve existing behavior when slate metadata isn't provided.
-        return [[str(pid).strip() for pid in lineup if str(pid).strip()] for lineup in lineups]
+        normalized_lineups: List[List[str]] = []
+        for lineup in lineups:
+            normalized_lineups.append(
+                [pid for pid in (_canonicalize_player_id(raw) for raw in lineup) if pid]
+            )
+        return normalized_lineups
 
     positions_by_player = _build_positions_lookup(
         game_date=game_date,
@@ -252,7 +295,7 @@ def _sample_lineup_player_ids(
         if max_lineups is not None and lineup_idx >= max_lineups:
             break
         for raw_pid in lineup:
-            pid = str(raw_pid).strip()
+            pid = _canonicalize_player_id(raw_pid)
             if not pid or pid in seen:
                 continue
             sampled.append(pid)
@@ -513,9 +556,9 @@ def _load_player_ownership(
                 ownership_mode="renormalize",
             )
             result = {
-                str(player["player_id"]): float(player["own_proj"])
+                _canonicalize_player_id(player.get("player_id")): float(player["own_proj"])
                 for player in pool
-                if player.get("own_proj") is not None
+                if _canonicalize_player_id(player.get("player_id")) and player.get("own_proj") is not None
             }
             if result:
                 logger.info(
@@ -537,7 +580,12 @@ def _load_player_ownership(
         df = load_projections_for_date(game_date, run_id=run_id, data_root=paths.data_path())
         if "player_id" in df.columns and "pred_own_pct" in df.columns:
             ownership = df.dropna(subset=["pred_own_pct"])
-            result = dict(zip(ownership["player_id"].astype(str), ownership["pred_own_pct"]))
+            result: Dict[str, float] = {}
+            for _, row in ownership.iterrows():
+                pid = _canonicalize_player_id(row.get("player_id"))
+                if not pid:
+                    continue
+                result[pid] = float(row.get("pred_own_pct"))
             if result:
                 logger.info("Loaded ownership for %d players from projections bundle", len(result))
                 return result
