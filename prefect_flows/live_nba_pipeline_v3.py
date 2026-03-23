@@ -2055,6 +2055,45 @@ def _sanitize_frame_to_expected_keys(
     )
 
 
+def _concat_frames_without_pandas_concat(
+    frames: Sequence[pd.DataFrame],
+) -> pd.DataFrame:
+    """Concatenate frames via NumPy arrays to avoid pandas concat segfaults."""
+    if not frames:
+        return pd.DataFrame()
+    if len(frames) == 1:
+        return frames[0].reset_index(drop=True)
+
+    all_cols: list[str] = []
+    seen_cols: set[str] = set()
+    row_counts: list[int] = []
+    for frame in frames:
+        row_counts.append(int(len(frame)))
+        for col in frame.columns:
+            col_name = str(col)
+            if col_name not in seen_cols:
+                seen_cols.add(col_name)
+                all_cols.append(col_name)
+
+    out_data: dict[str, np.ndarray] = {}
+    for col in all_cols:
+        pieces: list[np.ndarray] = []
+        for frame, row_count in zip(frames, row_counts, strict=False):
+            if col in frame.columns:
+                pieces.append(np.asarray(frame[col].to_numpy(copy=False)))
+            else:
+                pieces.append(np.full(row_count, np.nan, dtype=object))
+        try:
+            out_data[col] = np.concatenate(pieces, axis=0)
+        except Exception:
+            out_data[col] = np.concatenate(
+                [np.asarray(piece, dtype=object) for piece in pieces],
+                axis=0,
+            )
+
+    return pd.DataFrame(out_data, columns=all_cols)
+
+
 def _left_overlay_from_source_by_keys(
     base_df: pd.DataFrame,
     *,
@@ -5565,7 +5604,7 @@ def generate_worlds_gtv2_live_task(
                         except Exception:  # noqa: BLE001
                             continue
                 last_response = dict(response)
-            worlds_df = pd.concat(world_frames, ignore_index=True)
+            worlds_df = _concat_frames_without_pandas_concat(world_frames)
             contract_checks_seed = dict(contract_counter)
             device_for_summary = str(
                 last_response.get("device")
@@ -5611,11 +5650,7 @@ def generate_worlds_gtv2_live_task(
                 )
                 world_frames.append(df_batch)
                 contract_counter.update(checks)
-            worlds_df = (
-                pd.concat(world_frames, ignore_index=True)
-                if world_frames
-                else pd.DataFrame()
-            )
+            worlds_df = _concat_frames_without_pandas_concat(world_frames)
             contract_checks_seed = dict(contract_counter)
 
         if worlds_df.empty:

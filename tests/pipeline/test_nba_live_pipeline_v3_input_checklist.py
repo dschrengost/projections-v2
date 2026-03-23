@@ -14,6 +14,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _build_feature_input_checklist,
     _build_input_change_set,
     _build_publish_superseded_report,
+    _concat_frames_without_pandas_concat,
     _coerce_world_game_date,
     _factorize_int_key_arrays_preserve_order,
     _group_mean_by_keys_without_pandas_groupby,
@@ -1272,6 +1273,43 @@ def test_sanitize_frame_to_expected_keys_preserves_non_key_columns() -> None:
     assert cleaned["player_id"].tolist() == [100, 200, 300]
     assert cleaned["minutes"].tolist() == pytest.approx([240.0, 240.0, 240.0])
     assert cleaned["fg3m"].tolist() == pytest.approx([1.5, 2.5, 4.5])
+
+
+def test_concat_frames_without_pandas_concat_preserves_mixed_dtypes() -> None:
+    frame_a = pd.DataFrame(
+        {
+            "world_idx": [0, 0],
+            "player_id": [101, 102],
+            "minutes": [30.5, 28.0],
+            "tag": ["a", "b"],
+        }
+    )
+    frame_b = pd.DataFrame(
+        {
+            "world_idx": [1],
+            "player_id": [201],
+            "minutes": [32.25],
+            "tag": ["c"],
+            "extra_col": [99],
+        }
+    )
+
+    merged = _concat_frames_without_pandas_concat([frame_a, frame_b])
+
+    assert merged.columns.tolist() == [
+        "world_idx",
+        "player_id",
+        "minutes",
+        "tag",
+        "extra_col",
+    ]
+    assert merged["world_idx"].tolist() == [0, 0, 1]
+    assert merged["player_id"].tolist() == [101, 102, 201]
+    assert merged["minutes"].tolist() == pytest.approx([30.5, 28.0, 32.25])
+    assert merged["tag"].tolist() == ["a", "b", "c"]
+    assert pd.isna(merged.loc[0, "extra_col"])
+    assert pd.isna(merged.loc[1, "extra_col"])
+    assert merged.loc[2, "extra_col"] == 99
 
 
 def test_resample_extreme_game_worlds_avoids_pandas_multiindex_factorize(
