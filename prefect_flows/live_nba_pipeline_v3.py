@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import os
 import shutil
 import subprocess
@@ -2503,7 +2504,7 @@ def _merge_parquet_for_target_games(
                 "Int64"
             )
             previous_keep = previous_df.loc[~gids.isin(target_game_ids)].copy()
-        merged = pd.concat([previous_keep, current_df], ignore_index=True, sort=False)
+        merged = _concat_frames_without_pandas_concat([previous_keep, current_df])
     merged = _sort_for_stable_write(merged)
     required_cols = (
         ("game_id", "team_id", "player_id")
@@ -6186,6 +6187,11 @@ def materialize_unified_run_artifacts_task(
     target_ids = _normalize_game_ids(target_game_ids)
     if not target_ids:
         return {"mode": "no_target_games"}
+    try:
+        logger = get_run_logger()
+    except Exception:
+        logger = logging.getLogger(__name__)
+    stage_start = time.perf_counter()
 
     features_dir = data_root / "live" / FEATURES_ROOT / game_date
     scores_dir = data_root / "artifacts" / SCORES_ROOT / f"game_date={game_date}"
@@ -6220,6 +6226,17 @@ def materialize_unified_run_artifacts_task(
         ),
         target_game_ids=target_ids,
     )
+    logger.info(
+        "materialize stage complete: merge_inputs elapsed_sec=%.2f "
+        "features_rows=%d scores_rows=%d worlds_rows=%d final_rows=%d target_games=%d",
+        time.perf_counter() - stage_start,
+        int(len(merged_features)),
+        int(len(merged_scores)),
+        int(len(merged_worlds)),
+        int(len(merged_final)),
+        int(len(target_ids)),
+    )
+    stage_start = time.perf_counter()
 
     expected_feature_keys = merged_features.loc[:, ["game_id", "team_id", "player_id"]]
 
@@ -6234,6 +6251,12 @@ def materialize_unified_run_artifacts_task(
         scores_dir / f"run={run_id}" / "scores.parquet",
         required_cols=("game_date", "game_id", "team_id", "player_id"),
     )
+    logger.info(
+        "materialize stage complete: sanitize_scores elapsed_sec=%.2f rows=%d",
+        time.perf_counter() - stage_start,
+        int(len(merged_scores)),
+    )
+    stage_start = time.perf_counter()
 
     merged_worlds, world_key_report = _sanitize_frame_to_expected_keys(
         merged_worlds,
@@ -6269,11 +6292,45 @@ def materialize_unified_run_artifacts_task(
         worlds_dir / f"run={run_id}" / "worlds.parquet",
         required_cols=("world_idx", "game_id", "team_id", "player_id"),
     )
+    logger.info(
+        "materialize stage complete: sanitize_worlds elapsed_sec=%.2f rows=%d",
+        time.perf_counter() - stage_start,
+        int(len(merged_worlds)),
+    )
+    stage_start = time.perf_counter()
 
+    target_worlds_for_projection = _filter_to_target_games(merged_worlds, target_ids)
+    if target_worlds_for_projection.empty:
+        raise RuntimeError(
+            "materialize target-world projection recompute received empty target slice "
+            f"for target_game_ids={target_ids}"
+        )
     worlds_runtime = _gtv2_worlds_runtime()
-    merged_world_projections = worlds_runtime.summarize_worlds_to_projections(
-        merged_worlds,
+    target_world_projections = worlds_runtime.summarize_worlds_to_projections(
+        target_worlds_for_projection,
         sim_profile="game_transformer_v2",
+    )
+    merged_world_projections = _merge_parquet_for_target_games(
+        current_path=worlds_dir / f"run={run_id}" / "projections.parquet",
+        previous_path=_resolve_previous_run_file(
+            dataset_dir=worlds_dir, filename="projections.parquet"
+        ),
+        target_game_ids=target_ids,
+    )
+    projection_join_keys = ["game_id", "team_id", "player_id"]
+    target_projection_value_cols = [
+        col
+        for col in target_world_projections.columns
+        if col not in {"game_date", "game_id", "team_id", "player_id"}
+    ]
+    merged_world_projections = _left_overlay_from_source_by_keys(
+        merged_world_projections,
+        source_df=target_world_projections.loc[
+            :, projection_join_keys + target_projection_value_cols
+        ],
+        key_cols=projection_join_keys,
+        value_cols=target_projection_value_cols,
+        label="materialize_unified_run_artifacts_task/world_projection_target_overlay",
     )
     merged_world_projections, world_projection_key_report = _sanitize_frame_to_expected_keys(
         merged_world_projections,
@@ -6286,8 +6343,16 @@ def materialize_unified_run_artifacts_task(
         worlds_dir / f"run={run_id}" / "projections.parquet",
         required_cols=("game_date", "game_id", "team_id", "player_id"),
     )
+    logger.info(
+        "materialize stage complete: world_projections elapsed_sec=%.2f "
+        "target_world_rows=%d target_projection_rows=%d merged_projection_rows=%d",
+        time.perf_counter() - stage_start,
+        int(len(target_worlds_for_projection)),
+        int(len(target_world_projections)),
+        int(len(merged_world_projections)),
+    )
+    stage_start = time.perf_counter()
 
-    projection_join_keys = ["game_id", "team_id", "player_id"]
     projection_value_cols = [
         col
         for col in merged_world_projections.columns
@@ -6322,6 +6387,12 @@ def materialize_unified_run_artifacts_task(
         projections_dir / f"run={run_id}" / "projections.parquet",
         required_cols=("game_date", "game_id", "team_id", "player_id"),
     )
+    logger.info(
+        "materialize stage complete: finalize_overlay elapsed_sec=%.2f final_rows=%d",
+        time.perf_counter() - stage_start,
+        int(len(merged_final)),
+    )
+    stage_start = time.perf_counter()
 
     world_summary_path = worlds_dir / f"run={run_id}" / "world_contracts_summary.json"
     world_summary_payload = {
@@ -6347,6 +6418,11 @@ def materialize_unified_run_artifacts_task(
     world_summary_path.write_text(
         json.dumps(world_summary_payload, indent=2, sort_keys=True),
         encoding="utf-8",
+    )
+    logger.info(
+        "materialize stage complete: write_summary elapsed_sec=%.2f summary_path=%s",
+        time.perf_counter() - stage_start,
+        str(world_summary_path),
     )
     return {
         "mode": "merged",
