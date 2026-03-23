@@ -140,6 +140,7 @@ class TabulaTableReader:
                 stream=True,
                 area=layout.head_area,
                 columns=layout.head_columns,
+                force_subprocess=True,
             )
             if not head_tables:
                 raise RuntimeError("tabula did not return any tables for page 1")
@@ -152,6 +153,7 @@ class TabulaTableReader:
                     area=other_area,
                     columns=other_cols,
                     pandas_options={"header": None},
+                    force_subprocess=True,
                 )
         return head_tables + other_tables
 
