@@ -40,11 +40,34 @@ need_cmd gpg
 echo "[bootstrap] host=$(hostname) distro=$( . /etc/os-release; echo ${PRETTY_NAME} )"
 echo "[bootstrap] target_user=${TARGET_USER}"
 
+apt_update() {
+  # Debian 13 (apt 3.x + sqv) rejects some third-party repos whose signing keys
+  # rely on SHA1 certifications. NVIDIA's debian12 CUDA repo currently hits this.
+  #
+  # We keep a best-effort strict update first, then retry allowing weak repos only
+  # when necessary. This preserves normal security posture for Debian repos while
+  # still enabling one-time installation of nvidia-container-toolkit.
+  if apt-get update -y; then
+    return 0
+  fi
+  echo "[bootstrap] WARNING: apt update failed; retrying with AllowWeakRepositories=1"
+  apt-get -o Acquire::AllowWeakRepositories=true update -y
+}
+
+apt_install() {
+  # Use the same weak-repo retry strategy for installs.
+  if apt-get install -y --no-install-recommends "$@"; then
+    return 0
+  fi
+  echo "[bootstrap] WARNING: apt install failed; retrying with AllowWeakRepositories=1"
+  apt-get -o Acquire::AllowWeakRepositories=true install -y --no-install-recommends "$@"
+}
+
 echo "[bootstrap] apt update"
-apt-get update -y
+apt_update
 
 echo "[bootstrap] installing base deps"
-apt-get install -y --no-install-recommends \
+apt_install \
   ca-certificates \
   curl \
   gpg \
@@ -53,7 +76,7 @@ apt-get install -y --no-install-recommends \
   linux-headers-$(uname -r)
 
 echo "[bootstrap] installing docker (debian docker.io)"
-apt-get install -y docker.io docker-buildx
+apt_install docker.io docker-buildx
 systemctl enable --now docker
 
 echo "[bootstrap] adding ${TARGET_USER} to docker group (if user exists)"
@@ -64,7 +87,7 @@ else
 fi
 
 echo "[bootstrap] installing nvidia driver + nvidia-smi (debian non-free)"
-apt-get install -y nvidia-driver nvidia-smi
+apt_install nvidia-driver nvidia-smi
 
 # NVIDIA Container Toolkit:
 # GitHub pages repo endpoints are unreliable in some environments; use the
@@ -97,8 +120,8 @@ cat >"${CUDA_LIST_PATH}" <<EOF
 deb [signed-by=${CUDA_KEYRING_PATH}] ${CUDA_REPO_BASE}/ /
 EOF
 
-apt-get update -y
-apt-get install -y nvidia-container-toolkit
+apt_update
+apt_install nvidia-container-toolkit
 
 if command -v nvidia-ctk >/dev/null 2>&1; then
   echo "[bootstrap] configuring docker runtime for nvidia-container-toolkit"
@@ -119,3 +142,9 @@ echo "  docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-sm
 echo "  /home/daniel/prod/projections-v2/scripts/triton/check_prereqs.sh"
 echo ""
 echo "[bootstrap] If you added ${TARGET_USER} to the docker group, you must re-login or reboot."
+
+# Avoid breaking future `apt-get update` runs if NVIDIA's repo remains "weak".
+# Keep the keyring (harmless), but remove the repo list unless explicitly requested.
+if [[ "${KEEP_NVIDIA_APT_REPO:-0}" != "1" ]]; then
+  rm -f "${CUDA_LIST_PATH}" || true
+fi
