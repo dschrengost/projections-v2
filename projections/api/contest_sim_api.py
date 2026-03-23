@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Set, Tuple
@@ -341,25 +342,55 @@ def _resolve_draft_group_id_for_lineups(
         if matched == len(sample_player_ids):
             break
 
-    if best_dg is not None and best_match == len(sample_player_ids):
+    sample_player_count = len(sample_player_ids)
+    if best_dg is not None and best_match == sample_player_count:
         effective = int(best_dg)
         requested = int(requested_draft_group_id) if requested_draft_group_id is not None else None
         return effective, {
             "requested_draft_group_id": requested,
             "effective_draft_group_id": effective,
-            "sample_player_count": len(sample_player_ids),
+            "sample_player_count": sample_player_count,
             "requested_match_count": int(requested_match) if requested_match is not None else None,
             "best_match_count": int(best_match),
+            "best_match_draft_group_id": int(best_dg),
+            "inference_reason": "perfect_coverage",
             "inferred_from_lineups": requested != effective,
         }
+
+    # Non-perfect fallback for stale DK draft groups:
+    # if another slate has much stronger lineup-player coverage than the requested slate,
+    # trust that slate even when one or two sample players are missing from pool metadata.
+    if requested_draft_group_id is not None and requested_match is not None and best_dg is not None:
+        requested = int(requested_draft_group_id)
+        effective = int(best_dg)
+        min_support = max(2, int(math.ceil(0.60 * sample_player_count)))
+        min_improvement = max(2, int(math.ceil(0.15 * sample_player_count)))
+        if (
+            effective != requested
+            and best_match >= min_support
+            and (best_match - int(requested_match)) >= min_improvement
+        ):
+            return effective, {
+                "requested_draft_group_id": requested,
+                "effective_draft_group_id": effective,
+                "sample_player_count": sample_player_count,
+                "requested_match_count": int(requested_match),
+                "best_match_count": int(best_match),
+                "best_match_draft_group_id": effective,
+                "min_support_required": int(min_support),
+                "min_improvement_required": int(min_improvement),
+                "inference_reason": "coverage_improvement",
+                "inferred_from_lineups": True,
+            }
 
     return requested_draft_group_id, {
         "requested_draft_group_id": int(requested_draft_group_id) if requested_draft_group_id is not None else None,
         "effective_draft_group_id": int(requested_draft_group_id) if requested_draft_group_id is not None else None,
-        "sample_player_count": len(sample_player_ids),
+        "sample_player_count": sample_player_count,
         "requested_match_count": int(requested_match) if requested_match is not None else None,
         "best_match_count": int(best_match) if best_match >= 0 else None,
         "best_match_draft_group_id": int(best_dg) if best_dg is not None else None,
+        "inference_reason": "no_high_confidence_match",
         "inferred_from_lineups": False,
     }
 

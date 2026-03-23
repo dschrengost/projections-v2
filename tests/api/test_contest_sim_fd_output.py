@@ -241,3 +241,105 @@ def test_contest_sim_run_infers_dk_draft_group_from_lineups(tmp_path: Path, monk
     )
     saved = json.loads(build_path.read_text(encoding="utf-8"))
     assert saved["draft_group_id"] == actual_dg
+
+
+def test_resolve_dk_draft_group_uses_high_confidence_partial_match(monkeypatch) -> None:
+    requested_dg = 111111
+    actual_dg = 222222
+    lineup = ["pg1", "sg1", "sf1", "pf1", "c1", "pg2", "sf2", "pf2"]
+
+    by_dg = {
+        requested_dg: [
+            {"player_id": "pg1", "positions": ["PG"]},
+            {"player_id": "sg1", "positions": ["SG"]},
+        ],
+        actual_dg: [
+            {"player_id": "pg1", "positions": ["PG"]},
+            {"player_id": "sg1", "positions": ["SG"]},
+            {"player_id": "sf1", "positions": ["SF"]},
+            {"player_id": "pf1", "positions": ["PF"]},
+            {"player_id": "c1", "positions": ["C"]},
+            {"player_id": "pg2", "positions": ["PG"]},
+            {"player_id": "sf2", "positions": ["SF"]},
+        ],
+    }
+
+    monkeypatch.setattr(
+        contest_sim_api,
+        "build_player_pool",
+        lambda **kwargs: by_dg.get(int(kwargs["draft_group_id"]), []),
+    )
+    monkeypatch.setattr(
+        contest_sim_api,
+        "get_slates_for_date",
+        lambda game_date, slate_type="all", site="dk": [
+            {"draft_group_id": requested_dg, "slate_type": "night", "n_contests": 20, "games": [{}]},
+            {"draft_group_id": actual_dg, "slate_type": "main", "n_contests": 200, "games": [{}, {}]},
+        ],
+    )
+
+    effective_dg, debug = contest_sim_api._resolve_draft_group_id_for_lineups(
+        game_date="2026-03-15",
+        lineups=[lineup],
+        site="dk",
+        run_id=None,
+        requested_draft_group_id=requested_dg,
+    )
+
+    assert effective_dg == actual_dg
+    assert debug["requested_draft_group_id"] == requested_dg
+    assert debug["effective_draft_group_id"] == actual_dg
+    assert debug["requested_match_count"] == 2
+    assert debug["best_match_count"] == 7
+    assert debug["inference_reason"] == "coverage_improvement"
+    assert debug["inferred_from_lineups"] is True
+
+
+def test_resolve_dk_draft_group_keeps_requested_when_signal_is_weak(monkeypatch) -> None:
+    requested_dg = 111111
+    alt_dg = 222222
+    lineup = ["pg1", "sg1", "sf1", "pf1", "c1", "pg2", "sf2", "pf2"]
+
+    by_dg = {
+        requested_dg: [
+            {"player_id": "pg1", "positions": ["PG"]},
+            {"player_id": "sg1", "positions": ["SG"]},
+            {"player_id": "sf1", "positions": ["SF"]},
+            {"player_id": "pf1", "positions": ["PF"]},
+        ],
+        alt_dg: [
+            {"player_id": "pg1", "positions": ["PG"]},
+            {"player_id": "sg1", "positions": ["SG"]},
+            {"player_id": "sf1", "positions": ["SF"]},
+            {"player_id": "pf1", "positions": ["PF"]},
+            {"player_id": "c1", "positions": ["C"]},
+        ],
+    }
+
+    monkeypatch.setattr(
+        contest_sim_api,
+        "build_player_pool",
+        lambda **kwargs: by_dg.get(int(kwargs["draft_group_id"]), []),
+    )
+    monkeypatch.setattr(
+        contest_sim_api,
+        "get_slates_for_date",
+        lambda game_date, slate_type="all", site="dk": [
+            {"draft_group_id": requested_dg, "slate_type": "main", "n_contests": 150, "games": [{}, {}]},
+            {"draft_group_id": alt_dg, "slate_type": "night", "n_contests": 20, "games": [{}]},
+        ],
+    )
+
+    effective_dg, debug = contest_sim_api._resolve_draft_group_id_for_lineups(
+        game_date="2026-03-15",
+        lineups=[lineup],
+        site="dk",
+        run_id=None,
+        requested_draft_group_id=requested_dg,
+    )
+
+    assert effective_dg == requested_dg
+    assert debug["requested_match_count"] == 4
+    assert debug["best_match_count"] == 5
+    assert debug["inference_reason"] == "no_high_confidence_match"
+    assert debug["inferred_from_lineups"] is False
