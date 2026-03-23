@@ -1989,9 +1989,11 @@ def _sanitize_frame_to_expected_keys(
     null_mask = work_keys.loc[:, key_cols_list].isna().any(axis=1)
     dropped_null_key_rows = int(null_mask.sum())
     keep_non_null = ~null_mask.to_numpy(dtype=bool, copy=False)
-    keep_non_null_positions = np.flatnonzero(keep_non_null)
-    non_null_df = df.take(keep_non_null_positions)
-    work_keys = work_keys.take(keep_non_null_positions)
+    # NOTE: Avoid DataFrame.take on very large mixed-type world frames.
+    # In production this has intermittently produced silent column corruption
+    # (implausible scientific-notation spikes post-sanitize).
+    non_null_df = df.loc[keep_non_null].copy()
+    work_keys = work_keys.loc[keep_non_null].copy()
     for col in key_cols:
         work_keys[col] = work_keys[col].astype("int64", copy=False)
 
@@ -2033,11 +2035,10 @@ def _sanitize_frame_to_expected_keys(
     work_key_struct = work_key_matrix.view(structured_key_dtype).reshape(-1)
     keep_mask = np.isin(work_key_struct, expected_key_struct, assume_unique=False)
     dropped_unexpected_key_rows = int(np.count_nonzero(~keep_mask))
-    # Use positional masking to avoid pandas indexer edge cases on sparse/high
-    # integer labels observed in long-running worker processes.
-    keep_positions = np.flatnonzero(keep_mask)
-    merged = non_null_df.take(keep_positions).reset_index(drop=True)
-    merged_keys = work_keys.take(keep_positions).loc[:, key_cols_list].reset_index(drop=True)
+    merged = non_null_df.loc[keep_mask].reset_index(drop=True).copy()
+    merged_keys = (
+        work_keys.loc[keep_mask, key_cols_list].reset_index(drop=True)
+    )
     for col in key_cols:
         merged[col] = merged_keys[col].astype("int64", copy=False)
 
@@ -2830,8 +2831,8 @@ def _repair_world_frame_contract_fields(
                 raise RuntimeError("world repair drop mask shape mismatch")
             dropped_rows = int(np.count_nonzero(drop_mask))
             if 0 < dropped_rows < len(out):
-                keep_positions = np.flatnonzero(~drop_mask)
-                out = out.take(keep_positions).reset_index(drop=True)
+                # Avoid DataFrame.take on mixed-type world frames.
+                out = out.loc[~drop_mask].reset_index(drop=True).copy()
                 report["applied"] = True
                 report["dropped_bad_world_game_pairs"] = int(len(bad_pairs))
                 report["dropped_bad_world_rows"] = dropped_rows
@@ -3093,7 +3094,8 @@ def _resample_extreme_game_worlds(
                     donor_start:donor_end
                 ]
             world_idx_original = out["world_idx"].to_numpy(copy=False)
-            out = out.take(row_sources).reset_index(drop=True)
+            # Avoid DataFrame.take on mixed-type world frames.
+            out = out.iloc[row_sources].reset_index(drop=True).copy()
             out["world_idx"] = world_idx_original
 
         replaced_this_pass = len(replacements)

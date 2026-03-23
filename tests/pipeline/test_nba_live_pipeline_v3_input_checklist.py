@@ -1239,6 +1239,41 @@ def test_sanitize_frame_to_expected_keys_avoids_multiindex_membership(
     assert cleaned["team_id"].tolist() == [10, 20]
 
 
+def test_sanitize_frame_to_expected_keys_preserves_non_key_columns() -> None:
+    expected_keys = pd.DataFrame(
+        {
+            "game_id": [1, 1, 2],
+            "team_id": [10, 20, 30],
+            "player_id": [100, 200, 300],
+        }
+    )
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 0, 1, 1],
+            "game_id": [1, 1, 9, 2, 2],
+            "team_id": [10, 20, 10, 30, 30],
+            "player_id": [100, 200, 100, 300, 999],
+            "minutes": [240.0, 240.0, 5.0, 240.0, 10.0],
+            "fg3m": [1.5, 2.5, 3.5, 4.5, 5.5],
+        }
+    )
+
+    cleaned, report = _sanitize_frame_to_expected_keys(
+        worlds,
+        expected_keys_df=expected_keys,
+        key_cols=("game_id", "team_id", "player_id"),
+        label="unit-test preserve-non-key-columns",
+    )
+
+    assert report["rows_in"] == 5
+    assert report["rows_out"] == 3
+    assert report["dropped_unexpected_key_rows"] == 2
+    assert cleaned["game_id"].tolist() == [1, 1, 2]
+    assert cleaned["player_id"].tolist() == [100, 200, 300]
+    assert cleaned["minutes"].tolist() == pytest.approx([240.0, 240.0, 240.0])
+    assert cleaned["fg3m"].tolist() == pytest.approx([1.5, 2.5, 4.5])
+
+
 def test_resample_extreme_game_worlds_avoids_pandas_multiindex_factorize(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
