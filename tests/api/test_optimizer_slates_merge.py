@@ -190,3 +190,99 @@ def test_get_slates_for_date_fd_uses_disk_only(monkeypatch):
 
     slates = optimizer_service.get_slates_for_date("2025-12-28", slate_type="all", site="fd")
     assert slates == disk_slates
+
+
+def test_get_slates_for_date_filters_dk_non_classic_formats(monkeypatch):
+    api_df = pd.DataFrame(
+        [
+            {
+                "game_date": "2025-12-28",
+                "slate_type": "main",
+                "draft_group_id": 111,
+                "n_contests": 500,
+                "earliest_start": "2025-12-28T23:00:00+00:00",
+                "latest_start": "2025-12-29T02:00:00+00:00",
+                "example_contest_name": "NBA Main $100K",
+            },
+            {
+                "game_date": "2025-12-28",
+                "slate_type": "main",
+                "draft_group_id": 222,
+                "n_contests": 100,
+                "earliest_start": "2025-12-28T23:00:00+00:00",
+                "latest_start": "2025-12-29T02:00:00+00:00",
+                "example_contest_name": "NBA Snake $10 3-Player",
+            },
+            {
+                "game_date": "2025-12-28",
+                "slate_type": "main",
+                "draft_group_id": 333,
+                "n_contests": 200,
+                "earliest_start": "2025-12-28T23:00:00+00:00",
+                "latest_start": "2025-12-29T02:00:00+00:00",
+                "example_contest_name": "NBA Tiers $5K",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(optimizer_service, "list_draft_groups_for_date", lambda *_, **__: api_df)
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_, **__: [])
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_bronze_draftables", lambda *_, **__: [])
+
+    slates = optimizer_service.get_slates_for_date("2025-12-28", slate_type="all", site="dk")
+    assert [int(s["draft_group_id"]) for s in slates] == [111]
+
+
+def test_get_slates_for_date_dedupes_same_game_set_main_slates(monkeypatch):
+    api_df = pd.DataFrame(
+        [
+            {
+                "game_date": "2025-12-28",
+                "slate_type": "main",
+                "draft_group_id": 111,
+                "n_contests": 500,
+                "earliest_start": "2025-12-28T23:00:00+00:00",
+                "latest_start": "2025-12-29T02:00:00+00:00",
+                "example_contest_name": "NBA Main $100K",
+            },
+            {
+                "game_date": "2025-12-28",
+                "slate_type": "main",
+                "draft_group_id": 222,
+                "n_contests": 20,
+                "earliest_start": "2025-12-28T23:00:00+00:00",
+                "latest_start": "2025-12-29T02:00:00+00:00",
+                "example_contest_name": "NBA Main $2K",
+            },
+        ]
+    )
+    disk_slates = [
+        {
+            "game_date": "2025-12-28",
+            "slate_type": "main",
+            "draft_group_id": 111,
+            "n_contests": 500,
+            "earliest_start": "2025-12-28T23:00:00+00:00",
+            "latest_start": "2025-12-29T02:00:00+00:00",
+            "example_contest_name": "NBA Main $100K",
+            "games": [{"matchup": "AAA@BBB"}, {"matchup": "CCC@DDD"}],
+        },
+        {
+            "game_date": "2025-12-28",
+            "slate_type": "main",
+            "draft_group_id": 222,
+            "n_contests": 20,
+            "earliest_start": "2025-12-28T23:00:00+00:00",
+            "latest_start": "2025-12-29T02:00:00+00:00",
+            "example_contest_name": "NBA Main $2K",
+            "games": [{"matchup": "AAA@BBB"}, {"matchup": "CCC@DDD"}],
+        },
+    ]
+
+    monkeypatch.setattr(optimizer_service, "list_draft_groups_for_date", lambda *_, **__: api_df)
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_disk", lambda *_, **__: disk_slates)
+    monkeypatch.setattr(optimizer_service, "_discover_slates_from_bronze_draftables", lambda *_, **__: [])
+
+    slates = optimizer_service.get_slates_for_date("2025-12-28", slate_type="all", site="dk")
+    assert len(slates) == 1
+    assert int(slates[0]["draft_group_id"]) == 111

@@ -343,3 +343,118 @@ def test_resolve_dk_draft_group_keeps_requested_when_signal_is_weak(monkeypatch)
     assert debug["best_match_count"] == 5
     assert debug["inference_reason"] == "no_high_confidence_match"
     assert debug["inferred_from_lineups"] is False
+
+
+def test_resolve_dk_draft_group_considers_players_beyond_first_three_lineups(monkeypatch) -> None:
+    requested_dg = 111111
+    actual_dg = 222222
+    lineups = [
+        [f"a{i}" for i in range(1, 9)],
+        [f"b{i}" for i in range(1, 9)],
+        [f"c{i}" for i in range(1, 9)],
+        [f"d{i}" for i in range(1, 9)],
+    ]
+
+    requested_players = [pid for lineup in lineups[:3] for pid in lineup]
+    actual_players = [pid for lineup in lineups for pid in lineup]
+
+    by_dg = {
+        requested_dg: [{"player_id": pid, "positions": ["PG"]} for pid in requested_players],
+        actual_dg: [{"player_id": pid, "positions": ["PG"]} for pid in actual_players],
+    }
+
+    monkeypatch.setattr(
+        contest_sim_api,
+        "build_player_pool",
+        lambda **kwargs: by_dg.get(int(kwargs["draft_group_id"]), []),
+    )
+    monkeypatch.setattr(
+        contest_sim_api,
+        "get_slates_for_date",
+        lambda game_date, slate_type="all", site="dk": [
+            {"draft_group_id": requested_dg, "slate_type": "main", "n_contests": 100, "games": [{}, {}]},
+            {"draft_group_id": actual_dg, "slate_type": "main", "n_contests": 90, "games": [{}, {}]},
+        ],
+    )
+
+    effective_dg, debug = contest_sim_api._resolve_draft_group_id_for_lineups(
+        game_date="2026-03-15",
+        lineups=lineups,
+        site="dk",
+        run_id=None,
+        requested_draft_group_id=requested_dg,
+    )
+
+    assert effective_dg == actual_dg
+    assert debug["requested_match_count"] == 24
+    assert debug["best_match_count"] == 32
+    assert debug["inferred_from_lineups"] is True
+
+
+def test_contest_sim_run_retries_alternate_dk_slate_when_validation_fails(tmp_path: Path, monkeypatch) -> None:
+    requested_dg = 111111
+    actual_dg = 222222
+    lineup = ["pg1", "sg1", "sf1", "pf1", "c1", "pg2", "sf2", "pf2"]
+
+    by_dg = {
+        requested_dg: [
+            {"player_id": "pg1", "positions": ["PG"]},
+            {"player_id": "sg1", "positions": ["SG"]},
+        ],
+        actual_dg: [
+            {"player_id": "pg1", "positions": ["PG"]},
+            {"player_id": "sg1", "positions": ["SG"]},
+            {"player_id": "sf1", "positions": ["SF"]},
+            {"player_id": "pf1", "positions": ["PF"]},
+            {"player_id": "c1", "positions": ["C"]},
+            {"player_id": "pg2", "positions": ["PG"]},
+            {"player_id": "sf2", "positions": ["SF"]},
+            {"player_id": "pf2", "positions": ["PF"]},
+        ],
+    }
+
+    monkeypatch.setattr(
+        contest_sim_api,
+        "build_player_pool",
+        lambda **kwargs: by_dg.get(int(kwargs["draft_group_id"]), []),
+    )
+    monkeypatch.setattr(
+        contest_sim_api,
+        "_resolve_draft_group_id_for_lineups",
+        lambda **kwargs: (requested_dg, {"requested_draft_group_id": requested_dg, "effective_draft_group_id": requested_dg}),
+    )
+    monkeypatch.setattr(
+        contest_sim_api,
+        "get_slates_for_date",
+        lambda game_date, slate_type="all", site="dk": [
+            {"draft_group_id": requested_dg, "slate_type": "main", "n_contests": 120, "games": [{}, {}]},
+            {"draft_group_id": actual_dg, "slate_type": "main", "n_contests": 100, "games": [{}, {}]},
+        ],
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_contest_simulation(**kwargs):
+        captured["draft_group_id"] = kwargs.get("draft_group_id")
+        captured["user_lineups"] = kwargs.get("user_lineups")
+        return _fake_sim_result(kwargs["user_lineups"][0])
+
+    monkeypatch.setattr(contest_sim_api, "run_contest_simulation", _fake_run_contest_simulation)
+
+    client = _client(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/contest-sim/run",
+        json={
+            "game_date": "2026-03-15",
+            "site": "dk",
+            "draft_group_id": requested_dg,
+            "lineups": [lineup],
+            "ownership_mode": "off",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert captured["draft_group_id"] == actual_dg
+    assert payload["stats"]["debug"]["draft_group_resolution"]["effective_draft_group_id"] == actual_dg
+    assert payload["stats"]["debug"]["draft_group_resolution"]["inference_reason"] == "validation_retry_success"

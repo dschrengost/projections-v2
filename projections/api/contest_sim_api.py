@@ -243,18 +243,55 @@ def _normalize_lineups_for_site(
 def _sample_lineup_player_ids(
     lineups: Sequence[Sequence[str]],
     *,
-    max_lineups: int = 3,
+    max_lineups: int | None = None,
+    max_players: int | None = None,
 ) -> List[str]:
     sampled: List[str] = []
     seen: Set[str] = set()
-    for lineup in lineups[:max_lineups]:
+    for lineup_idx, lineup in enumerate(lineups):
+        if max_lineups is not None and lineup_idx >= max_lineups:
+            break
         for raw_pid in lineup:
             pid = str(raw_pid).strip()
             if not pid or pid in seen:
                 continue
             sampled.append(pid)
             seen.add(pid)
+            if max_players is not None and len(sampled) >= max_players:
+                return sampled
     return sampled
+
+
+def _candidate_draft_group_ids_for_resolution(game_date: str, site: str) -> List[int]:
+    site_norm = _normalize_site(site)
+    try:
+        slates = get_slates_for_date(game_date, slate_type="all", site=site_norm)
+    except Exception as exc:
+        logger.warning(
+            "Failed to enumerate slates for draft_group resolution (%s %s): %s",
+            game_date,
+            site_norm,
+            exc,
+        )
+        slates = []
+
+    def _rank(slate: Dict[str, object]) -> tuple[int, int, int, str]:
+        slate_type = str(slate.get("slate_type") or "").strip().lower()
+        games = slate.get("games") if isinstance(slate.get("games"), list) else []
+        n_games = len(games)
+        n_contests = int(slate.get("n_contests") or 0)
+        earliest = str(slate.get("earliest_start") or "")
+        return (0 if slate_type == "main" else 1, -n_games, -n_contests, earliest)
+
+    candidate_dgs: List[int] = []
+    for slate in sorted(slates, key=_rank):
+        raw_dg = slate.get("draft_group_id")
+        if raw_dg is None:
+            continue
+        dg = int(raw_dg)
+        if dg not in candidate_dgs:
+            candidate_dgs.append(dg)
+    return candidate_dgs
 
 
 def _resolve_draft_group_id_for_lineups(
@@ -304,33 +341,7 @@ def _resolve_draft_group_id_for_lineups(
                 "inferred_from_lineups": False,
             }
 
-    try:
-        slates = get_slates_for_date(game_date, slate_type="all", site=site_norm)
-    except Exception as exc:
-        logger.warning(
-            "Failed to enumerate slates for draft_group resolution (%s %s): %s",
-            game_date,
-            site_norm,
-            exc,
-        )
-        slates = []
-
-    def _rank(slate: Dict[str, object]) -> tuple[int, int, int, str]:
-        slate_type = str(slate.get("slate_type") or "").strip().lower()
-        games = slate.get("games") if isinstance(slate.get("games"), list) else []
-        n_games = len(games)
-        n_contests = int(slate.get("n_contests") or 0)
-        earliest = str(slate.get("earliest_start") or "")
-        return (0 if slate_type == "main" else 1, -n_games, -n_contests, earliest)
-
-    candidate_dgs: List[int] = []
-    for slate in sorted(slates, key=_rank):
-        raw_dg = slate.get("draft_group_id")
-        if raw_dg is None:
-            continue
-        dg = int(raw_dg)
-        if dg not in candidate_dgs:
-            candidate_dgs.append(dg)
+    candidate_dgs = _candidate_draft_group_ids_for_resolution(game_date, site_norm)
 
     best_dg: int | None = None
     best_match = -1
@@ -1054,14 +1065,65 @@ async def run_simulation(request: ContestSimRequest):
         use_dupe_ownership = ownership_mode in {"full", "dupe_only"}
         use_field_ownership = ownership_mode in {"full", "field_only"}
 
-        normalized_user_lineups = _normalize_lineups_for_site(
-            request.lineups,
-            game_date=request.game_date,
-            draft_group_id=effective_draft_group_id,
-            site=site_norm,
-            run_id=request.run_id,
-            context="lineups",
-        )
+        normalized_user_lineups: List[List[str]]
+        try:
+            normalized_user_lineups = _normalize_lineups_for_site(
+                request.lineups,
+                game_date=request.game_date,
+                draft_group_id=effective_draft_group_id,
+                site=site_norm,
+                run_id=request.run_id,
+                context="lineups",
+            )
+        except ValueError as exc:
+            recovered = False
+            if site_norm == "dk":
+                candidate_dgs = _candidate_draft_group_ids_for_resolution(request.game_date, site_norm)
+                for dg in candidate_dgs:
+                    if effective_draft_group_id is not None and int(dg) == int(effective_draft_group_id):
+                        continue
+                    try:
+                        normalized_user_lineups = _normalize_lineups_for_site(
+                            request.lineups,
+                            game_date=request.game_date,
+                            draft_group_id=int(dg),
+                            site=site_norm,
+                            run_id=request.run_id,
+                            context="lineups",
+                        )
+                        previous_dg = (
+                            int(effective_draft_group_id)
+                            if effective_draft_group_id is not None
+                            else None
+                        )
+                        effective_draft_group_id = int(dg)
+                        draft_group_resolution = dict(draft_group_resolution)
+                        draft_group_resolution.update(
+                            {
+                                "requested_draft_group_id": (
+                                    int(request.draft_group_id)
+                                    if request.draft_group_id is not None
+                                    else None
+                                ),
+                                "effective_draft_group_id": int(dg),
+                                "fallback_previous_draft_group_id": previous_dg,
+                                "fallback_trigger": str(exc),
+                                "inference_reason": "validation_retry_success",
+                                "inferred_from_lineups": True,
+                            }
+                        )
+                        logger.warning(
+                            "Contest sim recovered from stale DK draft_group_id via validation retry: %s -> %s (%s)",
+                            previous_dg,
+                            dg,
+                            exc,
+                        )
+                        recovered = True
+                        break
+                    except ValueError:
+                        continue
+            if not recovered:
+                raise
 
         # Load ownership data for dupe penalty calculation (only when enabled)
         player_ownership = (

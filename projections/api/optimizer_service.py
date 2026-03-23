@@ -2336,7 +2336,18 @@ def get_slates_for_date(
             if not existing.get("example_contest_name") and slate.get("example_contest_name"):
                 existing["example_contest_name"] = slate.get("example_contest_name")
 
-    return sorted(by_dg.values(), key=lambda s: _draft_group_sort_key(s.get("draft_group_id")))
+    merged_slates = sorted(by_dg.values(), key=lambda s: _draft_group_sort_key(s.get("draft_group_id")))
+    merged_slates = _dedupe_equivalent_slates(merged_slates)
+
+    compatible_slates = [
+        slate
+        for slate in merged_slates
+        if _is_optimizer_compatible_slate(site=site_norm, slate=slate)
+    ]
+    # Safety fallback: if heuristics filtered out everything, return unfiltered.
+    if compatible_slates:
+        return compatible_slates
+    return merged_slates
 
 
 def _draft_group_key(raw: object) -> str | None:
@@ -2356,6 +2367,85 @@ def _draft_group_sort_key(raw: object) -> tuple[int, int | str]:
         return (0, int(key))
     except ValueError:
         return (1, key)
+
+
+_DK_UNSUPPORTED_SLATE_NAME_RE = re.compile(
+    r"\b(snake|tiers|single[\s-]?stat|points?\s+only|in[\s-]?game|2nd\s+half|second\s+half|4th\s+qtr|fourth\s+qtr)\b",
+    re.IGNORECASE,
+)
+_FD_UNSUPPORTED_SLATE_NAME_RE = re.compile(
+    r"\b(snake(\s+draft)?|points?\s+only|2nd\s+half|second\s+half|4th\s+qtr|fourth\s+qtr)\b",
+    re.IGNORECASE,
+)
+_FD_SINGLE_GAME_LABEL_RE = re.compile(r"^[A-Z]{2,4}\s*@\s*[A-Z]{2,4}$")
+
+
+def _is_optimizer_compatible_slate(*, site: str, slate: Dict[str, Any]) -> bool:
+    """Return whether a slate is compatible with the classic optimizer/contest-sim roster."""
+    slate_type = str(slate.get("slate_type") or "").strip().lower()
+    if slate_type == "showdown":
+        return False
+
+    name = str(slate.get("example_contest_name") or "").strip()
+    if not name:
+        return True
+
+    site_norm = _normalize_site(site)
+    if site_norm == "dk":
+        return _DK_UNSUPPORTED_SLATE_NAME_RE.search(name) is None
+
+    if _FD_UNSUPPORTED_SLATE_NAME_RE.search(name) is not None:
+        return False
+    if _FD_SINGLE_GAME_LABEL_RE.match(name.upper()) is not None:
+        return False
+    return True
+
+
+def _slate_signature(slate: Dict[str, Any]) -> str | None:
+    slate_type = str(slate.get("slate_type") or "").strip().lower()
+    games = slate.get("games") if isinstance(slate.get("games"), list) else []
+    matchups = sorted(
+        {
+            str(game.get("matchup") or "").strip().upper()
+            for game in games
+            if isinstance(game, dict) and str(game.get("matchup") or "").strip()
+        }
+    )
+    if not matchups:
+        return None
+    earliest = str(slate.get("earliest_start") or "").strip()
+    return f"{slate_type}|{earliest}|{'|'.join(matchups)}"
+
+
+def _dedupe_equivalent_slates(slates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse duplicate slate rows that represent the same game set/start window."""
+    by_signature: dict[str, Dict[str, Any]] = {}
+    passthrough: List[Dict[str, Any]] = []
+
+    for slate in slates:
+        signature = _slate_signature(slate)
+        if signature is None:
+            passthrough.append(slate)
+            continue
+
+        current = by_signature.get(signature)
+        if current is None:
+            by_signature[signature] = slate
+            continue
+
+        curr_n_contests = int(current.get("n_contests") or 0)
+        next_n_contests = int(slate.get("n_contests") or 0)
+        if next_n_contests > curr_n_contests:
+            by_signature[signature] = slate
+            continue
+        if next_n_contests == curr_n_contests:
+            curr_dg = _draft_group_sort_key(current.get("draft_group_id"))
+            next_dg = _draft_group_sort_key(slate.get("draft_group_id"))
+            if next_dg < curr_dg:
+                by_signature[signature] = slate
+
+    merged = passthrough + list(by_signature.values())
+    return sorted(merged, key=lambda s: _draft_group_sort_key(s.get("draft_group_id")))
 
 
 def _extract_games_from_salaries_df(df: pd.DataFrame) -> tuple[List[Dict[str, Any]], datetime | None, datetime | None]:
