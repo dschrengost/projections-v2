@@ -1992,8 +1992,8 @@ def _sanitize_frame_to_expected_keys(
     # NOTE: Avoid DataFrame.take on very large mixed-type world frames.
     # In production this has intermittently produced silent column corruption
     # (implausible scientific-notation spikes post-sanitize).
-    non_null_df = df.loc[keep_non_null].copy()
-    work_keys = work_keys.loc[keep_non_null].copy()
+    non_null_df = df.loc[keep_non_null]
+    work_keys = work_keys.loc[keep_non_null]
     for col in key_cols:
         work_keys[col] = work_keys[col].astype("int64", copy=False)
 
@@ -2035,7 +2035,7 @@ def _sanitize_frame_to_expected_keys(
     work_key_struct = work_key_matrix.view(structured_key_dtype).reshape(-1)
     keep_mask = np.isin(work_key_struct, expected_key_struct, assume_unique=False)
     dropped_unexpected_key_rows = int(np.count_nonzero(~keep_mask))
-    merged = non_null_df.loc[keep_mask].reset_index(drop=True).copy()
+    merged = non_null_df.loc[keep_mask].reset_index(drop=True)
     merged_keys = (
         work_keys.loc[keep_mask, key_cols_list].reset_index(drop=True)
     )
