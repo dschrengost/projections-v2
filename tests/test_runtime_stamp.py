@@ -259,19 +259,23 @@ class TestFindGitRepoRoot:
 
     def test_returns_none_when_no_git(self, tmp_path: Path) -> None:
         """Verify None returned when not in a git repo."""
-        # tmp_path won't have a .git directory
-        # We need to create a deep path that definitely has no .git
         deep_path = tmp_path / "no_git" / "deep" / "path"
         deep_path.mkdir(parents=True)
+        result = _find_git_repo_root(deep_path)
+        assert result is None
 
-        # Force the function to not find .git by limiting the search
-        with mock.patch("projections.runtime_stamp._find_git_repo_root") as mock_find:
-            mock_find.return_value = None
-            from projections.runtime_stamp import _find_git_repo_root as real_find
-            # Actually test with real function but mock the limit
-            result = real_find(tmp_path)
-            # tmp_path itself doesn't have .git unless we're in a git repo
-            # The result depends on whether tmp_path is inside a real git repo
+    def test_does_not_escape_pyproject_boundary(self, tmp_path: Path) -> None:
+        """If a pyproject root has no .git, do not pick up a parent .git."""
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        (parent / ".git").mkdir()
+
+        project = parent / "child_project"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+
+        # Old behavior would have walked up and returned `parent` due to `.git`.
+        assert _find_git_repo_root(project) is None
 
 
 class TestRuntimeStampDataclass:

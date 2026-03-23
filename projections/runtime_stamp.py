@@ -130,9 +130,25 @@ def _find_git_repo_root(start: Path | None = None) -> Path | None:
     if start is None:
         start = Path.cwd()
     current = start.resolve()
+
+    # If the caller provided an explicit project root (pyproject present),
+    # do not accidentally "inherit" a parent git repo (e.g., dotfiles at ~/).
+    boundary: Path | None = None
+    try:
+        if current.is_file():
+            if (current.parent / "pyproject.toml").exists():
+                boundary = current.parent
+        else:
+            if (current / "pyproject.toml").exists():
+                boundary = current
+    except OSError:
+        boundary = None
+
     for _ in range(100):  # Safety limit
         if (current / ".git").exists():
             return current
+        if boundary is not None and current == boundary:
+            return None
         parent = current.parent
         if parent == current:
             break
