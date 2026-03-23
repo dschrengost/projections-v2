@@ -18,6 +18,7 @@ DEFAULT_DATA_ROOT="/home/daniel/projections-data"
 DRY_RUN=""
 SYNC_POINTERS=0
 RESTART_DASHBOARD=1
+SKIP_FRONTEND=0
 
 DASHBOARD_SERVICE="minutes-dashboard.service"
 DASHBOARD_PORT="8501"
@@ -30,12 +31,15 @@ while [[ $# -gt 0 ]]; do
         --sync-pointers)
             SYNC_POINTERS=1
             ;;
+        --skip-frontend)
+            SKIP_FRONTEND=1
+            ;;
         --skip-dashboard-restart)
             RESTART_DASHBOARD=0
             ;;
         *)
             echo "[deploy] ERROR: unknown argument: $1" >&2
-            echo "Usage: ./scripts/deploy/deploy_live.sh [--dry-run] [--sync-pointers] [--skip-dashboard-restart]" >&2
+            echo "Usage: ./scripts/deploy/deploy_live.sh [--dry-run] [--sync-pointers] [--skip-frontend] [--skip-dashboard-restart]" >&2
             exit 1
             ;;
     esac
@@ -248,6 +252,7 @@ FRONTEND_DIR="$PROD_REPO/web/minutes-dashboard"
 _run_frontend_install() {
     local root_dir="$1"
     local cache_dir="$2"
+    local npm_log="${3:-}"
     local had_lock=0
     local install_failed=0
     local -a install_cmd
@@ -268,12 +273,24 @@ _run_frontend_install() {
     fi
 
     if [[ $had_lock -eq 1 ]]; then
-        "${install_cmd[@]}" "${cache_env[@]}" --no-audit --no-fund || install_failed=$?
+        if [[ -n "$npm_log" ]]; then
+            timeout 15m "${install_cmd[@]}" "${cache_env[@]}" --no-audit --no-fund >"$npm_log" 2>&1 || install_failed=$?
+        else
+            timeout 15m "${install_cmd[@]}" "${cache_env[@]}" --no-audit --no-fund || install_failed=$?
+        fi
         if [[ $install_failed -ne 0 ]]; then
-            npm install --no-audit --no-fund "${cache_env[@]}" || install_failed=$?
+            if [[ -n "$npm_log" ]]; then
+                timeout 15m npm install --no-audit --no-fund "${cache_env[@]}" >>"$npm_log" 2>&1 || install_failed=$?
+            else
+                timeout 15m npm install --no-audit --no-fund "${cache_env[@]}" || install_failed=$?
+            fi
         fi
     else
-        "${install_cmd[@]}" --no-audit --no-fund "${cache_env[@]}" || install_failed=$?
+        if [[ -n "$npm_log" ]]; then
+            timeout 15m "${install_cmd[@]}" --no-audit --no-fund "${cache_env[@]}" >"$npm_log" 2>&1 || install_failed=$?
+        else
+            timeout 15m "${install_cmd[@]}" --no-audit --no-fund "${cache_env[@]}" || install_failed=$?
+        fi
     fi
 
     return "$install_failed"
@@ -308,7 +325,9 @@ _copy_or_build_frontend_from_dev() {
     return $?
 }
 
-if [[ -f "$FRONTEND_DIR/package.json" ]]; then
+if [[ "$SKIP_FRONTEND" -eq 1 ]]; then
+    echo "[deploy] Skipping frontend build (--skip-frontend)"
+elif [[ -f "$FRONTEND_DIR/package.json" ]]; then
     echo "[deploy] Building frontend in PROD..."
     cd "$PROD_REPO"
 
@@ -317,7 +336,8 @@ if [[ -f "$FRONTEND_DIR/package.json" ]]; then
         echo "[deploy] Installing frontend deps (attempt ${attempt}/3)..."
         TMP_NPM_CACHE=""
         TMP_NPM_CACHE=$(mktemp -d)
-        if _run_frontend_install "$FRONTEND_DIR" "$TMP_NPM_CACHE"; then
+        NPM_LOG="/tmp/projections-deploy-prod-npm-${attempt}.log"
+        if _run_frontend_install "$FRONTEND_DIR" "$TMP_NPM_CACHE" "$NPM_LOG"; then
             NPM_INSTALL_EXIT=0
         else
             NPM_INSTALL_EXIT=$?
@@ -328,6 +348,7 @@ if [[ -f "$FRONTEND_DIR/package.json" ]]; then
             break
         fi
         echo "[deploy] Frontend install failed with exit code $NPM_INSTALL_EXIT"
+        echo "[deploy] Frontend npm log: $NPM_LOG"
         if [[ $attempt -lt 3 ]]; then
             echo "[deploy] Retrying frontend install with clean cache..."
         fi
@@ -335,6 +356,10 @@ if [[ -f "$FRONTEND_DIR/package.json" ]]; then
 
     if [[ $NPM_INSTALL_OK -ne 1 ]]; then
         echo "[deploy] WARNING: frontend dependency install failed in PROD after retries."
+        echo "[deploy] See logs:"
+        for failed_attempt in 1 2 3; do
+            echo "   /tmp/projections-deploy-prod-npm-${failed_attempt}.log"
+        done
         echo "[deploy] Attempting fallback: copying a built dist from DEV if available."
         cd "$DEV_REPO/web/minutes-dashboard"
         DEV_NPM_LOG="/tmp/projections-deploy-dev-npm.log"
