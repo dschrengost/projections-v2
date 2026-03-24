@@ -8,6 +8,7 @@ from projections.runtime_safety import configure_runtime_safety
 
 configure_runtime_safety()
 
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -18,9 +19,6 @@ import pandas as pd
 import typer
 
 from projections import paths
-from projections.etl import daily_lineups as daily_lineups_etl
-from projections.etl import odds as odds_etl
-from projections.etl import roster_nightly as roster_etl
 
 # ESPN injuries for faster real-time injury updates
 try:
@@ -112,8 +110,13 @@ def _run_injuries_subprocess(
     for schedule_path in schedule:
         cmd.extend(["--schedule", schedule_path])
 
+    env = os.environ.copy()
+    # Avoid writing .pyc for crash-prone subprocesses; bad bytecode artifacts can
+    # cascade into "bad marshal data" after native segfaults.
+    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     result = subprocess.run(
         cmd,
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -129,6 +132,24 @@ def _run_injuries_subprocess(
         )
         return False
     return True
+
+
+def _load_daily_lineups_etl():
+    from projections.etl import daily_lineups as module
+
+    return module
+
+
+def _load_odds_etl():
+    from projections.etl import odds as module
+
+    return module
+
+
+def _load_roster_etl():
+    from projections.etl import roster_nightly as module
+
+    return module
 
 
 @app.command()
@@ -230,6 +251,7 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
     if lineups:
         _echo_stage("running daily lineups ETL")
         try:
+            daily_lineups_etl = _load_daily_lineups_etl()
             daily_lineups_etl.run(
                 start=start_dt,
                 end=end_dt,
@@ -305,6 +327,7 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
     if odds:
         _echo_stage("running odds ETL")
         try:
+            odds_etl = _load_odds_etl()
             odds_etl.main(
                 start=start_dt,
                 end=end_dt,
@@ -339,6 +362,7 @@ def run(  # noqa: PLR0913, PLR0917 - orchestrator with many knobs
                 roster_inputs = [str(default_roster)]
                 _echo_stage(f"using existing roster snapshot -> {default_roster}")
         try:
+            roster_etl = _load_roster_etl()
             roster_etl.main(
                 roster=roster_inputs,
                 schedule=schedule,

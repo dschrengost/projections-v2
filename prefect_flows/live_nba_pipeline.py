@@ -112,6 +112,7 @@ def _run_python_module(
 ) -> None:
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
+    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     _apply_stability_env(env)
     # Resolve uv path (handles systemd PATH issues)
     uv_path = _uv_bin()

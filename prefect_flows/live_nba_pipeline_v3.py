@@ -230,6 +230,7 @@ def _run_python_module(
 ) -> None:
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
+    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     cmd = [_subprocess_python(), "-m", module, *args]
     last_result: subprocess.CompletedProcess[str] | None = None
     for attempt in range(1, _SUBPROCESS_CRASH_RETRY_ATTEMPTS + 1):
@@ -844,6 +845,7 @@ print(json.dumps(payload))
 """.strip()
     env = os.environ.copy()
     env["PROJECTIONS_DATA_ROOT"] = str(data_root)
+    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     cmd = [
         _subprocess_python(),
         "-c",
