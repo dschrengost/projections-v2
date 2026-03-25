@@ -47,10 +47,10 @@ def _parse_int(value: Any, *, default: int) -> int:
     return int(value)
 
 
-def _atomic_write_parquet(df: pd.DataFrame, out_path: Path) -> None:
+def _atomic_write_parquet(df: pd.DataFrame, out_path: Path, *, row_group_size: int = 500_000) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_name(f"{out_path.name}.tmp")
-    df.to_parquet(tmp, index=False)
+    df.to_parquet(tmp, index=False, compression="zstd", row_group_size=row_group_size)
     os.replace(tmp, out_path)
 
 
