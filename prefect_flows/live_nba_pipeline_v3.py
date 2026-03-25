@@ -2043,21 +2043,22 @@ def _sanitize_frame_to_expected_keys(
             },
         )
 
-    # NOTE: Avoid dataframe merge and MultiIndex membership checks here. Both
-    # paths have intermittently triggered low-level pandas crashes in
-    # production workers on very large world matrices.
-    expected_key_matrix = np.ascontiguousarray(
-        expected.loc[:, key_cols_list].to_numpy(dtype=np.int64, copy=False)
+    # NOTE: structured-dtype + np.isin triggers an IndexError in numpy's in1d
+    # fast-path when the test_elements array is small (e.g. 7 expected keys) —
+    # it tries to use raw int64 NBA IDs as array indices.  Use a left merge with
+    # indicator instead: O(n log n), vectorised, no native crashes.
+    work_key_df = pd.DataFrame(
+        work_keys.loc[:, key_cols_list].to_numpy(dtype=np.int64, copy=False),
+        columns=key_cols_list,
     )
-    work_key_matrix = np.ascontiguousarray(
-        work_keys.loc[:, key_cols_list].to_numpy(dtype=np.int64, copy=False)
+    expected_key_df = pd.DataFrame(
+        expected.loc[:, key_cols_list].to_numpy(dtype=np.int64, copy=False),
+        columns=key_cols_list,
+    ).drop_duplicates()
+    merged_indicator = work_key_df.merge(
+        expected_key_df, on=key_cols_list, how="left", indicator=True
     )
-    structured_key_dtype = np.dtype(
-        [(f"k{i}", np.int64) for i in range(len(key_cols_list))]
-    )
-    expected_key_struct = expected_key_matrix.view(structured_key_dtype).reshape(-1)
-    work_key_struct = work_key_matrix.view(structured_key_dtype).reshape(-1)
-    keep_mask = np.isin(work_key_struct, expected_key_struct, assume_unique=False)
+    keep_mask = (merged_indicator["_merge"] == "both").to_numpy(dtype=bool)
     dropped_unexpected_key_rows = int(np.count_nonzero(~keep_mask))
     merged = non_null_df.loc[keep_mask].reset_index(drop=True)
     merged_keys = (
