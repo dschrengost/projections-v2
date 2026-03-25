@@ -2993,6 +2993,16 @@ tbody tr:hover {
   font-size: 0.85rem;
 }
 
+.sim-truncation-notice {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  border-radius: 6px;
+  color: #fbbf24;
+  font-size: 0.8rem;
+}
+
 .contest-sim-results {
   min-height: 400px;
 }

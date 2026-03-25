@@ -478,15 +478,22 @@ def _sim_builds_dir() -> Path:
     return paths.data_path() / "builds" / "contest_sim"
 
 
+_META_FIELDS = ("build_id", "game_date", "site", "draft_group_id", "created_at", "lineups_count", "name", "kind", "stats")
+
+
 def _save_sim_build(game_date: str, build_data: Dict[str, object]) -> str:
     builds_root = _sim_builds_dir() / game_date
     builds_root.mkdir(parents=True, exist_ok=True)
     build_id = build_data.get("build_id") or str(uuid4())
     build_path = builds_root / f"{build_id}.json"
     build_data["build_id"] = build_id
+    import json
     with open(build_path, "w") as f:
-        import json
         json.dump(build_data, f, indent=2)
+    # Write lightweight sidecar for fast listing (avoids full parse on list requests)
+    meta = {k: build_data.get(k) for k in _META_FIELDS}
+    with open(builds_root / f"{build_id}.meta.json", "w") as f:
+        json.dump(meta, f)
     return str(build_id)
 
 
@@ -511,12 +518,22 @@ def _list_sim_builds(game_date: str) -> List[Dict[str, object]]:
     builds_root = _sim_builds_dir() / game_date
     if not builds_root.exists():
         return []
+    import json
     builds = []
-    for build_file in sorted(builds_root.glob("*.json"), reverse=True):
+    # Only iterate full .json files (not .meta.json sidecars)
+    for build_file in sorted(
+        (f for f in builds_root.glob("*.json") if not f.name.endswith(".meta.json")),
+        reverse=True,
+    ):
         try:
-            import json
-            with open(build_file) as f:
-                data = json.load(f)
+            # Prefer lightweight sidecar; fall back to full parse only if missing
+            meta_file = build_file.with_suffix("").with_suffix(".meta.json")
+            if meta_file.exists():
+                with open(meta_file) as f:
+                    data = json.load(f)
+            else:
+                with open(build_file) as f:
+                    data = json.load(f)
             builds.append({
                 "build_id": data.get("build_id", build_file.stem),
                 "game_date": data.get("game_date"),
@@ -954,6 +971,7 @@ class SavedSimBuildDetail(BaseModel):
     results: Optional[List[LineupEVResultResponse]] = None
     lineups: List[List[str]]
     request: Optional[Dict[str, object]] = None
+    results_truncated: bool = False  # True when limit < lineups_count
 
 
 class SaveSimLineupsRequest(BaseModel):
@@ -1423,9 +1441,23 @@ def _backfill_tail_metrics(results: List[Dict]) -> List[Dict]:
     return results
 
 
+_DISPLAY_LIMIT_DEFAULT = 5000
+
+
 @router.get("/saved-builds/{build_id}", response_model=SavedSimBuildDetail)
-async def load_saved_sim_build(build_id: str, date: str):
-    """Load a saved contest sim build with lineups/results."""
+async def load_saved_sim_build(
+    build_id: str,
+    date: str,
+    limit: int = Query(default=_DISPLAY_LIMIT_DEFAULT, ge=0, description="Max results/lineups to return (0 = no limit). Does not affect server-side portfolio/top-N operations."),
+    offset: int = Query(default=0, ge=0, description="Result offset for pagination"),
+):
+    """Load a saved contest sim build with lineups/results.
+
+    `limit` caps the results and lineups arrays returned in the response for
+    display purposes. The full pool remains available server-side for portfolio
+    and top-N operations via /portfolio. lineups_count always reflects the true
+    total regardless of limit.
+    """
     data = _load_sim_build(date, build_id)
     if not data:
         raise HTTPException(status_code=404, detail=f"Sim build {build_id} not found for date {date}")
@@ -1433,20 +1465,32 @@ async def load_saved_sim_build(build_id: str, date: str):
     # Backfill tail metrics for legacy builds
     if results:
         results = _backfill_tail_metrics(results)
+
+    total = data.get("lineups_count", len(results) if results else 0)
+    truncated = False
+    if limit > 0 and results is not None:
+        end = offset + limit
+        results = results[offset:end]
+        lineups = (data.get("lineups") or [])[offset:end]
+        truncated = (offset + limit) < int(total)
+    else:
+        lineups = data.get("lineups", [])
+
     return SavedSimBuildDetail(
         build_id=data.get("build_id", build_id),
         game_date=data.get("game_date", date),
         site=_normalize_site(str(data.get("site") or "dk")),
         draft_group_id=data.get("draft_group_id"),
         created_at=data.get("created_at", datetime.utcnow().isoformat()),
-        lineups_count=data.get("lineups_count", 0),
+        lineups_count=int(total),
         name=data.get("name"),
         kind=data.get("kind", "run"),
         config=data.get("config"),
         stats=data.get("stats", {}),
         results=[LineupEVResultResponse(**r) for r in results] if results else None,
-        lineups=data.get("lineups", []),
+        lineups=lineups,
         request=data.get("request"),
+        results_truncated=truncated,
     )
 
 

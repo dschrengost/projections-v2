@@ -851,6 +851,7 @@ export default function ContestSimPage() {
     const [simResult, setSimResult] = useState<ContestSimResponse | null>(null)
     const [simLoading, setSimLoading] = useState(false)
     const [simError, setSimError] = useState<string | null>(null)
+    const [simResultTruncated, setSimResultTruncated] = useState<{ displayed: number; total: number } | null>(null)
 
     // Sorting and filtering
     const [sortKey, setSortKey] = useState<SortKey>('expected_value')
@@ -1144,6 +1145,11 @@ export default function ContestSimPage() {
                         build_id: build.build_id,
                     })
                     setLineups(build.lineups ?? [])
+                    setSimResultTruncated(
+                        build.results_truncated
+                            ? { displayed: build.results.length, total: build.lineups_count }
+                            : null
+                    )
                 }
             } catch {
                 setSimResult(null)
@@ -1476,6 +1482,7 @@ export default function ContestSimPage() {
                 use_strategy_overrides: useStrategyOverrides,
             })
             setSimResult(result)
+            setSimResultTruncated(null)
             const builds = await getSavedSimBuilds(selectedDate, undefined, site)
             setSavedSimBuilds(builds)
             setSelectedSimBuildId(result.build_id ?? builds.find(b => b.kind === 'run')?.build_id ?? null)
@@ -2466,6 +2473,13 @@ export default function ContestSimPage() {
                                 onExposureBoundsChange={handleExposureBoundsChange}
                                 exposureCapError={exposureCapError}
                             />
+
+                            {/* Truncation notice */}
+                            {simResultTruncated && (
+                                <div className="sim-truncation-notice">
+                                    Showing {simResultTruncated.displayed.toLocaleString()} of {simResultTruncated.total.toLocaleString()} lineups — portfolio optimize and top-N run on the full pool server-side.
+                                </div>
+                            )}
 
                             {/* Summary Cards */}
                             <div className="sim-summary compact">

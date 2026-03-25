@@ -143,6 +143,7 @@ export interface SavedSimBuildDetail extends SavedSimBuildSummary {
     results?: LineupEVResult[]
     lineups: string[][]
     request?: Record<string, unknown> | null
+    results_truncated?: boolean  // true when limit < lineups_count
 }
 
 export type PortfolioSelectionMode = 'greedy_constraints' | 'decorrelated_ev' | 'weighted_allocations'
@@ -249,8 +250,13 @@ export async function loadSavedSimBuild(
     date: string,
     buildId: string,
     site: SiteCode = 'dk',
+    limit?: number,
+    offset?: number,
 ): Promise<SavedSimBuildDetail> {
-    const resp = await fetch(`${API_BASE}/saved-builds/${buildId}?date=${encodeURIComponent(date)}&site=${site}`)
+    const params = new URLSearchParams({ date: encodeURIComponent(date), site })
+    if (limit !== undefined) params.set('limit', String(limit))
+    if (offset !== undefined) params.set('offset', String(offset))
+    const resp = await fetch(`${API_BASE}/saved-builds/${buildId}?${params.toString()}`)
     if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }))
         throw new Error(err.detail || 'Failed to load saved sim build')
