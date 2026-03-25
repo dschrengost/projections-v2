@@ -1716,6 +1716,23 @@ def _build_rerun_plan(
     }
 
 
+def _resolve_report_window_wait_policy(
+    *,
+    as_of_ts_override: str | None,
+    replay_mode: bool,
+    manual_target_game_ids: list[int] | None,
+) -> tuple[bool, str]:
+    """Decide whether report-window freshness waits are allowed for this run."""
+    if as_of_ts_override is not None:
+        return False, "as_of_ts_override"
+    if bool(replay_mode):
+        return False, "replay_mode"
+    manual_targets = _normalize_game_ids(manual_target_game_ids)
+    if manual_targets:
+        return False, "manual_target_game_rerun"
+    return True, "eligible"
+
+
 def _filter_to_target_games(
     df: pd.DataFrame, target_game_ids: list[int] | None
 ) -> pd.DataFrame:
@@ -6805,7 +6822,14 @@ def materialize_unified_run_artifacts_task(
     )
     stage_start = time.perf_counter()
 
-    expected_feature_keys = merged_features.loc[:, ["game_id", "team_id", "player_id"]]
+    # Use the current run's features as expected keys — the same file publish-atomic
+    # validates against. Using merged_features (which includes previous-run players)
+    # was too permissive: carry-forward players (e.g. a forced-in DNP) would survive
+    # the materialize sanitize but fail the publish-atomic key contract check.
+    expected_feature_keys = pd.read_parquet(
+        features_dir / f"run={run_id}" / "features.parquet",
+        columns=["game_id", "team_id", "player_id"],
+    )
 
     merged_scores, score_key_report = _sanitize_frame_to_expected_keys(
         merged_scores,
@@ -6867,9 +6891,6 @@ def materialize_unified_run_artifacts_task(
             random_seed=int(random_seed),
         )
     )
-    merged_worlds, world_contract_repair_report_post_sanitize = _repair_world_frame_contract_fields(
-        merged_worlds
-    )
     merged_worlds, world_key_report_postprocess = _sanitize_frame_to_expected_keys(
         merged_worlds,
         expected_keys_df=expected_feature_keys,
@@ -6885,6 +6906,17 @@ def materialize_unified_run_artifacts_task(
             "null_key_rows=%d unexpected_key_rows=%d",
             int(world_key_report_postprocess["dropped_null_key_rows"]),
             int(world_key_report_postprocess["dropped_unexpected_key_rows"]),
+        )
+    # Safety pass: sanitize may operate on very large mixed-type world frames.
+    # Keep repair as the final transform before write/summary so any
+    # post-sanitize numeric spikes are clipped out deterministically.
+    merged_worlds, world_contract_repair_report_post_sanitize = _repair_world_frame_contract_fields(
+        merged_worlds
+    )
+    if bool(world_contract_repair_report_post_sanitize.get("applied")):
+        logger.warning(
+            "Applied post-sanitize world contract repair safety pass in materialize: %s",
+            world_contract_repair_report_post_sanitize,
         )
     _atomic_write_validated_parquet(
         merged_worlds,
@@ -7472,7 +7504,11 @@ def nba_live_pipeline_v3_flow(
                 "attempts": 0,
                 "timed_out": False,
             }
-            wait_allowed = (as_of_ts_override is None) and (not replay_mode)
+            wait_allowed, wait_skip_reason = _resolve_report_window_wait_policy(
+                as_of_ts_override=as_of_ts_override,
+                replay_mode=bool(replay_mode),
+                manual_target_game_ids=manual_target_game_ids,
+            )
             if (
                 bool(report_window.get("active"))
                 and bool(report_window.get("needs_wait"))
@@ -7546,10 +7582,12 @@ def nba_live_pipeline_v3_flow(
                         report_window.get("label"),
                     )
             elif bool(report_window.get("needs_wait")) and not wait_allowed:
-                bounded_wait_report["reason"] = "wait_skipped_override_or_replay"
+                bounded_wait_report["reason"] = f"wait_skipped_{wait_skip_reason}"
                 logger.warning(
-                    "Skipping freshness wait because as_of_ts_override or replay_mode is active; report_window=%s",
+                    "Skipping freshness wait because %s is active; report_window=%s manual_target_game_ids=%s",
+                    wait_skip_reason,
                     report_window.get("label"),
+                    _normalize_game_ids(manual_target_game_ids),
                 )
 
         input_change_set = _build_input_change_set(
