@@ -1,4 +1,4 @@
-"""Plan/execute storage prune using canonical retention decisions."""
+"""Plan/execute storage archive using canonical retention decisions."""
 
 from __future__ import annotations
 
@@ -6,18 +6,17 @@ from pathlib import Path
 
 import typer
 
+from projections.storage_retention.archive import (
+    ArchiveParams,
+    build_archive_plan,
+    execute_archive_plan,
+    load_json,
+    write_archive_reports,
+)
 from projections.storage_retention.canonical import classify_inventory_runs
 from projections.storage_retention.config import load_storage_retention_policy
 from projections.storage_retention.inventory import InventoryParams, build_inventory
 from projections.storage_retention.paths import FAMILY_ROOTS, resolve_storage_roots
-from projections.storage_retention.prune import (
-    PruneParams,
-    assert_no_active_writer,
-    build_prune_plan,
-    execute_prune_plan,
-    load_json,
-    write_prune_reports,
-)
 
 app = typer.Typer(add_completion=False)
 
@@ -28,10 +27,17 @@ def _parse_families(raw: str | None) -> tuple[str, ...]:
     return tuple(part.strip() for part in str(raw).split(",") if part.strip())
 
 
+def _parse_classes(raw: str | None) -> tuple[str, ...]:
+    if raw is None or not str(raw).strip():
+        return ("noncanonical",)
+    return tuple(part.strip() for part in str(raw).split(",") if part.strip())
+
+
 @app.command()
 def main(
     data_root: Path | None = typer.Option(None, "--data-root"),
     hot_root: Path | None = typer.Option(None, "--hot-root"),
+    archive_root: Path | None = typer.Option(None, "--archive-root"),
     config_path: Path | None = typer.Option(None, "--config-path"),
     canonical_json: Path | None = typer.Option(
         None,
@@ -39,20 +45,29 @@ def main(
         help="Optional canonical map JSON from storage_select_canonical output.",
     ),
     families: str | None = typer.Option(None, "--families"),
+    include_classifications: str | None = typer.Option(
+        "noncanonical",
+        "--include-classifications",
+        help="Comma-separated classifications eligible for archive (default: noncanonical).",
+    ),
+    include_protected: bool = typer.Option(False, "--include-protected/--no-include-protected"),
     start_date: str | None = typer.Option(None, "--start-date", help="YYYY-MM-DD"),
     end_date: str | None = typer.Option(None, "--end-date", help="YYYY-MM-DD"),
-    min_age_hours: float = typer.Option(0.0, "--min-age-hours"),
-    max_delete_files: int | None = typer.Option(None, "--max-delete-files"),
-    max_delete_bytes: int | None = typer.Option(None, "--max-delete-bytes"),
-    require_archive_receipt: bool = typer.Option(
-        True,
-        "--require-archive-receipt/--allow-without-archive-receipt",
-        help="Require verified archive_receipt.json before prune candidate is eligible.",
-    ),
+    max_archive_files: int | None = typer.Option(None, "--max-archive-files"),
+    max_archive_bytes: int | None = typer.Option(None, "--max-archive-bytes"),
     execute: bool = typer.Option(False, "--execute/--dry-run"),
     skip_errors: bool = typer.Option(False, "--skip-errors/--no-skip-errors"),
 ) -> None:
-    roots = resolve_storage_roots(data_root=data_root, hot_root=hot_root)
+    roots = resolve_storage_roots(
+        data_root=data_root,
+        hot_root=hot_root,
+        archive_root=archive_root,
+    )
+    if roots.archive_root is None:
+        raise typer.BadParameter(
+            "archive root is required; pass --archive-root or set PROJECTIONS_ARCHIVE_ROOT"
+        )
+
     policy = load_storage_retention_policy(config_path=config_path)
 
     if canonical_json is not None:
@@ -74,30 +89,35 @@ def main(
             retention_policy=policy.retention,
         )
 
-    params = PruneParams(
+    params = ArchiveParams(
         execute=bool(execute),
-        max_delete_files=max_delete_files,
-        max_delete_bytes=max_delete_bytes,
-        min_age_hours=float(min_age_hours),
-        require_archive_receipt=bool(require_archive_receipt),
+        max_archive_files=max_archive_files,
+        max_archive_bytes=max_archive_bytes,
+        include_protected=bool(include_protected),
+        include_classifications=_parse_classes(include_classifications),
     )
-    plan = build_prune_plan(canonical_output=canonical, params=params, hot_root=roots.hot_root)
+    plan = build_archive_plan(
+        canonical_output=canonical,
+        hot_root=roots.hot_root,
+        archive_root=roots.archive_root,
+        params=params,
+    )
 
     if execute:
-        assert_no_active_writer(data_root=roots.data_root)
-        ledger = execute_prune_plan(plan=plan)
+        ledger = execute_archive_plan(plan=plan)
     else:
         ledger = None
 
-    reports = write_prune_reports(hot_root=roots.hot_root, plan=plan, ledger=ledger)
+    reports = write_archive_reports(hot_root=roots.hot_root, plan=plan, ledger=ledger)
 
-    summary = plan.get("summary") or {}
+    summary = dict(plan.get("summary") or {})
     msg = (
-        "[storage_prune] "
+        "[storage_archive] "
         f"mode={'execute' if execute else 'dry-run'} "
         f"candidates={summary.get('candidate_count', 0)} "
         f"bytes={summary.get('candidate_bytes', 0)} "
         f"files={summary.get('candidate_files', 0)} "
+        f"already={summary.get('already_archived_count', 0)} "
         f"plan={reports['plan']}"
     )
     if ledger is not None:

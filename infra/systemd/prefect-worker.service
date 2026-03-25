@@ -13,6 +13,7 @@ Environment="PREFECT_API_URL=http://127.0.0.1:4200/api"
 Environment="MLFLOW_TRACKING_URI=http://dfsbox.tail27dc61.ts.net:5000"
 Environment="MLFLOW_EXPERIMENT_NAME=projections-v2"
 Environment="PROJECTIONS_ALLOW_DIRTY=1"
+Environment="PROJECTIONS_ARCHIVE_ROOT=/mnt/archive/projections-data-archive/warm"
 Environment="PROJECTIONS_SUBPROCESS_PYTHON=/home/daniel/prod/projections-v2/.venv/bin/python"
 Environment="PYTHONFAULTHANDLER=1"
 ExecStartPre=-/home/daniel/prod/projections-v2/.venv/bin/python /home/daniel/prod/projections-v2/tools/prefect_reconcile_stale_deployment_runs.py --deployment nba-live-pipeline-v3/nba-live-pipeline --max-age-minutes 10

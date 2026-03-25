@@ -263,6 +263,10 @@ Design principle: always preserve lineage metadata; persist heavy payload only w
 ## 6) Tooling To Build
 Implement as reusable library + CLI wrappers matching current style (`python -m projections.cli.<module>`).
 
+Implementation status (2026-03-25):
+- Implemented: inventory, canonical selector, archive mover, prune planner/deleter, guard, path resolver, weekly orchestrator.
+- Pending: temp/legacy sweep (`projections/storage_retention/sweep.py`) and archive-aware historical read fallbacks for contest APIs.
+
 ## 6.1 Inventory / Audit Tool
 - Module: `projections/storage_retention/inventory.py`
 - CLI: `projections/cli/storage_inventory.py`

@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/home/daniel/prod/projections-v2
 Environment=PROJECTIONS_DATA_ROOT=/home/daniel/projections-data
+Environment=PROJECTIONS_ARCHIVE_ROOT=/mnt/archive/projections-data-archive/warm
 Environment=PROJECTIONS_PROD_ROOT=/home/daniel/prod/projections-v2
 
 # Safety: keep this as dry-run unless explicitly changed.
@@ -16,10 +17,12 @@ Environment=PROJECTIONS_RETENTION_EXECUTE=0
 Environment=PROJECTIONS_RETENTION_FAMILIES=gtv2_worlds
 Environment=PROJECTIONS_RETENTION_LOOKBACK_DAYS=30
 Environment=PROJECTIONS_RETENTION_MIN_AGE_HOURS=24
+Environment=PROJECTIONS_RETENTION_INCLUDE_CLASSIFICATIONS=noncanonical
+Environment=PROJECTIONS_RETENTION_REQUIRE_ARCHIVE_RECEIPT=1
+Environment=PROJECTIONS_RETENTION_MAX_ARCHIVE_BYTES=50000000000
 Environment=PROJECTIONS_RETENTION_MAX_DELETE_BYTES=50000000000
 
 ExecStart=/home/daniel/prod/projections-v2/scripts/storage/run_storage_retention.sh
 
 [Install]
 WantedBy=default.target
-

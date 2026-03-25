@@ -9,8 +9,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from projections.storage_retention.common import parse_any_ts, utc_now_compact, write_json
-from projections.storage_retention.paths import retention_reports_dir
+from projections.storage_retention.common import (
+    parse_any_ts,
+    read_json_file,
+    utc_now_compact,
+    write_json,
+)
+from projections.storage_retention.paths import retention_decision_dir, retention_reports_dir
 
 try:
     import fcntl
@@ -24,6 +29,7 @@ class PruneParams:
     max_delete_files: int | None = None
     max_delete_bytes: int | None = None
     min_age_hours: float = 0.0
+    require_archive_receipt: bool = True
 
 
 _LOCK_CANDIDATES: tuple[tuple[str, ...], ...] = (
@@ -67,9 +73,19 @@ def build_prune_plan(
     *,
     canonical_output: dict[str, Any],
     params: PruneParams,
+    hot_root: Path | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(tz=UTC)
     decisions = list(canonical_output.get("decisions") or [])
+    hot_root_eff = (
+        Path(hot_root).expanduser().resolve()
+        if hot_root is not None
+        else (
+            Path(str(canonical_output.get("hot_root"))).expanduser().resolve()
+            if canonical_output.get("hot_root")
+            else None
+        )
+    )
 
     candidates: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -95,6 +111,54 @@ def build_prune_plan(
                 }
             )
             continue
+
+        if bool(params.require_archive_receipt):
+            if hot_root_eff is None:
+                skipped.append(
+                    {
+                        "run_path": str(run_path),
+                        "reason": "missing_hot_root_for_receipt_check",
+                    }
+                )
+                continue
+            family = str(row.get("family") or "")
+            game_date = str(row.get("game_date") or "")
+            run_id = str(row.get("run_id") or "")
+            receipt_path = (
+                retention_decision_dir(
+                    hot_root=hot_root_eff,
+                    family=family,
+                    game_date=game_date,
+                    run_id=run_id,
+                )
+                / "archive_receipt.json"
+            )
+            receipt = read_json_file(receipt_path)
+            if not receipt:
+                skipped.append(
+                    {
+                        "run_path": str(run_path),
+                        "reason": "missing_archive_receipt",
+                    }
+                )
+                continue
+            if str(receipt.get("status") or "").lower() != "verified":
+                skipped.append(
+                    {
+                        "run_path": str(run_path),
+                        "reason": "archive_receipt_not_verified",
+                    }
+                )
+                continue
+            archived_path = Path(str(receipt.get("archive_run_path") or "")).expanduser()
+            if not archived_path.exists():
+                skipped.append(
+                    {
+                        "run_path": str(run_path),
+                        "reason": "archive_receipt_path_missing",
+                    }
+                )
+                continue
 
         as_of = parse_any_ts(row.get("as_of_ts")) or parse_any_ts(row.get("run_ts"))
         if as_of is not None and params.min_age_hours > 0:

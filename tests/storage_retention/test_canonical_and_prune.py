@@ -96,7 +96,10 @@ def test_canonical_selection_and_prune_plan(tmp_path: Path) -> None:
     assert decisions["20260320T180000Z"]["classification"] == "noncanonical"
     assert decisions["20260320T180000Z"]["protected"] is False
 
-    plan = build_prune_plan(canonical_output=canonical, params=PruneParams())
+    plan = build_prune_plan(
+        canonical_output=canonical,
+        params=PruneParams(require_archive_receipt=False),
+    )
     candidates = list(plan["candidates"])
     assert len(candidates) == 1
     assert candidates[0]["run_id"] == "20260320T180000Z"
