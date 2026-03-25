@@ -129,10 +129,11 @@ def test_apply_manual_overrides_to_frame_enforces_force_out_and_force_in(tmp_pat
         ]
     )
 
+    # as_of_ts=None defaults to now; using a past date would filter out overrides
+    # whose effective_ts was set to the upsert time.
     out, diag = apply_manual_overrides_to_frame(
         base,
         overrides_df=overrides_df,
-        as_of_ts="2026-03-01T18:00:00Z",
     )
     assert diag["matched_override_count"] == 2
 
@@ -152,4 +153,6 @@ def test_apply_manual_overrides_to_frame_enforces_force_out_and_force_in(tmp_pat
     assert pd.isna(forced_in["lineup_role"])
     assert int(forced_in["is_q"]) == 0
     assert int(forced_in["is_prob"]) == 0
+    assert float(forced_in["play_prob"]) == 1.0
+    assert float(forced_in["prior_play_prob"]) == 1.0
     assert forced_in["manual_override_type"] == "force_in"

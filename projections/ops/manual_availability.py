@@ -477,8 +477,10 @@ def apply_manual_overrides_to_frame(
         merged.loc[force_in, "is_prob"] = 0
     if "play_prob" in merged.columns:
         merged.loc[force_out, "play_prob"] = 0.0
+        merged.loc[force_in, "play_prob"] = 1.0
     if "prior_play_prob" in merged.columns:
         merged.loc[force_out, "prior_play_prob"] = 0.0
+        merged.loc[force_in, "prior_play_prob"] = 1.0
     if "lineup_role" in merged.columns:
         merged.loc[force_out, "lineup_role"] = "out"
         merged.loc[force_in & merged["lineup_role"].astype("string").str.lower().eq("out"), "lineup_role"] = pd.NA
