@@ -1919,6 +1919,59 @@ def test_repair_world_frame_contract_fields_preserves_uplifted_totals_without_re
     assert repaired["dk_fpts"].tolist() == pytest.approx(original_dk.tolist())
 
 
+def test_repair_world_frame_contract_fields_zeros_zero_minute_and_inactive_rows() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 0],
+            "game_id": [22500931, 22500931],
+            "team_id": [1610612739, 1610612739],
+            "player_id": [101, 102],
+            "active": [1, 0],
+            "minutes": [0.0, 24.0],
+            "fga2": [3.0, 4.0],
+            "fg2m": [2.0, 3.0],
+            "fga3": [2.0, 1.0],
+            "fg3m": [1.0, 1.0],
+            "fta": [1.0, 2.0],
+            "ftm": [1.0, 1.0],
+            "oreb": [1.0, 1.0],
+            "dreb": [2.0, 3.0],
+            "pts": [8.0, 10.0],
+            "reb": [3.0, 4.0],
+            "ast": [1.0, 2.0],
+            "stl": [1.0, 0.0],
+            "blk": [0.0, 1.0],
+            "tov": [1.0, 1.0],
+            "dk_fpts": [14.25, 20.5],
+        }
+    )
+
+    repaired, report = _repair_world_frame_contract_fields(worlds)
+
+    assert bool(report["applied"]) is True
+    assert int(report["zero_minute_rows_deactivated"]) == 1
+    assert int(report["zero_minute_or_inactive_rows_zeroed"]) == 2
+    assert repaired["active"].tolist() == [0, 0]
+    for col in (
+        "fga2",
+        "fg2m",
+        "fga3",
+        "fg3m",
+        "fta",
+        "ftm",
+        "oreb",
+        "dreb",
+        "pts",
+        "reb",
+        "ast",
+        "stl",
+        "blk",
+        "tov",
+        "dk_fpts",
+    ):
+        assert float(pd.to_numeric(repaired[col], errors="coerce").abs().max()) <= 1e-9
+
+
 def test_repair_world_frame_contract_fields_drops_bad_world_game_minutes_slices() -> None:
     worlds = pd.DataFrame(
         {

@@ -41,6 +41,7 @@ DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_RATIO = 0.65
 DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MIN = 12.0
 DEFAULT_FORCE_ACTIVE_MINUTES_FLOOR_MAX = 36.0
 DEFAULT_STARTER_LOW_MINUTES_TRIGGER = 10.0
+DEFAULT_ACTIVE_MINUTES_TOL = 1e-6
 
 
 @dataclass(frozen=True)
@@ -1123,6 +1124,10 @@ def sample_worlds_for_batch(
                 floor_min=float(force_active_minutes_floor_min),
                 floor_max=float(force_active_minutes_floor_max),
             )
+            # Enforce active semantics: players with effectively zero minutes are inactive.
+            sampled_active_mask = sampled_active_mask & sampled_minutes.gt(
+                float(DEFAULT_ACTIVE_MINUTES_TOL)
+            )
             # Enforce DNP semantics: inactive players contribute zero counting stats.
             flow_projected = flow_projected * sampled_active_mask.unsqueeze(-1).to(dtype=flow_projected.dtype)
             usage_share_logits: torch.Tensor | None = None
@@ -1199,6 +1204,10 @@ def sample_worlds_for_batch(
                     usage_share_logits=usage_share_logits,
                     allocation_source=alloc_source,
                     allocation_blend_alpha=float(allocation_blend_alpha),
+                )
+                # Safety re-mask after backbone alignment (allocator may fallback to valid players).
+                flow_projected = flow_projected * sampled_active_mask.unsqueeze(-1).to(
+                    dtype=flow_projected.dtype
                 )
 
         minutes = sampled_minutes.reshape(bsz, n_worlds_chunk, -1)

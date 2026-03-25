@@ -7864,3 +7864,79 @@ live pipeline was often failing before GTv2 feature assembly could complete.
   - vacancy fields
 - The refactor was introduced for stability, not model-behavior experimentation,
   so parity checks against frozen snapshots are the correct rollback gate.
+
+### 17.6 Live Propless-Tail Calibration Policy Update (2026-03-25)
+
+Scope: inference-time world post-processing in `nba-live-pipeline-v3` for GTv2 worlds.
+
+#### 17.6.1 What changed
+
+1. **Props-presence detection hardening**
+   - In `_apply_propless_tail_calibration_to_worlds(...)`, props presence now prioritizes explicit signals:
+     - `an_has_any_props`
+     - `an_props_market_count`
+     - `an_has_*`
+   - `an_*_line` fields are now fallback-only and treated as props-present only when
+     `abs(line) > _WORLD_CONTRACT_TOL` (to avoid default-filled zero-line false positives).
+
+2. **Promoted default propless-tail knobs (`c4_tight`)**
+   - `min_minutes_mean`: `18.0 -> 21.0`
+   - `min_dk_mean`: `14.0 -> 16.0`
+   - `tail_boost`: `0.18 -> 0.14`
+   - `max_tail_scale`: `1.28 -> 1.22`
+   - `mid_minutes_tail_boost`: unchanged at `0.14`
+
+3. **Default locations updated**
+   - `prefect_flows/live_nba_pipeline_v3.py`:
+     - `_apply_propless_tail_calibration_to_worlds(...)`
+     - `generate_worlds_gtv2_live_task(...)` arg defaults
+     - `materialize_unified_run_artifacts_task(...)` arg defaults
+     - `nba_live_pipeline_v3(...)` GTv2 arg defaults
+
+#### 17.6.2 Why this setting was promoted
+
+Second-round tuning around the earlier selective candidate showed:
+
+- two candidates (`c1_ref`, `c5_lowboost`) had intermittent numeric blow-ups in eval output
+  (`huge_pred_rows > 0`);
+- `c4_tight` and `c6_midplus` were stable (`huge_pred_rows = 0`);
+- among stable options, `c4_tight` gave the best 12-20 minute over-tail correction with
+  comparable overall error tradeoff.
+
+Interpretation:
+- this is a **stability-first, calibration-preserving** promotion, not a large mean-accuracy gain.
+- expected impact is modest on overall MAE, but favorable for tail realism and downstream world usability.
+
+#### 17.6.3 Acceptance criteria used for this promotion
+
+Primary:
+- no large-value projection blowups (`huge_pred_rows = 0`);
+- over-tail pressure reduced (`d_over_p95 <= 0`) overall and in key buckets:
+  - `props_bucket = propless`
+  - `minutes_bucket = 12-20`.
+
+Secondary:
+- avoid material degradation in overall point error (small MAE drift allowed);
+- preserve contract/plausibility checks (no new inactive/zero-minute realism regressions).
+
+#### 17.6.4 Post-promotion validation snapshot
+
+A focused stress rerun (`2026-03-04`, `2026-03-08`, `2026-03-11`, `2026-03-23`) with
+post-patch defaults showed:
+
+- `huge_pred_rows = 0`;
+- `over_p95` improvement (delta negative);
+- no widening of lower-tail miss rate (`under_p05` not worse);
+- MAE impact small and slightly worse (expected for this tail-focused adjustment).
+
+#### 17.6.5 Operational next steps
+
+1. Run a full 12-date post-change eval with promoted defaults only (no ad-hoc overrides).
+2. Add an automated nightly monitor to alert on:
+   - `huge_pred_rows > 0`
+   - `propless over_p95` drift above baseline band
+   - `minutes 12-20 over_p95` drift above baseline band.
+3. Keep `c6_midplus` (`mid_minutes_tail_boost=0.15`) as the next candidate only if
+   7-day live monitoring shows persistent 12-20 tail under-call with stable numerics.
+4. If mean-accuracy improvement is required, move that objective to model-level changes;
+   keep this post-processing layer constrained to realism/tail risk control.

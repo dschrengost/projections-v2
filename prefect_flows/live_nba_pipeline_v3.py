@@ -2693,6 +2693,8 @@ def _repair_world_frame_contract_fields(
     report: dict[str, Any] = {
         "applied": False,
         "game_id_from_norm_rows": 0,
+        "zero_minute_rows_deactivated": 0,
+        "zero_minute_or_inactive_rows_zeroed": 0,
         "nonfinite_stat_values_replaced": 0,
         "base_stat_cap_clipped_rows": 0,
         "base_stat_cap_clipped_rows_by_col": {},
@@ -2715,6 +2717,75 @@ def _repair_world_frame_contract_fields(
             out["game_id"] = game_id.where(~replace_mask, game_id_norm)
             report["game_id_from_norm_rows"] = replaced
             report["applied"] = True
+
+    minutes_zero_like_mask = np.zeros(len(out), dtype=bool)
+    if "minutes" in out.columns:
+        minutes_vals = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0)
+        minutes_zero_like_mask = (
+            pd.to_numeric(minutes_vals, errors="coerce")
+            .fillna(0.0)
+            .le(float(_WORLD_CONTRACT_TOL))
+            .to_numpy(dtype=bool)
+        )
+
+    inactive_mask = np.zeros(len(out), dtype=bool)
+    if "active" in out.columns:
+        active_vals = pd.to_numeric(out["active"], errors="coerce").fillna(0.0)
+        inactive_mask = active_vals.le(0.0).to_numpy(dtype=bool)
+        deactivate_rows = int(np.count_nonzero(minutes_zero_like_mask & (~inactive_mask)))
+        if deactivate_rows > 0:
+            out.loc[minutes_zero_like_mask, "active"] = 0
+            inactive_mask = pd.to_numeric(out["active"], errors="coerce").fillna(0.0).le(0.0).to_numpy(
+                dtype=bool
+            )
+            report["applied"] = True
+            report["zero_minute_rows_deactivated"] = deactivate_rows
+
+    zero_contract_mask = minutes_zero_like_mask | inactive_mask
+    if bool(np.any(zero_contract_mask)):
+        stat_zero_cols = [
+            col
+            for col in (
+                "fga2",
+                "fg2m",
+                "fga3",
+                "fg3m",
+                "fta",
+                "ftm",
+                "oreb",
+                "dreb",
+                "ast",
+                "stl",
+                "blk",
+                "tov",
+                "pf",
+                "fga",
+                "fgm",
+                "fg3a",
+                "pts",
+                "reb",
+                "dk_fpts",
+            )
+            if col in out.columns
+        ]
+        if stat_zero_cols:
+            stat_arrays = [
+                np.abs(pd.to_numeric(out[col], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False))
+                for col in stat_zero_cols
+            ]
+            stat_nonzero = (
+                np.column_stack(stat_arrays).sum(axis=1) > float(_WORLD_CONTRACT_TOL)
+                if stat_arrays
+                else np.zeros(len(out), dtype=bool)
+            )
+            rows_to_zero = zero_contract_mask & stat_nonzero
+            rows_to_zero_count = int(np.count_nonzero(rows_to_zero))
+            if rows_to_zero_count > 0:
+                for col in stat_zero_cols:
+                    out.loc[rows_to_zero, col] = 0.0
+                stat_repair_mask[:] = stat_repair_mask | rows_to_zero
+                report["applied"] = True
+                report["zero_minute_or_inactive_rows_zeroed"] = rows_to_zero_count
 
     def _clip_numeric_with_cap(
         col: str,
@@ -3775,6 +3846,411 @@ def _apply_props_uplift_calibration_to_worlds(
         )
     else:
         report["total_adjusted_players"] = 0
+    return out, report
+
+
+def _apply_propless_tail_calibration_to_worlds(
+    worlds_df: pd.DataFrame,
+    *,
+    features_df: pd.DataFrame,
+    enabled: bool = True,
+    min_minutes_mean: float = 21.0,
+    min_dk_mean: float = 16.0,
+    tail_boost: float = 0.14,
+    max_tail_scale: float = 1.22,
+    target_game_ids: set[int] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Broaden upper tails for propless players with stable minutes/fpts baselines."""
+    if not enabled:
+        return worlds_df, {"applied": False, "reason": "disabled"}
+    if worlds_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_worlds"}
+    if features_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_features"}
+
+    key_cols = ["game_id", "team_id", "player_id"]
+    required_world_cols = {"game_id", "team_id", "player_id", "minutes", "dk_fpts"}
+    missing_world_cols = sorted(required_world_cols - set(worlds_df.columns))
+    if missing_world_cols:
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_world_cols",
+            "missing_world_cols": missing_world_cols,
+        }
+    missing_feature_cols = sorted(set(key_cols) - set(features_df.columns))
+    if missing_feature_cols:
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_feature_keys",
+            "missing_feature_cols": missing_feature_cols,
+        }
+
+    indicator_cols: list[str] = []
+    if "an_props_market_count" in features_df.columns:
+        indicator_cols.append("an_props_market_count")
+    has_cols = sorted([col for col in features_df.columns if str(col).startswith("an_has_")])
+    line_cols = sorted(
+        [
+            col
+            for col in features_df.columns
+            if str(col).startswith("an_") and str(col).endswith("_line")
+        ]
+    )
+    indicator_cols.extend(has_cols)
+    indicator_cols.extend(line_cols)
+    if not indicator_cols:
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_props_indicator_columns",
+        }
+
+    tail_boost_clipped = float(np.clip(float(tail_boost), 0.0, 0.50))
+    max_tail_scale_clipped = float(max(1.0, float(max_tail_scale)))
+    min_minutes_mean_f = float(max(0.0, float(min_minutes_mean)))
+    min_dk_mean_f = float(max(0.0, float(min_dk_mean)))
+    if tail_boost_clipped <= 0.0:
+        return worlds_df, {
+            "applied": False,
+            "reason": "tail_boost_zero",
+            "tail_boost": tail_boost_clipped,
+        }
+
+    feat_cols = key_cols + [col for col in indicator_cols if col in features_df.columns]
+    feat = features_df.loc[:, feat_cols].copy()
+    agg_dict: dict[str, str] = {}
+    for col in feat.columns:
+        if col in key_cols:
+            continue
+        if str(col).startswith("an_has_"):
+            agg_dict[col] = "max"
+        elif str(col) == "an_props_market_count":
+            agg_dict[col] = "max"
+        else:
+            agg_dict[col] = "first"
+    feat = feat.groupby(key_cols, dropna=False, as_index=False).agg(agg_dict)
+
+    has_any_props = np.zeros(len(feat), dtype=bool)
+    has_explicit_props_indicator = False
+    if "an_has_any_props" in feat.columns:
+        has_explicit_props_indicator = True
+        has_any_props |= (
+            pd.to_numeric(feat["an_has_any_props"], errors="coerce")
+            .fillna(0.0)
+            .ge(0.5)
+            .to_numpy(dtype=bool)
+        )
+    if "an_props_market_count" in feat.columns:
+        has_explicit_props_indicator = True
+        has_any_props |= (
+            pd.to_numeric(feat["an_props_market_count"], errors="coerce")
+            .fillna(0.0)
+            .ge(1.0)
+            .to_numpy(dtype=bool)
+        )
+    for col in has_cols:
+        if col in feat.columns:
+            has_explicit_props_indicator = True
+            has_any_props |= (
+                pd.to_numeric(feat[col], errors="coerce")
+                .fillna(0.0)
+                .ge(0.5)
+                .to_numpy(dtype=bool)
+            )
+    # Some live frames default-fill *_line columns (often 0.0) for all rows.
+    # Only use line columns as a fallback signal when explicit has/market
+    # indicators are unavailable.
+    if not has_explicit_props_indicator:
+        for col in line_cols:
+            if col in feat.columns:
+                has_any_props |= (
+                    pd.to_numeric(feat[col], errors="coerce")
+                    .fillna(0.0)
+                    .abs()
+                    .gt(float(_WORLD_CONTRACT_TOL))
+                    .to_numpy(dtype=bool)
+                )
+    feat["has_any_props"] = has_any_props.astype(np.int8)
+
+    stat_cols = [col for col in ("pts", "reb", "ast", "stl", "blk") if col in worlds_df.columns]
+    if not stat_cols:
+        return worlds_df, {"applied": False, "reason": "missing_tail_stat_columns"}
+    mean_cols = ["minutes", "dk_fpts", *stat_cols]
+    player_means = _group_mean_by_keys_without_pandas_groupby(
+        worlds_df,
+        key_cols=key_cols,
+        value_cols=mean_cols,
+        label="propless_tail/player_means",
+    )
+    if player_means.empty:
+        return worlds_df, {"applied": False, "reason": "empty_player_means"}
+    player_means = player_means.rename(
+        columns={
+            "minutes": "minutes_mean",
+            "dk_fpts": "dk_fpts_mean",
+            **{col: f"{col}_mean" for col in stat_cols},
+        }
+    )
+    meta = _left_overlay_from_source_by_keys(
+        player_means,
+        source_df=feat.loc[:, key_cols + ["has_any_props"]],
+        key_cols=key_cols,
+        value_cols=("has_any_props",),
+        label="propless_tail/feature_overlay",
+    )
+    has_props = (
+        pd.to_numeric(meta.get("has_any_props", 0.0), errors="coerce")
+        .fillna(0.0)
+        .ge(0.5)
+        .to_numpy(dtype=bool)
+    )
+    minutes_mean = pd.to_numeric(meta["minutes_mean"], errors="coerce").fillna(0.0)
+    dk_mean = pd.to_numeric(meta["dk_fpts_mean"], errors="coerce").fillna(0.0)
+    propless = ~has_props
+    minutes_strength = (
+        (minutes_mean - min_minutes_mean_f) / max(1.0, 30.0 - min_minutes_mean_f)
+    ).clip(lower=0.0, upper=1.0)
+    dk_strength = ((dk_mean - min_dk_mean_f) / max(1.0, 35.0 - min_dk_mean_f)).clip(
+        lower=0.0, upper=1.0
+    )
+    confidence = (0.6 * minutes_strength + 0.4 * dk_strength).clip(lower=0.0, upper=1.0)
+    eligible = propless & confidence.gt(0.0)
+    if not bool(eligible.any()):
+        return worlds_df, {
+            "applied": False,
+            "reason": "no_eligible_propless_players",
+            "propless_player_count": int(np.count_nonzero(propless)),
+        }
+
+    tail_scale = (
+        1.0
+        + tail_boost_clipped
+        * pd.to_numeric(confidence, errors="coerce").fillna(0.0)
+    ).clip(lower=1.0, upper=max_tail_scale_clipped)
+    eligible_players = meta.loc[eligible, key_cols].copy()
+    eligible_players["propless_tail_scale"] = tail_scale.loc[eligible].astype(float).values
+    eligible_players["propless_tail_confidence"] = confidence.loc[eligible].astype(float).values
+    if eligible_players.empty:
+        return worlds_df, {"applied": False, "reason": "no_eligible_player_rows"}
+
+    out = worlds_df.copy()
+    out = _left_overlay_from_source_by_keys(
+        out,
+        source_df=eligible_players,
+        key_cols=key_cols,
+        value_cols=("propless_tail_scale", "propless_tail_confidence"),
+        label="propless_tail/scale_overlay",
+        copy_base=False,
+    )
+    row_scale = (
+        pd.to_numeric(out.get("propless_tail_scale", 1.0), errors="coerce")
+        .fillna(1.0)
+        .clip(lower=1.0, upper=max_tail_scale_clipped)
+        .to_numpy(dtype=float, copy=False)
+    )
+    row_eligible = row_scale > 1.0 + _WORLD_CONTRACT_TOL
+    if target_game_ids:
+        game_ids = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
+        row_eligible &= game_ids.isin(sorted(target_game_ids)).to_numpy(dtype=bool)
+    if not bool(np.any(row_eligible)):
+        out = out.drop(columns=["propless_tail_scale", "propless_tail_confidence"], errors="ignore")
+        return out, {
+            "applied": False,
+            "reason": "no_eligible_world_rows",
+            "eligible_player_count": int(len(eligible_players)),
+            "target_game_count": int(len(target_game_ids or set())),
+        }
+
+    mean_overlay = player_means.loc[:, key_cols + [f"{col}_mean" for col in stat_cols]]
+    out = _left_overlay_from_source_by_keys(
+        out,
+        source_df=mean_overlay,
+        key_cols=key_cols,
+        value_cols=[f"{col}_mean" for col in stat_cols],
+        label="propless_tail/mean_overlay",
+        copy_base=False,
+    )
+
+    for col in stat_cols:
+        mean_col = f"{col}_mean"
+        cap = float(_WORLD_BASE_STAT_CAPS.get(col, 1_000.0))
+        x = pd.to_numeric(out[col], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        mu = (
+            pd.to_numeric(out.get(mean_col, 0.0), errors="coerce")
+            .fillna(0.0)
+            .to_numpy(dtype=float, copy=False)
+        )
+        resid = x - mu
+        resid_pos = np.maximum(resid, 0.0)
+        resid_neg = np.minimum(resid, 0.0)
+        x_new = np.clip(
+            np.nan_to_num(mu + resid_neg + row_scale * resid_pos, nan=0.0, posinf=cap, neginf=0.0),
+            0.0,
+            cap,
+        )
+        out[col] = np.where(row_eligible, x_new, x)
+        out = out.drop(columns=[mean_col], errors="ignore")
+
+    if {"oreb", "dreb", "reb"}.issubset(out.columns):
+        oreb_cap = float(_WORLD_BASE_STAT_CAPS.get("oreb", 25.0))
+        dreb_cap = float(_WORLD_BASE_STAT_CAPS.get("dreb", 30.0))
+        oreb = pd.to_numeric(out["oreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        dreb = pd.to_numeric(out["dreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        reb = pd.to_numeric(out["reb"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        split_sum = np.maximum(oreb + dreb, 1e-6)
+        oreb_share = np.divide(oreb, split_sum)
+        oreb_new = np.clip(reb * oreb_share, 0.0, oreb_cap)
+        dreb_new = np.clip(reb * (1.0 - oreb_share), 0.0, dreb_cap)
+        out["oreb"] = np.where(row_eligible, oreb_new, oreb)
+        out["dreb"] = np.where(row_eligible, dreb_new, dreb)
+
+    dk_cap = float(_WORLD_DERIVED_STAT_CAPS.get("dk_fpts", 150.0))
+    dk = _recompute_dk_fpts(out).to_numpy(dtype=float, copy=False)
+    out["dk_fpts"] = np.clip(np.nan_to_num(dk, nan=0.0, posinf=dk_cap, neginf=0.0), 0.0, dk_cap)
+    out = out.drop(columns=["propless_tail_scale", "propless_tail_confidence"], errors="ignore")
+
+    report = {
+        "applied": True,
+        "eligible_player_count": int(len(eligible_players)),
+        "eligible_world_row_count": int(np.count_nonzero(row_eligible)),
+        "target_game_count": int(len(target_game_ids or set())),
+        "min_minutes_mean": min_minutes_mean_f,
+        "min_dk_mean": min_dk_mean_f,
+        "tail_boost": tail_boost_clipped,
+        "max_tail_scale": max_tail_scale_clipped,
+        "scale_mean": float(np.mean(row_scale[row_eligible])) if bool(np.any(row_eligible)) else 1.0,
+        "scale_p90": float(np.quantile(row_scale[row_eligible], 0.90)) if bool(np.any(row_eligible)) else 1.0,
+    }
+    return out, report
+
+
+def _apply_mid_minutes_tail_calibration_to_worlds(
+    worlds_df: pd.DataFrame,
+    *,
+    enabled: bool = True,
+    min_minutes: float = 12.0,
+    max_minutes: float = 20.0,
+    tail_boost: float = 0.14,
+    target_game_ids: set[int] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Targeted upper-tail lift for 12-20 minute rows while preserving lower tails."""
+    if not enabled:
+        return worlds_df, {"applied": False, "reason": "disabled"}
+    if worlds_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_worlds"}
+
+    required = {"game_id", "team_id", "player_id", "minutes", "dk_fpts"}
+    missing = sorted(required - set(worlds_df.columns))
+    if missing:
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_required_columns",
+            "missing_columns": missing,
+        }
+
+    lo = float(max(0.0, min(float(min_minutes), float(max_minutes))))
+    hi = float(max(float(min_minutes), float(max_minutes)))
+    if hi <= lo:
+        return worlds_df, {
+            "applied": False,
+            "reason": "invalid_minutes_window",
+            "min_minutes": lo,
+            "max_minutes": hi,
+        }
+    boost = float(np.clip(float(tail_boost), 0.0, 0.40))
+    if boost <= 0.0:
+        return worlds_df, {"applied": False, "reason": "tail_boost_zero", "tail_boost": boost}
+
+    out = worlds_df.copy()
+    minutes = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+    bucket_mask = (minutes >= lo) & (minutes <= hi)
+    if target_game_ids:
+        game_ids = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64")
+        bucket_mask &= game_ids.isin(sorted(target_game_ids)).to_numpy(dtype=bool)
+    if not bool(np.any(bucket_mask)):
+        return out, {
+            "applied": False,
+            "reason": "no_rows_in_minutes_bucket",
+            "min_minutes": lo,
+            "max_minutes": hi,
+            "target_game_count": int(len(target_game_ids or set())),
+        }
+
+    key_cols = ["game_id", "team_id", "player_id"]
+    stat_cols = [col for col in ("pts", "reb", "ast", "stl", "blk") if col in out.columns]
+    if not stat_cols:
+        return out, {"applied": False, "reason": "missing_tail_stat_columns"}
+
+    player_means = _group_mean_by_keys_without_pandas_groupby(
+        out,
+        key_cols=key_cols,
+        value_cols=stat_cols,
+        label="mid_minutes_tail/player_means",
+    ).rename(columns={col: f"{col}_mean" for col in stat_cols})
+    out = _left_overlay_from_source_by_keys(
+        out,
+        source_df=player_means,
+        key_cols=key_cols,
+        value_cols=[f"{col}_mean" for col in stat_cols],
+        label="mid_minutes_tail/mean_overlay",
+        copy_base=False,
+    )
+
+    center = 0.5 * (lo + hi)
+    half_span = max((hi - lo) * 0.5, 1e-6)
+    shape = np.clip(1.0 - np.abs(minutes - center) / half_span, 0.0, 1.0)
+    row_scale = 1.0 + boost * shape
+
+    for col in stat_cols:
+        mean_col = f"{col}_mean"
+        cap = float(_WORLD_BASE_STAT_CAPS.get(col, 1_000.0))
+        x = pd.to_numeric(out[col], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        mu = (
+            pd.to_numeric(out.get(mean_col, 0.0), errors="coerce")
+            .fillna(0.0)
+            .to_numpy(dtype=float, copy=False)
+        )
+        resid = x - mu
+        resid_pos = np.maximum(resid, 0.0)
+        resid_neg = np.minimum(resid, 0.0)
+        x_new = np.clip(
+            np.nan_to_num(mu + resid_neg + row_scale * resid_pos, nan=0.0, posinf=cap, neginf=0.0),
+            0.0,
+            cap,
+        )
+        out[col] = np.where(bucket_mask, x_new, x)
+        out = out.drop(columns=[mean_col], errors="ignore")
+
+    if {"oreb", "dreb", "reb"}.issubset(out.columns):
+        oreb_cap = float(_WORLD_BASE_STAT_CAPS.get("oreb", 25.0))
+        dreb_cap = float(_WORLD_BASE_STAT_CAPS.get("dreb", 30.0))
+        oreb = pd.to_numeric(out["oreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        dreb = pd.to_numeric(out["dreb"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        reb = pd.to_numeric(out["reb"], errors="coerce").fillna(0.0).to_numpy(dtype=float, copy=False)
+        split_sum = np.maximum(oreb + dreb, 1e-6)
+        oreb_share = np.divide(oreb, split_sum)
+        oreb_new = np.clip(reb * oreb_share, 0.0, oreb_cap)
+        dreb_new = np.clip(reb * (1.0 - oreb_share), 0.0, dreb_cap)
+        out["oreb"] = np.where(bucket_mask, oreb_new, oreb)
+        out["dreb"] = np.where(bucket_mask, dreb_new, dreb)
+
+    dk_cap = float(_WORLD_DERIVED_STAT_CAPS.get("dk_fpts", 150.0))
+    dk = _recompute_dk_fpts(out).to_numpy(dtype=float, copy=False)
+    out["dk_fpts"] = np.clip(np.nan_to_num(dk, nan=0.0, posinf=dk_cap, neginf=0.0), 0.0, dk_cap)
+    report = {
+        "applied": True,
+        "min_minutes": lo,
+        "max_minutes": hi,
+        "tail_boost": boost,
+        "target_game_count": int(len(target_game_ids or set())),
+        "affected_rows": int(np.count_nonzero(bucket_mask)),
+        "affected_players": int(
+            out.loc[bucket_mask, key_cols].drop_duplicates().shape[0]
+            if bool(np.any(bucket_mask))
+            else 0
+        ),
+        "scale_mean": float(np.mean(row_scale[bucket_mask])) if bool(np.any(bucket_mask)) else 1.0,
+        "scale_p90": float(np.quantile(row_scale[bucket_mask], 0.90)) if bool(np.any(bucket_mask)) else 1.0,
+    }
     return out, report
 
 
@@ -5374,6 +5850,15 @@ def generate_worlds_gtv2_live_task(
     apply_props_uplift: bool = True,
     props_uplift_scope: str = "all_players",
     props_uplift_confidence_weighted: bool = True,
+    apply_propless_tail_calibration: bool = True,
+    propless_tail_min_minutes_mean: float = 21.0,
+    propless_tail_min_dk_mean: float = 16.0,
+    propless_tail_boost: float = 0.14,
+    propless_tail_max_scale: float = 1.22,
+    apply_mid_minutes_tail_calibration: bool = True,
+    mid_minutes_tail_min_minutes: float = 12.0,
+    mid_minutes_tail_max_minutes: float = 20.0,
+    mid_minutes_tail_boost: float = 0.14,
     apply_world_realism_controls: bool = True,
     world_realism_low_minutes_tail_damping_enabled: bool = True,
     world_realism_low_minutes_threshold: float = 12.0,
@@ -5437,6 +5922,14 @@ def generate_worlds_gtv2_live_task(
                 "total_violations": 0,
             },
             "world_realism_controls": {
+                "applied": False,
+                "reason": "placeholder_mode",
+            },
+            "propless_tail_calibration": {
+                "applied": False,
+                "reason": "placeholder_mode",
+            },
+            "mid_minutes_tail_calibration": {
                 "applied": False,
                 "reason": "placeholder_mode",
             },
@@ -5708,6 +6201,31 @@ def generate_worlds_gtv2_live_task(
                 logger.info("Applied props uplift calibration: %s", props_uplift_report)
         else:
             props_uplift_report = {"applied": False, "reason": "disabled"}
+        worlds_df, propless_tail_report = _apply_propless_tail_calibration_to_worlds(
+            worlds_df,
+            features_df=features_df,
+            enabled=bool(apply_propless_tail_calibration),
+            min_minutes_mean=float(propless_tail_min_minutes_mean),
+            min_dk_mean=float(propless_tail_min_dk_mean),
+            tail_boost=float(propless_tail_boost),
+            max_tail_scale=float(propless_tail_max_scale),
+            target_game_ids=None,
+        )
+        if bool(propless_tail_report.get("applied")):
+            logger.info("Applied propless tail calibration: %s", propless_tail_report)
+        worlds_df, mid_minutes_tail_report = _apply_mid_minutes_tail_calibration_to_worlds(
+            worlds_df,
+            enabled=bool(apply_mid_minutes_tail_calibration),
+            min_minutes=float(mid_minutes_tail_min_minutes),
+            max_minutes=float(mid_minutes_tail_max_minutes),
+            tail_boost=float(mid_minutes_tail_boost),
+            target_game_ids=None,
+        )
+        if bool(mid_minutes_tail_report.get("applied")):
+            logger.info(
+                "Applied mid-minutes tail calibration: %s",
+                mid_minutes_tail_report,
+            )
         worlds_df, world_realism_report = _apply_world_realism_controls_to_worlds(
             worlds_df,
             enabled=bool(apply_world_realism_controls),
@@ -5805,6 +6323,8 @@ def generate_worlds_gtv2_live_task(
             "force_active_guardrails": force_active_diag,
             "game_date_normalization": game_date_normalization_report,
             "props_uplift_calibration": props_uplift_report,
+            "propless_tail_calibration": propless_tail_report,
+            "mid_minutes_tail_calibration": mid_minutes_tail_report,
             "world_realism_controls": world_realism_report,
             "world_contract_field_repair": world_contract_repair_report,
             "world_contract_field_repair_post_sanitize": (
@@ -6082,6 +6602,15 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     target_game_ids: list[int],
     props_uplift_scope: str,
     props_uplift_confidence_weighted: bool,
+    apply_propless_tail_calibration: bool,
+    propless_tail_min_minutes_mean: float,
+    propless_tail_min_dk_mean: float,
+    propless_tail_boost: float,
+    propless_tail_max_scale: float,
+    apply_mid_minutes_tail_calibration: bool,
+    mid_minutes_tail_min_minutes: float,
+    mid_minutes_tail_max_minutes: float,
+    mid_minutes_tail_boost: float,
     apply_world_realism_controls: bool,
     world_realism_low_minutes_tail_damping_enabled: bool,
     world_realism_low_minutes_threshold: float,
@@ -6089,7 +6618,14 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     world_realism_outlier_resample_enabled: bool,
     world_realism_outlier_resample_max_passes: int,
     random_seed: int,
-) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[
+    pd.DataFrame,
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+]:
     """Post-process only target games when materializing game-scoped merges."""
     target_ids = _normalize_game_ids(target_game_ids)
     scope_report = {
@@ -6099,17 +6635,17 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     }
     if worlds_df.empty:
         base = {"applied": False, "reason": "empty_worlds", **scope_report}
-        return worlds_df, dict(base), dict(base), dict(base)
+        return worlds_df, dict(base), dict(base), dict(base), dict(base), dict(base)
     if not target_ids:
         base = {"applied": False, "reason": "no_target_games", **scope_report}
-        return worlds_df, dict(base), dict(base), dict(base)
+        return worlds_df, dict(base), dict(base), dict(base), dict(base), dict(base)
     if "game_id" not in worlds_df.columns:
         base = {
             "applied": False,
             "reason": "missing_world_game_id",
             **scope_report,
         }
-        return worlds_df, dict(base), dict(base), dict(base)
+        return worlds_df, dict(base), dict(base), dict(base), dict(base), dict(base)
 
     world_game_ids = pd.to_numeric(worlds_df["game_id"], errors="coerce").astype("Int64")
     target_mask = world_game_ids.isin(target_ids).to_numpy(dtype=bool)
@@ -6117,7 +6653,7 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     scope_report["target_row_count_before"] = target_rows_before
     if target_rows_before <= 0:
         base = {"applied": False, "reason": "no_target_world_rows", **scope_report}
-        return worlds_df, dict(base), dict(base), dict(base)
+        return worlds_df, dict(base), dict(base), dict(base), dict(base), dict(base)
 
     untouched_worlds = worlds_df.loc[~target_mask].copy()
     target_worlds = worlds_df.loc[target_mask].reset_index(drop=True).copy()
@@ -6128,6 +6664,24 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
         features_df=target_features,
         scope=str(props_uplift_scope),
         confidence_weighted=bool(props_uplift_confidence_weighted),
+    )
+    target_worlds, propless_tail_report = _apply_propless_tail_calibration_to_worlds(
+        target_worlds,
+        features_df=target_features,
+        enabled=bool(apply_propless_tail_calibration),
+        min_minutes_mean=float(propless_tail_min_minutes_mean),
+        min_dk_mean=float(propless_tail_min_dk_mean),
+        tail_boost=float(propless_tail_boost),
+        max_tail_scale=float(propless_tail_max_scale),
+        target_game_ids=None,
+    )
+    target_worlds, mid_minutes_tail_report = _apply_mid_minutes_tail_calibration_to_worlds(
+        target_worlds,
+        enabled=bool(apply_mid_minutes_tail_calibration),
+        min_minutes=float(mid_minutes_tail_min_minutes),
+        max_minutes=float(mid_minutes_tail_max_minutes),
+        tail_boost=float(mid_minutes_tail_boost),
+        target_game_ids=None,
     )
     target_worlds, world_realism_report = _apply_world_realism_controls_to_worlds(
         target_worlds,
@@ -6164,6 +6718,8 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     return (
         merged_worlds,
         _annotate_scope(props_uplift_report),
+        _annotate_scope(propless_tail_report),
+        _annotate_scope(mid_minutes_tail_report),
         _annotate_scope(world_realism_report),
         _annotate_scope(world_contract_repair_report),
     )
@@ -6178,6 +6734,15 @@ def materialize_unified_run_artifacts_task(
     target_game_ids: list[int],
     props_uplift_scope: str = "all_players",
     props_uplift_confidence_weighted: bool = True,
+    apply_propless_tail_calibration: bool = True,
+    propless_tail_min_minutes_mean: float = 21.0,
+    propless_tail_min_dk_mean: float = 16.0,
+    propless_tail_boost: float = 0.14,
+    propless_tail_max_scale: float = 1.22,
+    apply_mid_minutes_tail_calibration: bool = True,
+    mid_minutes_tail_min_minutes: float = 12.0,
+    mid_minutes_tail_max_minutes: float = 20.0,
+    mid_minutes_tail_boost: float = 0.14,
     apply_world_realism_controls: bool = True,
     world_realism_low_minutes_tail_damping_enabled: bool = True,
     world_realism_low_minutes_threshold: float = 12.0,
@@ -6266,13 +6831,29 @@ def materialize_unified_run_artifacts_task(
         key_cols=("game_id", "team_id", "player_id"),
         label="merged worlds",
     )
-    merged_worlds, props_uplift_report, world_realism_report, world_contract_repair_report = (
+    (
+        merged_worlds,
+        props_uplift_report,
+        propless_tail_report,
+        mid_minutes_tail_report,
+        world_realism_report,
+        world_contract_repair_report,
+    ) = (
         _postprocess_target_world_slice_for_game_scoped_merge(
             worlds_df=merged_worlds,
             features_df=merged_features,
             target_game_ids=target_ids,
             props_uplift_scope=str(props_uplift_scope),
             props_uplift_confidence_weighted=bool(props_uplift_confidence_weighted),
+            apply_propless_tail_calibration=bool(apply_propless_tail_calibration),
+            propless_tail_min_minutes_mean=float(propless_tail_min_minutes_mean),
+            propless_tail_min_dk_mean=float(propless_tail_min_dk_mean),
+            propless_tail_boost=float(propless_tail_boost),
+            propless_tail_max_scale=float(propless_tail_max_scale),
+            apply_mid_minutes_tail_calibration=bool(apply_mid_minutes_tail_calibration),
+            mid_minutes_tail_min_minutes=float(mid_minutes_tail_min_minutes),
+            mid_minutes_tail_max_minutes=float(mid_minutes_tail_max_minutes),
+            mid_minutes_tail_boost=float(mid_minutes_tail_boost),
             apply_world_realism_controls=bool(apply_world_realism_controls),
             world_realism_low_minutes_tail_damping_enabled=bool(
                 world_realism_low_minutes_tail_damping_enabled
@@ -6427,6 +7008,8 @@ def materialize_unified_run_artifacts_task(
         "rows": int(len(merged_worlds)),
         "projection_rows": int(len(merged_world_projections)),
         "props_uplift_calibration": props_uplift_report,
+        "propless_tail_calibration": propless_tail_report,
+        "mid_minutes_tail_calibration": mid_minutes_tail_report,
         "world_realism_controls": world_realism_report,
         "world_contract_field_repair": world_contract_repair_report,
         "world_contract_field_repair_post_sanitize": (
@@ -6645,6 +7228,15 @@ def nba_live_pipeline_v3_flow(
     gtv2_make_model_use_learned_efficiency: bool = True,
     gtv2_props_uplift_scope: str = "all_players",
     gtv2_props_uplift_confidence_weighted: bool = True,
+    gtv2_apply_propless_tail_calibration: bool = True,
+    gtv2_propless_tail_min_minutes_mean: float = 21.0,
+    gtv2_propless_tail_min_dk_mean: float = 16.0,
+    gtv2_propless_tail_boost: float = 0.14,
+    gtv2_propless_tail_max_scale: float = 1.22,
+    gtv2_apply_mid_minutes_tail_calibration: bool = True,
+    gtv2_mid_minutes_tail_min_minutes: float = 12.0,
+    gtv2_mid_minutes_tail_max_minutes: float = 20.0,
+    gtv2_mid_minutes_tail_boost: float = 0.14,
     gtv2_apply_world_realism_controls: bool = True,
     gtv2_world_realism_low_minutes_tail_damping_enabled: bool = True,
     gtv2_world_realism_low_minutes_threshold: float = 12.0,
@@ -7142,6 +7734,23 @@ def nba_live_pipeline_v3_flow(
             props_uplift_confidence_weighted=bool(
                 gtv2_props_uplift_confidence_weighted
             ),
+            apply_propless_tail_calibration=bool(
+                gtv2_apply_propless_tail_calibration
+                and rerun_plan.get("mode") == "full_slate"
+            ),
+            propless_tail_min_minutes_mean=float(
+                gtv2_propless_tail_min_minutes_mean
+            ),
+            propless_tail_min_dk_mean=float(gtv2_propless_tail_min_dk_mean),
+            propless_tail_boost=float(gtv2_propless_tail_boost),
+            propless_tail_max_scale=float(gtv2_propless_tail_max_scale),
+            apply_mid_minutes_tail_calibration=bool(
+                gtv2_apply_mid_minutes_tail_calibration
+                and rerun_plan.get("mode") == "full_slate"
+            ),
+            mid_minutes_tail_min_minutes=float(gtv2_mid_minutes_tail_min_minutes),
+            mid_minutes_tail_max_minutes=float(gtv2_mid_minutes_tail_max_minutes),
+            mid_minutes_tail_boost=float(gtv2_mid_minutes_tail_boost),
             apply_world_realism_controls=bool(gtv2_apply_world_realism_controls),
             world_realism_low_minutes_tail_damping_enabled=bool(
                 gtv2_world_realism_low_minutes_tail_damping_enabled
@@ -7212,6 +7821,25 @@ def nba_live_pipeline_v3_flow(
                 props_uplift_confidence_weighted=bool(
                     gtv2_props_uplift_confidence_weighted
                 ),
+                apply_propless_tail_calibration=bool(
+                    gtv2_apply_propless_tail_calibration
+                ),
+                propless_tail_min_minutes_mean=float(
+                    gtv2_propless_tail_min_minutes_mean
+                ),
+                propless_tail_min_dk_mean=float(gtv2_propless_tail_min_dk_mean),
+                propless_tail_boost=float(gtv2_propless_tail_boost),
+                propless_tail_max_scale=float(gtv2_propless_tail_max_scale),
+                apply_mid_minutes_tail_calibration=bool(
+                    gtv2_apply_mid_minutes_tail_calibration
+                ),
+                mid_minutes_tail_min_minutes=float(
+                    gtv2_mid_minutes_tail_min_minutes
+                ),
+                mid_minutes_tail_max_minutes=float(
+                    gtv2_mid_minutes_tail_max_minutes
+                ),
+                mid_minutes_tail_boost=float(gtv2_mid_minutes_tail_boost),
                 apply_world_realism_controls=bool(gtv2_apply_world_realism_controls),
                 world_realism_low_minutes_tail_damping_enabled=bool(
                     gtv2_world_realism_low_minutes_tail_damping_enabled

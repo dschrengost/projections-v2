@@ -80,7 +80,7 @@ Rules:
 | `rates-training-base-refresh` | 4:05 AM daily | Refresh rates training base partitions |
 | `gamerotation-scrape` | 4:15 AM daily | Scrape NBA Stats GameRotation feed |
 | `rotation-priors-update` | 4:45 AM daily | Rebuild rotation priors after scrape |
-| `nightly-eval` | 3 AM daily | Model evaluation |
+| `nightly-eval` | 3 AM daily | Model evaluation + GTv2 nightly calibration monitor (`reports/gtv2_calibration/`) |
 | `minutes-retrain-pipeline` | Weekly (Tue 10 AM ET) | Minutes recency retrain + head-to-head eval vs prod |
 | `rates-retrain-pipeline` | Weekly trigger (Tue 10 AM ET, biweekly gate in flow) | Rates recency retrain + calibration diagnostics + head-to-head guardrails + auto-promotion |
 | `rates-calibration-monitor` | Weekly (Tue 9 AM ET) | Calibration diagnostics (decile curves / efficiency heads) for current production rates run |

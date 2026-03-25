@@ -515,6 +515,90 @@ def test_sample_worlds_for_batch_honors_force_active_worlds_mask() -> None:
         assert int(pid_rows["active"].min()) == 1
 
 
+def test_sample_worlds_for_batch_zero_minute_forced_active_rows_remain_inactive() -> None:
+    cols = list(FLOW_TARGET_COLUMNS_V1)
+
+    class _FlowHead:
+        def sample(self, z: torch.Tensor, **_: object) -> torch.Tensor:
+            return torch.ones_like(z, dtype=torch.float32)
+
+    class _Out:
+        def __init__(
+            self,
+            valid_flat: torch.Tensor,
+            active_flat: torch.Tensor,
+            minutes_flat: torch.Tensor,
+            team_idx: torch.Tensor,
+        ) -> None:
+            self.player_states = torch.zeros((valid_flat.shape[0], 30, 4), dtype=torch.float32)
+            self.team_states = torch.zeros((valid_flat.shape[0], 2, 4), dtype=torch.float32)
+            self.game_state = torch.zeros((valid_flat.shape[0], 4), dtype=torch.float32)
+            self.player_valid_mask = valid_flat
+            self.player_team_index = team_idx
+            self.active = type("Active", (), {"active_mask": active_flat})()
+            self.minutes = type("Minutes", (), {"minutes": minutes_flat})()
+            self.flow = None
+            self.backbone = None
+            self.usage_share = None
+            self.efficiency = None
+
+    class _Model:
+        def __init__(self) -> None:
+            self.flow_head = _FlowHead()
+            self.flow_target_columns = cols
+            self.enable_possession_backbone = False
+
+        def __call__(self, pf: torch.Tensor, pvm: torch.Tensor, **_: object) -> _Out:
+            bsz = int(pf.shape[0])
+            valid_flat = pvm.reshape(bsz, -1).to(dtype=torch.bool)
+            active_flat = torch.zeros_like(valid_flat, dtype=torch.bool)
+            minutes_flat = torch.zeros((bsz, 30), dtype=torch.float32)
+            minutes_flat[:, 1:6] = 48.0
+            minutes_flat[:, 15:20] = 48.0
+            team_idx = _team_index(bsz)
+            return _Out(
+                valid_flat=valid_flat,
+                active_flat=active_flat,
+                minutes_flat=minutes_flat,
+                team_idx=team_idx,
+            )
+
+    player_ids = torch.arange(1001, 1031, dtype=torch.long).reshape(1, 2, 15)
+    player_valid_mask = torch.zeros((1, 2, 15), dtype=torch.bool)
+    player_valid_mask[:, 0, :6] = True
+    player_valid_mask[:, 1, :5] = True
+    force_active_worlds = torch.zeros((1, 2, 15), dtype=torch.bool)
+    force_active_worlds[:, 0, 0] = True
+
+    batch: dict[str, torch.Tensor | list[str]] = {
+        "player_features": torch.zeros((1, 2, 15, 2), dtype=torch.float32),
+        "player_valid_mask": player_valid_mask,
+        "force_active_worlds": force_active_worlds,
+        "game_features": torch.zeros((1, 0), dtype=torch.float32),
+        "team_features": torch.zeros((1, 2, 0), dtype=torch.float32),
+        "player_ids": player_ids,
+        "team_ids": torch.tensor([[10, 20]], dtype=torch.long),
+        "game_id_norm": ["1001"],
+        "game_date": ["2026-01-18"],
+    }
+
+    worlds_df, checks = sample_worlds_for_batch(
+        _Model(),
+        batch,
+        device=torch.device("cpu"),
+        num_worlds=2,
+        chunk_size=2,
+        active_temperature=1.0,
+        strict_contracts=True,
+    )
+    assert checks["total_violations"] == 0
+    forced_rows = worlds_df.loc[worlds_df["player_id"] == 1001]
+    assert len(forced_rows) == 2
+    assert int(forced_rows["active"].max()) == 0
+    assert float(forced_rows["minutes"].max()) <= 1e-6
+    assert float(forced_rows["dk_fpts"].max()) <= 1e-6
+
+
 def test_sample_worlds_for_batch_applies_props_anchor_floor_for_manual_and_low_minute_starter() -> None:
     cols = list(FLOW_TARGET_COLUMNS_V1)
 

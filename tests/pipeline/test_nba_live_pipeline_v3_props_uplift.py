@@ -4,7 +4,10 @@ import pandas as pd
 import pytest
 from pandas.core.groupby.generic import DataFrameGroupBy
 
-from prefect_flows.live_nba_pipeline_v3 import _apply_props_uplift_calibration_to_worlds
+from prefect_flows.live_nba_pipeline_v3 import (
+    _apply_propless_tail_calibration_to_worlds,
+    _apply_props_uplift_calibration_to_worlds,
+)
 
 
 def test_props_uplift_handles_existing_direction_suffix_columns() -> None:
@@ -210,3 +213,112 @@ def test_props_uplift_adjusts_stocks_bidirectionally() -> None:
     assert wemby["blk"].mean() > 2.0
     assert dyson["stl"].mean() < 1.8
     assert dyson["blk"].mean() < 0.9
+
+
+def test_propless_tail_calibration_only_adjusts_propless_players() -> None:
+    worlds_df = pd.DataFrame(
+        {
+            "world_idx": [0, 1, 2, 3, 0, 1, 2, 3],
+            "game_id": [1, 1, 1, 1, 1, 1, 1, 1],
+            "team_id": [10, 10, 10, 10, 20, 20, 20, 20],
+            "player_id": [100, 100, 100, 100, 200, 200, 200, 200],
+            "minutes": [24.0, 24.0, 24.0, 24.0, 32.0, 32.0, 32.0, 32.0],
+            "pts": [10.0, 12.0, 14.0, 22.0, 24.0, 25.0, 26.0, 27.0],
+            "reb": [4.0, 5.0, 6.0, 8.0, 8.0, 8.0, 9.0, 9.0],
+            "ast": [3.0, 3.0, 4.0, 6.0, 5.0, 5.0, 6.0, 6.0],
+            "stl": [0.5, 0.5, 0.8, 1.2, 1.0, 1.0, 1.1, 1.1],
+            "blk": [0.2, 0.3, 0.3, 0.8, 0.5, 0.5, 0.6, 0.6],
+            "tov": [2.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0],
+            "oreb": [1.2, 1.4, 1.8, 2.3, 2.5, 2.5, 2.7, 2.7],
+            "dreb": [2.8, 3.6, 4.2, 5.7, 5.5, 5.5, 6.3, 6.3],
+            "dk_fpts": [0.0] * 8,
+        }
+    )
+    features_df = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 20],
+            "player_id": [100, 200],
+            "an_props_market_count": [0.0, 5.0],
+            "an_has_pts": [0.0, 1.0],
+            "an_pts_line": [pd.NA, 25.5],
+        }
+    )
+
+    pre = worlds_df.copy()
+    out, report = _apply_propless_tail_calibration_to_worlds(
+        worlds_df,
+        features_df=features_df,
+        enabled=True,
+        min_minutes_mean=18.0,
+        min_dk_mean=0.0,
+        tail_boost=0.2,
+        max_tail_scale=1.3,
+    )
+
+    assert report["applied"] is True
+    assert report["eligible_player_count"] == 1
+    pre_propless = pre.loc[pre["player_id"] == 100, "pts"].max()
+    post_propless = out.loc[out["player_id"] == 100, "pts"].max()
+    assert post_propless > pre_propless
+    pd.testing.assert_series_equal(
+        out.loc[out["player_id"] == 200, "pts"].reset_index(drop=True),
+        pre.loc[pre["player_id"] == 200, "pts"].reset_index(drop=True),
+        check_names=False,
+    )
+
+
+def test_propless_tail_calibration_uses_has_signals_not_default_line_fill() -> None:
+    worlds_df = pd.DataFrame(
+        {
+            "world_idx": [0, 1, 2, 3, 0, 1, 2, 3],
+            "game_id": [1, 1, 1, 1, 1, 1, 1, 1],
+            "team_id": [10, 10, 10, 10, 20, 20, 20, 20],
+            "player_id": [100, 100, 100, 100, 200, 200, 200, 200],
+            "minutes": [26.0, 26.0, 26.0, 26.0, 30.0, 30.0, 30.0, 30.0],
+            "pts": [11.0, 12.0, 14.0, 24.0, 21.0, 22.0, 23.0, 31.0],
+            "reb": [4.0, 5.0, 6.0, 8.0, 7.0, 7.0, 8.0, 9.0],
+            "ast": [3.0, 3.0, 4.0, 6.0, 4.0, 4.0, 5.0, 6.0],
+            "stl": [0.5, 0.5, 0.8, 1.2, 1.0, 1.0, 1.1, 1.2],
+            "blk": [0.2, 0.3, 0.3, 0.8, 0.4, 0.5, 0.6, 0.7],
+            "tov": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+            "oreb": [1.0, 1.2, 1.4, 2.0, 2.0, 2.1, 2.2, 2.4],
+            "dreb": [3.0, 3.8, 4.6, 6.0, 5.0, 4.9, 5.8, 6.6],
+            "dk_fpts": [0.0] * 8,
+        }
+    )
+    # Lines are default-filled at 0.0 for both players; only has/market flags
+    # should drive props-vs-propless detection.
+    features_df = pd.DataFrame(
+        {
+            "game_id": [1, 1],
+            "team_id": [10, 20],
+            "player_id": [100, 200],
+            "an_has_any_props": [0.0, 1.0],
+            "an_props_market_count": [0.0, 4.0],
+            "an_has_pts": [0.0, 1.0],
+            "an_pts_line": [0.0, 0.0],
+            "an_reb_line": [0.0, 0.0],
+            "an_ast_line": [0.0, 0.0],
+        }
+    )
+
+    pre = worlds_df.copy()
+    out, report = _apply_propless_tail_calibration_to_worlds(
+        worlds_df,
+        features_df=features_df,
+        enabled=True,
+        min_minutes_mean=18.0,
+        min_dk_mean=0.0,
+        tail_boost=0.2,
+        max_tail_scale=1.3,
+    )
+
+    assert report["applied"] is True
+    assert report["eligible_player_count"] == 1
+    assert out.loc[out["player_id"] == 100, "pts"].max() > pre.loc[pre["player_id"] == 100, "pts"].max()
+    pd.testing.assert_series_equal(
+        out.loc[out["player_id"] == 200, "pts"].reset_index(drop=True),
+        pre.loc[pre["player_id"] == 200, "pts"].reset_index(drop=True),
+        check_names=False,
+    )

@@ -4,6 +4,7 @@ import pandas as pd
 
 from prefect_flows.live_nba_pipeline_v3 import (
     _apply_low_minutes_tail_damping_to_worlds,
+    _apply_mid_minutes_tail_calibration_to_worlds,
     _recompute_dk_fpts,
     _resample_extreme_game_worlds,
 )
@@ -123,3 +124,43 @@ def test_resample_extreme_game_worlds_replaces_multiple_bad_pairs_from_same_dono
             ["team_id", "player_id", "minutes", "pts", "dk_fpts"],
         ].sort_values(["team_id", "player_id"])
         pd.testing.assert_frame_equal(replaced.reset_index(drop=True), donor.reset_index(drop=True))
+
+
+def test_mid_minutes_tail_calibration_lifts_positive_residuals_in_bucket() -> None:
+    worlds = pd.DataFrame(
+        {
+            "world_idx": [0, 1],
+            "game_id": [44, 44],
+            "team_id": [401, 401],
+            "player_id": [4001, 4001],
+            "minutes": [16.0, 30.0],
+            "pts": [30.0, 10.0],
+            "reb": [8.0, 4.0],
+            "ast": [6.0, 2.0],
+            "stl": [1.0, 0.2],
+            "blk": [1.0, 0.1],
+            "tov": [2.0, 2.0],
+            "oreb": [2.0, 1.0],
+            "dreb": [6.0, 3.0],
+        }
+    )
+    worlds["dk_fpts"] = _recompute_dk_fpts(worlds)
+
+    out, report = _apply_mid_minutes_tail_calibration_to_worlds(
+        worlds,
+        enabled=True,
+        min_minutes=12.0,
+        max_minutes=20.0,
+        tail_boost=0.20,
+    )
+
+    assert report["applied"] is True
+    assert report["affected_rows"] == 1
+    assert out.loc[0, "pts"] > worlds.loc[0, "pts"]
+    assert out.loc[1, "pts"] == worlds.loc[1, "pts"]
+    assert out.loc[0, "reb"] == out.loc[0, "oreb"] + out.loc[0, "dreb"]
+    pd.testing.assert_series_equal(
+        out["dk_fpts"].round(6),
+        _recompute_dk_fpts(out).round(6),
+        check_names=False,
+    )

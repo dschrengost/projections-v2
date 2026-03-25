@@ -19,7 +19,7 @@ This document describes **what runs the live NBA pipeline today**, where it writ
 Key deployments (current):
 - `prefect_flows/live_nba_pipeline.py:nba_live_pipeline_flow` (**canonical**, end-to-end)
 - `prefect_flows/boxscores_etl.py:boxscores_etl_flow` (yesterday boxscores ETL; scheduled before nightly eval)
-- `prefect_flows/nightly_eval.py:nightly_eval_flow` (nightly evaluation; ensures boxscores exist before evaluating)
+- `prefect_flows/nightly_eval.py:nightly_eval_flow` (nightly evaluation; ensures boxscores exist before evaluating and runs GTv2 calibration monitoring)
 - `prefect_flows/live_pipeline.py:*` (legacy wrappers; deprecated and should remain unscheduled)
 
 ### systemd (in repo)
