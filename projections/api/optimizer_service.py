@@ -1503,6 +1503,8 @@ def build_player_pool(
         adjusted_summaries = None
         if slate_overrides.overrides:
             try:
+                from projections.ops.manual_availability import list_manual_overrides
+
                 model_fpts_by_player, model_minutes_by_player = _build_model_value_maps(
                     proj_df,
                     site=site_norm,
@@ -1514,6 +1516,19 @@ def build_player_pool(
                     run_id=sim_run_id or run_id,
                     worlds_source="gtv2",
                 )
+                try:
+                    _force_in_overrides = list_manual_overrides(
+                        pd.Timestamp(game_date).date(),
+                        data_root=root,
+                        active_only=True,
+                    )
+                    force_active_ids: set[str] = {
+                        str(r["player_id"])
+                        for r in _force_in_overrides
+                        if str(r.get("override_type", "")).lower() == "force_in"
+                    }
+                except Exception:
+                    force_active_ids = set()
                 adjusted_fpts, adjusted_minutes, world_diagnostics = apply_strategy_overrides_to_worlds(
                     fpts_matrix=player_worlds.fpts_matrix,
                     player_index=player_worlds.player_index,
@@ -1521,6 +1536,7 @@ def build_player_pool(
                     minutes_matrix=player_worlds.minutes_matrix,
                     model_minutes_by_player=model_minutes_by_player,
                     model_fpts_by_player=model_fpts_by_player,
+                    force_active_player_ids=force_active_ids or None,
                 )
                 adjusted_summaries = summarize_worlds(
                     fpts_matrix=adjusted_fpts,
@@ -2175,6 +2191,12 @@ def run_quick_build(
                             for p in player_pool
                             if p.get("player_id") is not None
                         }
+                        try:
+                            from projections.ops.manual_availability import list_manual_overrides as _lmo
+                            _fi = _lmo(pd.Timestamp(job.game_date).date(), data_root=get_data_root(), active_only=True)
+                            _force_active_qb: set[str] = {str(r["player_id"]) for r in _fi if str(r.get("override_type", "")).lower() == "force_in"}
+                        except Exception:
+                            _force_active_qb = set()
                         worlds_matrix, _, world_diagnostics = apply_strategy_overrides_to_worlds(
                             fpts_matrix=player_worlds.fpts_matrix,
                             player_index=player_index,
@@ -2182,6 +2204,7 @@ def run_quick_build(
                             minutes_matrix=player_worlds.minutes_matrix,
                             model_minutes_by_player=model_minutes_by_player,
                             model_fpts_by_player=model_fpts_by_player,
+                            force_active_player_ids=_force_active_qb or None,
                         )
                         logger.info(
                             "QuickBuild world-sample strategy overrides applied for %s/dg=%d: matched=%d",

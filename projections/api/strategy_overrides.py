@@ -347,6 +347,7 @@ def apply_strategy_overrides_to_worlds(
     minutes_matrix: np.ndarray | None = None,
     model_minutes_by_player: Optional[Dict[str, float]] = None,
     model_fpts_by_player: Optional[Dict[str, float]] = None,
+    force_active_player_ids: set[str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray | None, Dict[str, Any]]:
     adjusted_fpts = np.asarray(fpts_matrix, dtype=np.float64).copy()
     adjusted_minutes = None if minutes_matrix is None else np.asarray(minutes_matrix, dtype=np.float64).copy()
@@ -394,24 +395,46 @@ def apply_strategy_overrides_to_worlds(
         diagnostics["matched_override_count"] = int(diagnostics["matched_override_count"]) + 1
         diagnostics["applied_player_ids"].append(normalized_pid)
 
+        is_force_active = force_active_player_ids is not None and any(
+            _normalize_player_id(p) == normalized_pid for p in force_active_player_ids
+        )
+
         fpts_col = adjusted_fpts[:, col_idx]
         if adjusted_minutes is not None:
             minutes_col = adjusted_minutes[:, col_idx]
-            active_mask = (fpts_col > 0.0) | (minutes_col > 0.0)
+            natural_active = (fpts_col > 0.0) | (minutes_col > 0.0)
         else:
             minutes_col = None
-            active_mask = fpts_col > 0.0
+            natural_active = fpts_col > 0.0
+
+        # Force-active players treat all worlds as active; inactive worlds get
+        # filled with delta minutes and FPTS derived from avg FPPM of active worlds.
+        active_mask = np.ones(len(fpts_col), dtype=bool) if is_force_active else natural_active
 
         if not np.any(active_mask):
             continue
 
         if minutes_delta is not None:
             if minutes_col is not None:
-                active_minutes = minutes_col[active_mask]
-                new_minutes = np.maximum(0.0, active_minutes + float(minutes_delta))
-                scale = new_minutes / np.maximum(active_minutes, FLOOR_MINUTES)
+                new_minutes = np.maximum(0.0, minutes_col[active_mask] + float(minutes_delta))
+                scale = new_minutes / np.maximum(minutes_col[active_mask], FLOOR_MINUTES)
                 adjusted_minutes[active_mask, col_idx] = new_minutes
-                adjusted_fpts[active_mask, col_idx] = np.maximum(0.0, fpts_col[active_mask] * scale)
+
+                if is_force_active and np.any(natural_active) and np.any(~natural_active):
+                    # Fill formerly-inactive worlds with delta-minutes × avg FPPM from active worlds
+                    avg_fppm = float(np.mean(fpts_col[natural_active])) / max(
+                        float(np.mean(minutes_col[natural_active])), FLOOR_MINUTES
+                    )
+                    formerly_inactive = ~natural_active
+                    adjusted_fpts[formerly_inactive, col_idx] = np.maximum(
+                        0.0, adjusted_minutes[formerly_inactive, col_idx] * avg_fppm
+                    )
+                    # Scale FPTS only for naturally-active worlds
+                    adjusted_fpts[natural_active, col_idx] = np.maximum(
+                        0.0, fpts_col[natural_active] * scale[natural_active]
+                    )
+                else:
+                    adjusted_fpts[active_mask, col_idx] = np.maximum(0.0, fpts_col[active_mask] * scale)
             else:
                 diagnostics["used_minutes_fallback_count"] = int(diagnostics["used_minutes_fallback_count"]) + 1
                 baseline_minutes = float(model_minutes) if model_minutes is not None else 0.0
