@@ -20,8 +20,9 @@ reduced_persistence:
   # unless explicitly requested by env override.
   sim_write_worlds_matrix: false
   sim_write_minutes_matrix: false
-  # Cap GTV2 world count for temporary two-SSD operation.
-  gtv2_max_worlds: 10000
+  # Cap GTV2 world count during reduced-persistence mode.
+  # Set to live deployment default (50k) so normal runs are not down-capped.
+  gtv2_max_worlds: 50000
 
 families:
   - gtv2_worlds
