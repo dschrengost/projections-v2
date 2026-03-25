@@ -1849,6 +1849,7 @@ def _atomic_write_validated_parquet(
     *,
     required_cols: tuple[str, ...] = (),
     compression: str | None = "snappy",
+    row_group_size: int | None = None,
 ) -> dict[str, Any]:
     def _is_retryable_validation_error(exc: Exception) -> bool:
         text = str(exc).lower()
@@ -1873,7 +1874,10 @@ def _atomic_write_validated_parquet(
             f".tmp.{control_plane.canonical_run_id()}.{os.getpid()}.{attempt}.parquet"
         )
         try:
-            df.to_parquet(tmp, index=False, compression=current_compression)
+            write_kwargs: dict[str, Any] = {"index": False, "compression": current_compression}
+            if row_group_size is not None:
+                write_kwargs["row_group_size"] = int(row_group_size)
+            df.to_parquet(tmp, **write_kwargs)
             validation = _stream_validate_parquet(
                 tmp,
                 expected_rows=int(len(df)),
@@ -6183,6 +6187,8 @@ def generate_worlds_gtv2_live_task(
                     worlds_df,
                     raw_worlds_path,
                     required_cols=("world_idx", "game_id", "team_id", "player_id"),
+                    compression="zstd",
+                    row_group_size=500_000,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -6300,6 +6306,8 @@ def generate_worlds_gtv2_live_task(
             worlds_df,
             worlds_path,
             required_cols=("world_idx", "game_id", "team_id", "player_id"),
+            compression="zstd",
+            row_group_size=500_000,
         )
 
         projections = worlds_runtime.summarize_worlds_to_projections(
