@@ -481,6 +481,12 @@ def apply_manual_overrides_to_frame(
     if "prior_play_prob" in merged.columns:
         merged.loc[force_out, "prior_play_prob"] = 0.0
         merged.loc[force_in, "prior_play_prob"] = 1.0
+    # Sim-level activity probability columns: keep consistent with play_prob so the
+    # optimizer delta calculation uses p_active=1.0 for forced-in players.
+    for p_active_col in ("minutes_sim_p_active", "p_play_eff", "sim_p_active"):
+        if p_active_col in merged.columns:
+            merged.loc[force_out, p_active_col] = 0.0
+            merged.loc[force_in, p_active_col] = 1.0
     if "lineup_role" in merged.columns:
         merged.loc[force_out, "lineup_role"] = "out"
         merged.loc[force_in & merged["lineup_role"].astype("string").str.lower().eq("out"), "lineup_role"] = pd.NA

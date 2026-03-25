@@ -125,6 +125,8 @@ def test_apply_manual_overrides_to_frame_enforces_force_out_and_force_in(tmp_pat
                 "minutes_final": 0.0,
                 "is_q": 1,
                 "is_prob": 1,
+                "minutes_sim_p_active": 0.15,
+                "p_play_eff": 0.15,
             },
         ]
     )
@@ -155,4 +157,6 @@ def test_apply_manual_overrides_to_frame_enforces_force_out_and_force_in(tmp_pat
     assert int(forced_in["is_prob"]) == 0
     assert float(forced_in["play_prob"]) == 1.0
     assert float(forced_in["prior_play_prob"]) == 1.0
+    assert float(forced_in["minutes_sim_p_active"]) == 1.0
+    assert float(forced_in["p_play_eff"]) == 1.0
     assert forced_in["manual_override_type"] == "force_in"
