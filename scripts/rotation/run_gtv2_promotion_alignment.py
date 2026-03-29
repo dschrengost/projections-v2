@@ -67,6 +67,14 @@ class VariantSpec:
     name: str
     run_dir: str
     active_temperature: float
+    tree_rate_predictions_csv: str | None = None
+    tree_rate_blend_alpha: float = 0.0
+    tree_rate_oreb_share_override_enabled: bool = False
+    tree_rate_dreb_share_cap_mult: float | None = None
+    tree_rate_dreb_share_cap_add: float = 0.0
+    tree_rate_dreb_share_cap_min: float = 0.0
+    tree_rate_dreb_share_cap_max: float = 1.0
+    tree_rate_dreb_bucket_hierarchy_enabled: bool = False
     promotion_expert_run_dir: str | None = None
     promotion_prior_minutes_max: float = 12.0
     promotion_hist_start_rate_max: float = 0.20
@@ -158,6 +166,422 @@ def _normalize_game_date_str(df: pd.DataFrame, *, col: str = "game_date") -> pd.
     out = df.copy()
     out[col] = pd.to_datetime(out[col], errors="coerce").dt.date.astype(str)
     return out
+
+
+def _compute_world_dk_fpts_from_frame(df: pd.DataFrame) -> pd.Series:
+    pts = pd.to_numeric(df["pts"], errors="coerce").fillna(0.0)
+    reb = pd.to_numeric(df["reb"], errors="coerce").fillna(0.0)
+    ast = pd.to_numeric(df["ast"], errors="coerce").fillna(0.0)
+    stl = pd.to_numeric(df["stl"], errors="coerce").fillna(0.0)
+    blk = pd.to_numeric(df["blk"], errors="coerce").fillna(0.0)
+    tov = pd.to_numeric(df["tov"], errors="coerce").fillna(0.0)
+    base = pts + 1.25 * reb + 1.5 * ast + 2.0 * stl + 2.0 * blk - 0.5 * tov
+    qualifiers = pd.concat(
+        [
+            (pts >= 10.0).astype(int),
+            (reb >= 10.0).astype(int),
+            (ast >= 10.0).astype(int),
+            (stl >= 10.0).astype(int),
+            (blk >= 10.0).astype(int),
+        ],
+        axis=1,
+    ).sum(axis=1)
+    return base + np.where(qualifiers == 2, 1.5, 0.0) + np.where(qualifiers >= 3, 3.0, 0.0)
+
+
+def _normalize_pos_bucket_series(values: pd.Series) -> pd.Series:
+    pos = values.astype("string").fillna("UNK").str.upper().str.strip()
+    mapping = {
+        "PG": "G",
+        "SG": "G",
+        "G": "G",
+        "SF": "W",
+        "PF": "W",
+        "F": "W",
+        "W": "W",
+        "C": "B",
+        "BIG": "B",
+        "B": "B",
+    }
+    return pos.map(mapping).fillna(pos).replace({"BIG": "B", "UNK": "W"}).astype("string")
+
+
+def _rescale_world_stat_to_target_mean(
+    work: pd.DataFrame,
+    *,
+    stat_col: str,
+    target_mean_col: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    out = work.copy()
+    current_means = (
+        out.groupby(["game_date", "game_id", "team_id", "player_id"], as_index=False)[stat_col]
+        .mean()
+        .rename(columns={stat_col: f"{stat_col}_current_mean"})
+    )
+    out = out.merge(current_means, on=["game_date", "game_id", "team_id", "player_id"], how="left")
+    target_means = pd.to_numeric(out[target_mean_col], errors="coerce").fillna(0.0)
+    current_means_arr = pd.to_numeric(out[f"{stat_col}_current_mean"], errors="coerce").fillna(0.0)
+    current_vals = pd.to_numeric(out[stat_col], errors="coerce").fillna(0.0)
+    scale = np.where(current_means_arr > 1e-9, target_means / current_means_arr, np.nan)
+    scaled_vals = current_vals * scale
+
+    fallback_mask = ~np.isfinite(scale)
+    fallback_groups = 0
+    if bool(fallback_mask.any()):
+        fallback_groups = int(
+            out.loc[fallback_mask, ["game_date", "game_id", "team_id", "player_id"]].drop_duplicates().shape[0]
+        )
+        minutes = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0)
+        positive_minutes = minutes.clip(lower=0.0)
+        active_world = (positive_minutes > 0.0).astype(float)
+        fallback_weight = np.where(positive_minutes > 0.0, positive_minutes, active_world)
+        out["_fallback_weight"] = fallback_weight
+        group_weight_sum = out.groupby(["game_date", "game_id", "team_id", "player_id"])["_fallback_weight"].transform("sum")
+        group_world_count = out.groupby(["game_date", "game_id", "team_id", "player_id"])[stat_col].transform("size")
+        fallback_target_total = target_means * pd.to_numeric(group_world_count, errors="coerce").fillna(0.0)
+        fallback_vals = np.where(
+            group_weight_sum > 1e-9,
+            fallback_target_total * out["_fallback_weight"] / group_weight_sum,
+            target_means,
+        )
+        scaled_vals = np.where(fallback_mask, fallback_vals, scaled_vals)
+        out = out.drop(columns=["_fallback_weight"])
+
+    out[stat_col] = np.clip(np.asarray(scaled_vals, dtype=float), 0.0, None)
+    out = out.drop(columns=[f"{stat_col}_current_mean"])
+    return out, {
+        "stat": stat_col,
+        "fallback_group_count": int(fallback_groups),
+    }
+
+
+def _override_rebound_share_to_target_mean(
+    work: pd.DataFrame,
+    *,
+    stat_col: str,
+    target_mean_col: str,
+    blend_alpha: float,
+    bucket_col: str | None = None,
+    share_cap_mult: float | None = None,
+    share_cap_add: float = 0.0,
+    share_cap_min: float = 0.0,
+    share_cap_max: float = 1.0,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    out = work.copy()
+    team_keys = ["game_date", "game_id", "team_id"]
+    player_keys = ["game_date", "game_id", "team_id", "player_id"]
+    world_team_keys = ["game_date", "game_id", "team_id", "world_idx"]
+    bucket_hierarchy_enabled = bool(bucket_col is not None and bucket_col in out.columns)
+
+    target_player = (
+        out.loc[:, player_keys + [target_mean_col]]
+        .drop_duplicates(player_keys)
+        .copy()
+    )
+    if bucket_hierarchy_enabled:
+        bucket_lookup = out.loc[:, player_keys + [bucket_col]].drop_duplicates(player_keys)
+        target_player = target_player.merge(bucket_lookup, on=player_keys, how="left", validate="one_to_one")
+    target_player[target_mean_col] = pd.to_numeric(target_player[target_mean_col], errors="coerce").fillna(0.0)
+    target_team = (
+        target_player.groupby(team_keys, as_index=False)[target_mean_col]
+        .sum()
+        .rename(columns={target_mean_col: f"{stat_col}_target_team_mean"})
+    )
+    target_player = target_player.merge(target_team, on=team_keys, how="left")
+    target_player[f"{stat_col}_target_share"] = np.where(
+        pd.to_numeric(target_player[f"{stat_col}_target_team_mean"], errors="coerce").fillna(0.0) > 1e-9,
+        pd.to_numeric(target_player[target_mean_col], errors="coerce").fillna(0.0)
+        / pd.to_numeric(target_player[f"{stat_col}_target_team_mean"], errors="coerce").fillna(1.0),
+        0.0,
+    )
+    out = out.merge(
+        target_player.loc[:, player_keys + [f"{stat_col}_target_share"]],
+        on=player_keys,
+        how="left",
+        validate="many_to_one",
+    )
+    out[f"{stat_col}_target_share"] = pd.to_numeric(out[f"{stat_col}_target_share"], errors="coerce").fillna(0.0)
+
+    team_world_total = out.groupby(world_team_keys)[stat_col].transform("sum")
+    current_vals = pd.to_numeric(out[stat_col], errors="coerce").fillna(0.0)
+    active_mask = pd.to_numeric(out.get("minutes", 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float) > 1e-9
+    target_share = pd.to_numeric(out[f"{stat_col}_target_share"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    alpha = float(np.clip(blend_alpha, 0.0, 1.0))
+    if bucket_hierarchy_enabled:
+        bucket_keys = world_team_keys + [bucket_col]
+        bucket_world_total = out.groupby(bucket_keys)[stat_col].transform("sum")
+        current_bucket_share = np.where(team_world_total > 1e-9, bucket_world_total / team_world_total, 0.0)
+        out[f"{stat_col}_bucket_share_final"] = np.clip(np.asarray(current_bucket_share, dtype=float), 0.0, None)
+
+        current_within_share = np.where(active_mask & (bucket_world_total > 1e-9), current_vals / bucket_world_total, 0.0)
+        target_bucket_player = (
+            target_player.groupby(team_keys + [bucket_col], as_index=False)[target_mean_col]
+            .sum()
+            .rename(columns={target_mean_col: f"{stat_col}_target_bucket_player_mean"})
+        )
+        target_player = target_player.merge(target_bucket_player, on=team_keys + [bucket_col], how="left")
+        target_player[f"{stat_col}_target_within_bucket_share"] = np.where(
+            pd.to_numeric(target_player[f"{stat_col}_target_bucket_player_mean"], errors="coerce").fillna(0.0) > 1e-9,
+            pd.to_numeric(target_player[target_mean_col], errors="coerce").fillna(0.0)
+            / pd.to_numeric(target_player[f"{stat_col}_target_bucket_player_mean"], errors="coerce").fillna(1.0),
+            0.0,
+        )
+        out = out.merge(
+            target_player.loc[:, player_keys + [f"{stat_col}_target_within_bucket_share"]],
+            on=player_keys,
+            how="left",
+            validate="many_to_one",
+        )
+        target_within_share = pd.to_numeric(out[f"{stat_col}_target_within_bucket_share"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        target_within_share = np.where(active_mask, target_within_share, 0.0)
+        blended_within_share = (1.0 - alpha) * current_within_share + alpha * target_within_share
+        out[f"{stat_col}_share_blended"] = np.clip(np.asarray(blended_within_share, dtype=float), 0.0, None)
+        within_share_sum = out.groupby(bucket_keys)[f"{stat_col}_share_blended"].transform("sum")
+        out[f"{stat_col}_share_blended"] = np.where(
+            within_share_sum > 1e-9,
+            out[f"{stat_col}_share_blended"] / within_share_sum,
+            0.0,
+        )
+        target_share = (
+            pd.to_numeric(out[f"{stat_col}_bucket_share_final"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            * pd.to_numeric(out[f"{stat_col}_share_blended"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        )
+    else:
+        current_share = np.where(active_mask & (team_world_total > 1e-9), current_vals / team_world_total, 0.0)
+        target_share = np.where(active_mask, target_share, 0.0)
+        blended_share = (1.0 - alpha) * current_share + alpha * target_share
+        out[f"{stat_col}_share_blended"] = np.clip(np.asarray(blended_share, dtype=float), 0.0, None)
+
+    share_cap_applied = bool(share_cap_mult is not None)
+    clipped_group_count = 0
+    max_excess_before_clip = 0.0
+    if share_cap_applied:
+        mult = max(float(share_cap_mult), 1.0)
+        add = max(float(share_cap_add), 0.0)
+        min_cap = max(float(share_cap_min), 0.0)
+        max_cap = min(max(float(share_cap_max), 0.0), 1.0)
+        out[f"{stat_col}_share_cap"] = np.clip(
+            np.maximum.reduce(
+                [
+                    target_share * mult,
+                    target_share + add,
+                    np.full_like(target_share, min_cap, dtype=float),
+                ]
+            ),
+            0.0,
+            max_cap,
+        )
+        new_share = np.zeros(len(out), dtype=float)
+        for _, idx in out.groupby(world_team_keys).groups.items():
+            idx_arr = np.asarray(idx, dtype=int)
+            raw = out.iloc[idx_arr][f"{stat_col}_share_blended"].to_numpy(dtype=float)
+            caps = out.iloc[idx_arr][f"{stat_col}_share_cap"].to_numpy(dtype=float)
+            active = active_mask[idx_arr]
+            raw = np.where(active, raw, 0.0)
+            caps = np.where(active, caps, 0.0)
+            raw_sum = float(raw.sum())
+            if raw_sum <= 1e-9:
+                continue
+            raw = raw / raw_sum
+            capped = np.minimum(raw, caps)
+            excess = np.maximum(raw - caps, 0.0)
+            if float(excess.sum()) > 1e-9:
+                clipped_group_count += 1
+                max_excess_before_clip = max(max_excess_before_clip, float(excess.max()))
+            residual = 1.0 - float(capped.sum())
+            if residual > 1e-9:
+                headroom = np.maximum(caps - capped, 0.0)
+                headroom_sum = float(headroom.sum())
+                if headroom_sum > 1e-9:
+                    capped = capped + residual * (headroom / headroom_sum)
+            new_share[idx_arr] = capped
+        out[f"{stat_col}_share_final"] = new_share
+    else:
+        if bucket_col is not None and bucket_col in out.columns:
+            out[f"{stat_col}_share_final"] = target_share
+        else:
+            share_sum = out.groupby(world_team_keys)[f"{stat_col}_share_blended"].transform("sum")
+            out[f"{stat_col}_share_final"] = np.where(
+                share_sum > 1e-9,
+                out[f"{stat_col}_share_blended"] / share_sum,
+                0.0,
+            )
+    out[stat_col] = np.where(
+        team_world_total > 1e-9,
+        team_world_total * pd.to_numeric(out[f"{stat_col}_share_final"], errors="coerce").fillna(0.0),
+        current_vals,
+    )
+    out = out.drop(
+        columns=[
+            col
+            for col in [f"{stat_col}_target_share", f"{stat_col}_share_blended", f"{stat_col}_share_final", f"{stat_col}_share_cap"]
+            if col in out.columns
+        ]
+    )
+
+    current_means = (
+        out.groupby(player_keys, as_index=False)[stat_col]
+        .mean()
+        .rename(columns={stat_col: f"{stat_col}_post_mean"})
+    )
+    compare = current_means.merge(target_player.loc[:, player_keys + [target_mean_col]], on=player_keys, how="left")
+    err = (
+        pd.to_numeric(compare[f"{stat_col}_post_mean"], errors="coerce").fillna(0.0)
+        - pd.to_numeric(compare[target_mean_col], errors="coerce").fillna(0.0)
+    )
+    return out, {
+        "stat": stat_col,
+        "mode": "team_budget_share_override",
+        "bucket_hierarchy_enabled": bucket_hierarchy_enabled,
+        "post_minus_target_mean_abs_mean": float(np.abs(err).mean()) if len(err) else 0.0,
+        "post_minus_target_mean_bias": float(err.mean()) if len(err) else 0.0,
+        "share_cap_applied": share_cap_applied,
+        "share_cap_mult": float(share_cap_mult) if share_cap_mult is not None else None,
+        "share_cap_add": float(share_cap_add),
+        "share_cap_min": float(share_cap_min),
+        "share_cap_max": float(share_cap_max),
+        "clipped_group_count": int(clipped_group_count),
+        "max_excess_before_clip": float(max_excess_before_clip),
+    }
+
+
+def _apply_tree_rate_mean_override(
+    worlds: pd.DataFrame,
+    *,
+    predictions_csv: Path,
+    blend_alpha: float,
+    oreb_share_override_enabled: bool = False,
+    role_bucket_df: pd.DataFrame | None = None,
+    dreb_bucket_hierarchy_enabled: bool = False,
+    share_cap_mult: float | None = None,
+    share_cap_add: float = 0.0,
+    share_cap_min: float = 0.0,
+    share_cap_max: float = 1.0,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if not predictions_csv.exists():
+        raise FileNotFoundError(f"tree-rate predictions csv not found: {predictions_csv}")
+    pred_df = _coerce_join_keys(pd.read_csv(predictions_csv), name="tree_rate_predictions")
+    stat_to_rate_col = {
+        "ast": "pred_ast_per_min",
+        "oreb": "pred_oreb_per_min",
+        "dreb": "pred_dreb_per_min",
+    }
+    available_stats = [stat for stat, rate_col in stat_to_rate_col.items() if rate_col in pred_df.columns]
+    if not available_stats:
+        raise ValueError(
+            "tree-rate predictions must include at least one of "
+            f"{sorted(stat_to_rate_col.values())}: {predictions_csv}"
+        )
+    pred_df = _normalize_game_date_str(pred_df)
+    keep_pred_cols = [stat_to_rate_col[stat] for stat in available_stats]
+    pred_df = pred_df.loc[:, ["game_date", "game_id", "team_id", "player_id", *keep_pred_cols]].drop_duplicates(
+        ["game_date", "game_id", "team_id", "player_id"]
+    )
+    work = worlds.merge(pred_df, on=["game_date", "game_id", "team_id", "player_id"], how="left", validate="many_to_one")
+    if work.empty:
+        raise ValueError("tree-rate override merge produced no rows")
+    bucket_col_name: str | None = None
+    if dreb_bucket_hierarchy_enabled and role_bucket_df is not None and "pred_dreb_per_min" in keep_pred_cols:
+        required_cols = ["game_date", "game_id", "team_id", "player_id", "pos_bucket"]
+        if all(col in role_bucket_df.columns for col in required_cols):
+            bucket_frame = _coerce_join_keys(role_bucket_df.loc[:, required_cols].copy(), name="role_bucket_df")
+            bucket_frame = _normalize_game_date_str(bucket_frame)
+            bucket_frame = bucket_frame.drop_duplicates(["game_date", "game_id", "team_id", "player_id"])
+            bucket_frame["pos_bucket"] = _normalize_pos_bucket_series(bucket_frame["pos_bucket"])
+            work = work.merge(
+                bucket_frame,
+                on=["game_date", "game_id", "team_id", "player_id"],
+                how="left",
+                validate="many_to_one",
+            )
+            bucket_col_name = "pos_bucket"
+
+    minutes_mean = (
+        work.groupby(["game_date", "game_id", "team_id", "player_id"], as_index=False)["minutes"]
+        .mean()
+        .rename(columns={"minutes": "variant_minutes_mean"})
+    )
+    work = work.merge(minutes_mean, on=["game_date", "game_id", "team_id", "player_id"], how="left")
+
+    alpha = float(np.clip(blend_alpha, 0.0, 1.0))
+    for stat_col in available_stats:
+        per_min_col = stat_to_rate_col[stat_col]
+        current_mean = (
+            work.groupby(["game_date", "game_id", "team_id", "player_id"], as_index=False)[stat_col]
+            .mean()
+            .rename(columns={stat_col: f"{stat_col}_current_mean"})
+        )
+        work = work.merge(current_mean, on=["game_date", "game_id", "team_id", "player_id"], how="left")
+        tree_target_mean = (
+            pd.to_numeric(work["variant_minutes_mean"], errors="coerce").fillna(0.0)
+            * pd.to_numeric(work[per_min_col], errors="coerce").fillna(0.0)
+        )
+        current_mean_arr = pd.to_numeric(work[f"{stat_col}_current_mean"], errors="coerce").fillna(0.0)
+        work[f"{stat_col}_target_mean"] = (1.0 - alpha) * current_mean_arr + alpha * tree_target_mean
+        work = work.drop(columns=[f"{stat_col}_current_mean"])
+
+    stat_reports: list[dict[str, Any]] = []
+    for stat_col in available_stats:
+        if stat_col == "oreb" and oreb_share_override_enabled:
+            work, stat_report = _override_rebound_share_to_target_mean(
+                work,
+                stat_col=stat_col,
+                target_mean_col=f"{stat_col}_target_mean",
+                blend_alpha=alpha,
+            )
+        elif stat_col == "dreb":
+            work, stat_report = _override_rebound_share_to_target_mean(
+                work,
+                stat_col=stat_col,
+                target_mean_col=f"{stat_col}_target_mean",
+                blend_alpha=alpha,
+                bucket_col=bucket_col_name,
+                share_cap_mult=share_cap_mult,
+                share_cap_add=float(share_cap_add),
+                share_cap_min=float(share_cap_min),
+                share_cap_max=float(share_cap_max),
+            )
+        else:
+            work, stat_report = _rescale_world_stat_to_target_mean(
+                work,
+                stat_col=stat_col,
+                target_mean_col=f"{stat_col}_target_mean",
+            )
+        stat_reports.append(stat_report)
+
+    if {"oreb", "dreb"} & set(available_stats):
+        work["reb"] = pd.to_numeric(work["oreb"], errors="coerce").fillna(0.0) + pd.to_numeric(
+            work["dreb"], errors="coerce"
+        ).fillna(0.0)
+    work["dk_fpts"] = _compute_world_dk_fpts_from_frame(work)
+
+    override_keys = pd.Series(False, index=work.index)
+    for rate_col in keep_pred_cols:
+        override_keys = override_keys | work[rate_col].notna()
+    report = {
+        "applied": True,
+        "predictions_csv": str(predictions_csv),
+        "blend_alpha": alpha,
+        "available_stats": available_stats,
+        "player_count_with_predictions": int(
+            work.loc[override_keys, ["game_date", "game_id", "team_id", "player_id"]].drop_duplicates().shape[0]
+        ),
+        "stat_reports": stat_reports,
+        "oreb_share_override_enabled": bool(oreb_share_override_enabled),
+        "dreb_bucket_hierarchy_enabled": bool(bucket_col_name is not None),
+    }
+    drop_cols = [
+        "pred_ast_per_min",
+        "pred_oreb_per_min",
+        "pred_dreb_per_min",
+        "variant_minutes_mean",
+        "ast_target_mean",
+        "oreb_target_mean",
+        "dreb_target_mean",
+        "pos_bucket",
+    ]
+    work = work.drop(columns=[col for col in drop_cols if col in work.columns])
+    return work, report
 
 
 def _load_variant_specs(path: Path) -> list[VariantSpec]:
@@ -480,6 +904,23 @@ def _apply_live_postprocessing(
     seed: int,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     worlds = raw_worlds.copy()
+    tree_override_report = {"applied": False, "reason": "disabled"}
+    role_bucket_df: pd.DataFrame | None = None
+    if "pos_bucket" in ctx.selected_features_df.columns:
+        role_bucket_df = ctx.selected_features_df.loc[:, ["game_date", "game_id", "team_id", "player_id", "pos_bucket"]].copy()
+    if spec.tree_rate_predictions_csv and float(spec.tree_rate_blend_alpha) > 0.0:
+        worlds, tree_override_report = _apply_tree_rate_mean_override(
+            worlds,
+            predictions_csv=Path(str(spec.tree_rate_predictions_csv)).expanduser().resolve(),
+            blend_alpha=float(spec.tree_rate_blend_alpha),
+            oreb_share_override_enabled=bool(spec.tree_rate_oreb_share_override_enabled),
+            role_bucket_df=role_bucket_df,
+            dreb_bucket_hierarchy_enabled=bool(spec.tree_rate_dreb_bucket_hierarchy_enabled),
+            share_cap_mult=spec.tree_rate_dreb_share_cap_mult,
+            share_cap_add=float(spec.tree_rate_dreb_share_cap_add),
+            share_cap_min=float(spec.tree_rate_dreb_share_cap_min),
+            share_cap_max=float(spec.tree_rate_dreb_share_cap_max),
+        )
     if bool(spec.apply_props_uplift):
         worlds, props_report = _apply_props_uplift_calibration_to_worlds(
             worlds,
@@ -503,6 +944,7 @@ def _apply_live_postprocessing(
     )
     worlds, repair_report = _repair_world_frame_contract_fields(worlds)
     return worlds, {
+        "tree_rate_override": tree_override_report,
         "props_uplift": props_report,
         "world_realism_controls": realism_report,
         "world_contract_repair": repair_report,
@@ -1059,9 +1501,17 @@ def _flatten_variant_row(
     props_meta = postprocess_meta["props_uplift"]
     realism_meta = postprocess_meta["world_realism_controls"]
     repair_meta = postprocess_meta["world_contract_repair"]
+    tree_meta = postprocess_meta["tree_rate_override"]
     return {
         "variant": spec.name,
         "run_dir": spec.run_dir,
+        "tree_rate_predictions_csv": str(spec.tree_rate_predictions_csv) if spec.tree_rate_predictions_csv else None,
+        "tree_rate_blend_alpha": float(spec.tree_rate_blend_alpha),
+        "tree_rate_oreb_share_override_enabled": bool(spec.tree_rate_oreb_share_override_enabled),
+        "tree_rate_dreb_share_cap_mult": (
+            float(spec.tree_rate_dreb_share_cap_mult) if spec.tree_rate_dreb_share_cap_mult is not None else None
+        ),
+        "tree_rate_dreb_share_cap_add": float(spec.tree_rate_dreb_share_cap_add),
         "promotion_expert_run_dir": str(spec.promotion_expert_run_dir) if spec.promotion_expert_run_dir else None,
         "bench_expert_run_dir": str(spec.bench_expert_run_dir) if spec.bench_expert_run_dir else None,
         "promotion_blend_mode": str(spec.promotion_blend_mode),
@@ -1079,6 +1529,8 @@ def _flatten_variant_row(
         "n_games": int(len(post_worlds[["game_date", "game_id"]].drop_duplicates())),
         "raw_world_rows": int(len(raw_worlds)),
         "post_world_rows": int(len(post_worlds)),
+        "tree_rate_override_applied": bool(tree_meta.get("applied", False)),
+        "tree_rate_override_player_count": int(tree_meta.get("player_count_with_predictions", 0) or 0),
         "props_uplift_applied": bool(props_meta.get("applied", False)),
         "props_total_adjusted_players": int(props_meta.get("total_adjusted_players", 0) or 0),
         "world_realism_applied": bool(realism_meta.get("applied", False)),

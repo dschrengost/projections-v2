@@ -14,7 +14,10 @@
   "sparse_blend_alpha": 0.5,
   "sparse_require_no_props": true,
   "sparse_gate_artifact": "/home/daniel/projections-data/training/runs/sparse_emergency_gate_20260329T061500Z/gate_thr_0p75.json",
-  "model_version": "reb_mtfanneal_live_20260329_teamopp_ratepres_a050_sparsegate075_a050",
-  "promoted_at": "2026-03-29T06:03:20Z",
+  "tree_rate_predictions_csv": "/home/daniel/projections-data/training/runs/lgbm_rate_hybrid_astreb_current60_20260329T0800Z/eval_player_rows.csv",
+  "tree_rate_blend_alpha": 0.75,
+  "tree_rate_oreb_share_override_enabled": true,
+  "model_version": "reb_mtfanneal_live_20260329_teamopp_ratepres_a050_sparsegate075_a050_treeastorebdreb075",
+  "promoted_at": "2026-03-29T16:05:00Z",
   "bundle_hash": "d863145c6dfd0a4bcc71052d7cd95bc9fe334c8683297f4f3041b6d7f6337275"
 }

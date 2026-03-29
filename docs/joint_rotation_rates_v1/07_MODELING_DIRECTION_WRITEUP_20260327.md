@@ -4783,3 +4783,197 @@ So the gate sweep converted this from a pure research branch into a real
 operating frontier: we now have one setting that is basically broad-neutral and
 another that keeps substantially more of the next-man-up lift for only a modest
 aggregate cost.
+
+Tree-rate hybrid pivot update
+
+Reason for the pivot:
+
+- after the team-split / sparse-next-up work, live-slate review still showed a
+  broad underprojection problem on top `AST` and `REB` names
+- this looked more like mean-rate compression than a pure world-generation
+  issue
+- the next experiment therefore switched to a hybrid: keep GTv2 minutes and
+  world generation, but replace selected per-minute means with tree models
+
+Mean-layer result:
+
+- added a reusable harness in `scripts/rotation/eval_lgbm_rate_hybrid.py`
+- on the exact shipped 60-game packet, weighted `LGBM` on
+  `AST / OREB / DREB` per-minute rates improved:
+  - `AST MAE`: `1.280 -> 1.054`
+  - `REB MAE`: `1.666 -> 1.580`
+  - naive `DK MAE`: `5.613 -> 5.531`
+- `XGBoost` was directionally interesting on AST tails, but too aggressive on
+  REB and too unstable as a broad default
+- full-boxscore tree replacement was not the answer:
+  - it helped `AST / REB`
+  - but degraded `PTS` and broad `DK`
+
+End-to-end world override result:
+
+- added an inference-time tree override hook in
+  `scripts/rotation/run_gtv2_promotion_alignment.py`
+- this lets promotion-alignment variants blend player world means toward
+  precomputed tree rate targets
+
+What worked:
+
+- `AST-only` override was immediately viable
+- on the 60-game packet:
+  - `AST line >= 7` moved from `3.75` predicted to `7.66` against `7.78`
+    actual
+  - broad `DK` improved modestly
+  - contracts and world structure stayed clean
+
+What failed:
+
+- naive `AST + OREB + DREB` count-scaling was not usable
+- it improved player means, but `OREB` scaling broke world semantics and
+  possession-side plausibility
+- even after narrowing to `AST + DREB`, direct player `DREB` count scaling
+  produced absurd rebound tails because it:
+  - preserved the old fat-right-tail world shape
+  - added rebound mass without team-level conservation
+
+Why the initial DREB override was wrong:
+
+- GTv2 appears to have the wrong **shape** for rebound worlds:
+  - too little probability on normal big-rebound games
+  - too much probability in middling outcomes
+  - a small number of absurd right-tail spikes
+- raising player `DREB` means by scaling those worlds preserves the bad shape
+  and inflates the spikes
+- that explains how the model can be low on rebound means while still producing
+  absurd single-world rebound outcomes
+
+Current DREB fix attempt:
+
+- replaced direct `DREB` count scaling with a team-budget-preserving
+  **share override**
+  - keep each team-world `DREB` total fixed
+  - blend player `DREB` shares toward tree-implied targets
+  - renormalize inside each team-world
+
+Share-override result:
+
+- broad packet remained good:
+  - `dk_fpts_mae`: `5.611 -> 5.515`
+  - `ast_mae_player`: `1.296 -> 1.082`
+  - `reb_mae_player`: `1.660 -> 1.603`
+- contracts remained clean and possession symmetry stayed intact
+- but the extreme rebound tail is still too hot semantically:
+  - max rebound world came down versus the unsafe count-scaling branch
+  - but top rebound worlds still include clearly implausible outputs for some
+    archetypes
+
+Updated boundary:
+
+- `AST-only` tree override is the first clean selective hybrid that looks
+  production-viable
+- `DREB` tree help is directionally useful, but still needs explicit tail
+  control before live use
+- the next `DREB` iteration should focus on **tail dampening under fixed team
+  budget**, not another mean change
+
+Team-share DREB hierarchy result:
+
+- added a stricter `DREB` override that preserves each team-world `DREB`
+  budget and also preserves current role-bucket `DREB` totals, only
+  redistributing share **within** the bucket
+- implementation lives in
+  `scripts/rotation/run_gtv2_promotion_alignment.py`
+
+What it revealed:
+
+- on the actual 60-game packet, the bucket-hierarchy run was effectively
+  identical to the no-hierarchy `AST + DREB` run
+- `pos_bucket` coverage in this historical feature packet is too `UNK`-heavy
+  for the hierarchy to materially bind
+- broad metrics remained strong, but there was no incremental lift attributable
+  to the bucket layer itself:
+  - `dk_fpts_mae`: `5.619 -> 5.524`
+  - `reb_mae_player`: `1.665 -> 1.607`
+  - `ast_mae_player`: `1.296 -> 1.082`
+  - `poss_sym_abs_p95`: `0.444 -> 0.398`
+
+What the check clarified:
+
+- the remaining bad total-rebound tails are mostly an `OREB` problem, not a
+  `DREB` problem
+- max `DREB` world is already down at `16.1`, while max `OREB` world is still
+  `25.0`
+- the worst total rebound worlds are now driven by `OREB` spikes for players
+  who should not plausibly have them
+- so the current tree hybrid boundary is:
+  - `AST`: viable now
+  - `DREB`: improved enough for this branch
+  - `REB` overall: still blocked by `OREB` world-shape pathologies
+
+Next rebound step:
+
+- do not add more `DREB` mean pressure on this branch
+- move the same conservation logic to `OREB`, likely with even stronger
+  frontcourt/big specialization than `DREB`
+
+OREB share-preserving result:
+
+- implemented the same fixed-team-budget share override for `OREB`
+- replay used the full `AST / OREB / DREB` weighted-`LGBM` file, with both
+  rebound components redistributed by share instead of direct count scaling
+
+What improved:
+
+- the absurd `OREB` tail came down sharply:
+  - max `OREB`: `25.0 -> 12.5`
+  - max `REB`: `29.2 -> 24.0`
+- broad metrics stayed strong or improved:
+  - `dk_fpts_mae`: `5.619 -> 5.514`
+  - `reb_mae_player`: `1.665 -> 1.585`
+  - `ast_mae_player`: `1.296 -> 1.082`
+
+What is still unresolved:
+
+- the packet-level possession diagnostics moved a lot after the full
+  `AST + OREB + DREB` share override:
+  - `poss_sym_abs_p95`: `0.444 -> 1.567`
+- this is not because the override violates direct team-world rebound
+  conservation; both `OREB` and `DREB` budgets are preserved
+- the likely issue is downstream interaction with world realism / outlier
+  resample, or a possession diagnostic that is more sensitive to rebound
+  redistribution than expected
+
+Current read:
+
+- this is the first rebound-tail fix that actually brings the worst `OREB`
+  worlds back into a plausible range
+- but it is not yet ready to ship until the possession-side regression is
+  localized and either fixed or shown to be a harmless metric artifact
+
+Possession regression root cause and fix:
+
+- the possession regression was real, and it came from the share override
+  redistributing rebound mass onto zero-minute rows
+- the later world-contract repair then zeroed those rows back out, which leaked
+  rebound mass and changed derived possession totals
+- fixed in `scripts/rotation/run_gtv2_promotion_alignment.py` by restricting
+  `OREB / DREB` share redistribution to active rows only
+
+Post-fix result on the same shipped+sparse 60-game packet:
+
+- `tree_ast_orebshare_dreb_a075` now looks clean:
+  - `dk_fpts_mae`: `5.619 -> 5.508`
+  - `reb_mae_player`: `1.665 -> 1.594`
+  - `ast_mae_player`: `1.296 -> 1.082`
+  - `poss_sym_abs_p95`: `0.444 -> 0.281`
+  - `contract_repair_applied`: `False`
+- rebound tails remain much more plausible than baseline:
+  - max `OREB`: `25.0 -> 13.1`
+  - max `REB`: `29.2 -> 24.1`
+  - max `DREB`: `16.3`
+
+Updated boundary:
+
+- this is now the first full `AST + OREB + DREB` tree-share branch that is
+  both structurally coherent and broadly competitive
+- if the goal is a selective live hybrid for AST/REB, this is now a serious
+  promotion candidate

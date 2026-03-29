@@ -66,6 +66,7 @@ from projections.rotation.gtv2_promotion_hybrid import (
     SparseEmergencyHybridConfig,
     assert_promotion_hybrid_compatible,
 )
+from projections.rotation.sample_worlds_v2 import _coerce_join_keys
 from projections.runtime_stamp import (
     enforce_clean_tree,
     enforce_prod_sanity,
@@ -308,6 +309,9 @@ def _load_gtv2_inference_current_config() -> dict[str, Any]:
         "sparse_blend_alpha": 1.0,
         "sparse_require_no_props": False,
         "sparse_gate_artifact": None,
+        "tree_rate_predictions_csv": None,
+        "tree_rate_blend_alpha": 0.0,
+        "tree_rate_oreb_share_override_enabled": False,
     }
     if config_path.exists():
         payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -357,6 +361,204 @@ def _load_gtv2_inference_server_config() -> dict[str, Any]:
     if cfg.get("triton_url") and not cfg.get("triton_endpoint"):
         cfg["triton_endpoint"] = cfg.get("triton_url")
     return cfg
+
+
+def _normalize_tree_world_game_date(df: pd.DataFrame, *, col: str = "game_date") -> pd.DataFrame:
+    out = df.copy()
+    out[col] = pd.to_datetime(out[col], errors="coerce").dt.date.astype(str)
+    return out
+
+
+def _compute_tree_world_dk_fpts(df: pd.DataFrame) -> pd.Series:
+    pts = pd.to_numeric(df["pts"], errors="coerce").fillna(0.0)
+    reb = pd.to_numeric(df["reb"], errors="coerce").fillna(0.0)
+    ast = pd.to_numeric(df["ast"], errors="coerce").fillna(0.0)
+    stl = pd.to_numeric(df["stl"], errors="coerce").fillna(0.0)
+    blk = pd.to_numeric(df["blk"], errors="coerce").fillna(0.0)
+    tov = pd.to_numeric(df["tov"], errors="coerce").fillna(0.0)
+    base = pts + 1.25 * reb + 1.5 * ast + 2.0 * stl + 2.0 * blk - 0.5 * tov
+    qualifiers = pd.concat(
+        [
+            (pts >= 10.0).astype(int),
+            (reb >= 10.0).astype(int),
+            (ast >= 10.0).astype(int),
+            (stl >= 10.0).astype(int),
+            (blk >= 10.0).astype(int),
+        ],
+        axis=1,
+    ).sum(axis=1)
+    return base + np.where(qualifiers == 2, 1.5, 0.0) + np.where(qualifiers >= 3, 3.0, 0.0)
+
+
+def _rescale_tree_world_stat_to_target_mean(
+    work: pd.DataFrame,
+    *,
+    stat_col: str,
+    target_mean_col: str,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    out = work.copy()
+    player_keys = ["game_date", "game_id", "team_id", "player_id"]
+    current_means = (
+        out.groupby(player_keys, as_index=False)[stat_col]
+        .mean()
+        .rename(columns={stat_col: f"{stat_col}_current_mean"})
+    )
+    out = out.merge(current_means, on=player_keys, how="left")
+    target_means = pd.to_numeric(out[target_mean_col], errors="coerce").fillna(0.0)
+    current_means_arr = pd.to_numeric(out[f"{stat_col}_current_mean"], errors="coerce").fillna(0.0)
+    current_vals = pd.to_numeric(out[stat_col], errors="coerce").fillna(0.0)
+    scale = np.where(current_means_arr > 1e-9, target_means / current_means_arr, np.nan)
+    scaled_vals = current_vals * scale
+    fallback_mask = ~np.isfinite(scale)
+    fallback_groups = 0
+    if bool(fallback_mask.any()):
+        fallback_groups = int(out.loc[fallback_mask, player_keys].drop_duplicates().shape[0])
+        minutes = pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0)
+        active_world = (minutes > 0.0).astype(float)
+        fallback_weight = np.where(minutes > 0.0, minutes, active_world)
+        out["_fallback_weight"] = fallback_weight
+        group_weight_sum = out.groupby(player_keys)["_fallback_weight"].transform("sum")
+        group_world_count = out.groupby(player_keys)[stat_col].transform("size")
+        fallback_target_total = target_means * pd.to_numeric(group_world_count, errors="coerce").fillna(0.0)
+        fallback_vals = np.where(
+            group_weight_sum > 1e-9,
+            fallback_target_total * out["_fallback_weight"] / group_weight_sum,
+            target_means,
+        )
+        scaled_vals = np.where(fallback_mask, fallback_vals, scaled_vals)
+        out = out.drop(columns=["_fallback_weight"])
+    out[stat_col] = np.clip(np.asarray(scaled_vals, dtype=float), 0.0, None)
+    out = out.drop(columns=[f"{stat_col}_current_mean"])
+    return out, {"stat": stat_col, "fallback_group_count": int(fallback_groups)}
+
+
+def _override_tree_rebound_share_to_target_mean(
+    work: pd.DataFrame,
+    *,
+    stat_col: str,
+    target_mean_col: str,
+    blend_alpha: float,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    out = work.copy()
+    team_keys = ["game_date", "game_id", "team_id"]
+    player_keys = ["game_date", "game_id", "team_id", "player_id"]
+    world_team_keys = ["game_date", "game_id", "team_id", "world_idx"]
+
+    target_player = out.loc[:, player_keys + [target_mean_col]].drop_duplicates(player_keys).copy()
+    target_player[target_mean_col] = pd.to_numeric(target_player[target_mean_col], errors="coerce").fillna(0.0)
+    target_team = (
+        target_player.groupby(team_keys, as_index=False)[target_mean_col]
+        .sum()
+        .rename(columns={target_mean_col: f"{stat_col}_target_team_mean"})
+    )
+    target_player = target_player.merge(target_team, on=team_keys, how="left")
+    target_player[f"{stat_col}_target_share"] = np.where(
+        pd.to_numeric(target_player[f"{stat_col}_target_team_mean"], errors="coerce").fillna(0.0) > 1e-9,
+        pd.to_numeric(target_player[target_mean_col], errors="coerce").fillna(0.0)
+        / pd.to_numeric(target_player[f"{stat_col}_target_team_mean"], errors="coerce").fillna(1.0),
+        0.0,
+    )
+    out = out.merge(
+        target_player.loc[:, player_keys + [f"{stat_col}_target_share"]],
+        on=player_keys,
+        how="left",
+        validate="many_to_one",
+    )
+    team_world_total = out.groupby(world_team_keys)[stat_col].transform("sum")
+    current_vals = pd.to_numeric(out[stat_col], errors="coerce").fillna(0.0)
+    active_mask = pd.to_numeric(out.get("minutes", 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float) > 1e-9
+    target_share = pd.to_numeric(out[f"{stat_col}_target_share"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    target_share = np.where(active_mask, target_share, 0.0)
+    current_share = np.where(active_mask & (team_world_total > 1e-9), current_vals / team_world_total, 0.0)
+    alpha = float(np.clip(blend_alpha, 0.0, 1.0))
+    out[f"{stat_col}_share_blended"] = np.clip((1.0 - alpha) * current_share + alpha * target_share, 0.0, None)
+    share_sum = out.groupby(world_team_keys)[f"{stat_col}_share_blended"].transform("sum")
+    out[f"{stat_col}_share_final"] = np.where(share_sum > 1e-9, out[f"{stat_col}_share_blended"] / share_sum, 0.0)
+    out[stat_col] = np.where(
+        team_world_total > 1e-9,
+        team_world_total * pd.to_numeric(out[f"{stat_col}_share_final"], errors="coerce").fillna(0.0),
+        current_vals,
+    )
+    out = out.drop(columns=[c for c in [f"{stat_col}_target_share", f"{stat_col}_share_blended", f"{stat_col}_share_final"] if c in out.columns])
+    current_means = (
+        out.groupby(player_keys, as_index=False)[stat_col]
+        .mean()
+        .rename(columns={stat_col: f"{stat_col}_post_mean"})
+    )
+    compare = current_means.merge(target_player.loc[:, player_keys + [target_mean_col]], on=player_keys, how="left")
+    err = pd.to_numeric(compare[f"{stat_col}_post_mean"], errors="coerce").fillna(0.0) - pd.to_numeric(compare[target_mean_col], errors="coerce").fillna(0.0)
+    return out, {
+        "stat": stat_col,
+        "mode": "team_budget_share_override",
+        "post_minus_target_mean_abs_mean": float(np.abs(err).mean()) if len(err) else 0.0,
+        "post_minus_target_mean_bias": float(err.mean()) if len(err) else 0.0,
+    }
+
+
+def _apply_tree_rate_mean_override_to_worlds(
+    worlds: pd.DataFrame,
+    *,
+    predictions_csv: Path,
+    blend_alpha: float,
+    oreb_share_override_enabled: bool = False,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if not predictions_csv.exists():
+        raise FileNotFoundError(f"tree-rate predictions csv not found: {predictions_csv}")
+    pred_df = _coerce_join_keys(pd.read_csv(predictions_csv), name="tree_rate_predictions")
+    stat_to_rate_col = {"ast": "pred_ast_per_min", "oreb": "pred_oreb_per_min", "dreb": "pred_dreb_per_min"}
+    available_stats = [stat for stat, rate_col in stat_to_rate_col.items() if rate_col in pred_df.columns]
+    if not available_stats:
+        raise ValueError(f"tree-rate predictions must include at least one of {sorted(stat_to_rate_col.values())}: {predictions_csv}")
+    pred_df = _normalize_tree_world_game_date(pred_df)
+    keep_pred_cols = [stat_to_rate_col[stat] for stat in available_stats]
+    pred_df = pred_df.loc[:, ["game_date", "game_id", "team_id", "player_id", *keep_pred_cols]].drop_duplicates(["game_date", "game_id", "team_id", "player_id"])
+    work = worlds.merge(pred_df, on=["game_date", "game_id", "team_id", "player_id"], how="left", validate="many_to_one")
+    minutes_mean = (
+        work.groupby(["game_date", "game_id", "team_id", "player_id"], as_index=False)["minutes"]
+        .mean()
+        .rename(columns={"minutes": "variant_minutes_mean"})
+    )
+    work = work.merge(minutes_mean, on=["game_date", "game_id", "team_id", "player_id"], how="left")
+    alpha = float(np.clip(blend_alpha, 0.0, 1.0))
+    for stat_col in available_stats:
+        per_min_col = stat_to_rate_col[stat_col]
+        current_mean = (
+            work.groupby(["game_date", "game_id", "team_id", "player_id"], as_index=False)[stat_col]
+            .mean()
+            .rename(columns={stat_col: f"{stat_col}_current_mean"})
+        )
+        work = work.merge(current_mean, on=["game_date", "game_id", "team_id", "player_id"], how="left")
+        tree_target_mean = pd.to_numeric(work["variant_minutes_mean"], errors="coerce").fillna(0.0) * pd.to_numeric(work[per_min_col], errors="coerce").fillna(0.0)
+        current_mean_arr = pd.to_numeric(work[f"{stat_col}_current_mean"], errors="coerce").fillna(0.0)
+        work[f"{stat_col}_target_mean"] = (1.0 - alpha) * current_mean_arr + alpha * tree_target_mean
+        work = work.drop(columns=[f"{stat_col}_current_mean"])
+    stat_reports: list[dict[str, Any]] = []
+    for stat_col in available_stats:
+        if stat_col == "oreb" and oreb_share_override_enabled:
+            work, stat_report = _override_tree_rebound_share_to_target_mean(work, stat_col=stat_col, target_mean_col=f"{stat_col}_target_mean", blend_alpha=alpha)
+        elif stat_col == "dreb":
+            work, stat_report = _override_tree_rebound_share_to_target_mean(work, stat_col=stat_col, target_mean_col=f"{stat_col}_target_mean", blend_alpha=alpha)
+        else:
+            work, stat_report = _rescale_tree_world_stat_to_target_mean(work, stat_col=stat_col, target_mean_col=f"{stat_col}_target_mean")
+        stat_reports.append(stat_report)
+    if {"oreb", "dreb"} & set(available_stats):
+        work["reb"] = pd.to_numeric(work["oreb"], errors="coerce").fillna(0.0) + pd.to_numeric(work["dreb"], errors="coerce").fillna(0.0)
+    work["dk_fpts"] = _compute_tree_world_dk_fpts(work)
+    override_keys = pd.Series(False, index=work.index)
+    for rate_col in keep_pred_cols:
+        override_keys = override_keys | work[rate_col].notna()
+    report = {
+        "applied": True,
+        "predictions_csv": str(predictions_csv),
+        "blend_alpha": alpha,
+        "available_stats": available_stats,
+        "player_count_with_predictions": int(work.loc[override_keys, ["game_date", "game_id", "team_id", "player_id"]].drop_duplicates().shape[0]),
+        "stat_reports": stat_reports,
+        "oreb_share_override_enabled": bool(oreb_share_override_enabled),
+    }
+    drop_cols = ["pred_ast_per_min", "pred_oreb_per_min", "pred_dreb_per_min", "variant_minutes_mean", "ast_target_mean", "oreb_target_mean", "dreb_target_mean"]
+    work = work.drop(columns=[col for col in drop_cols if col in work.columns])
+    return work, report
 
 
 def _resolve_gtv2_inference_backend(
@@ -6029,6 +6231,9 @@ def generate_worlds_gtv2_live_task(
     sparse_blend_alpha: float = 1.0,
     sparse_require_no_props: bool = False,
     sparse_gate_artifact: str | None = None,
+    tree_rate_predictions_csv: str | None = None,
+    tree_rate_blend_alpha: float = 0.0,
+    tree_rate_oreb_share_override_enabled: bool = False,
 ) -> dict[str, str]:
     run_dir = (
         data_root
@@ -6442,6 +6647,18 @@ def generate_worlds_gtv2_live_task(
                 "Dropped invalid world rows before publish: %s",
                 world_key_report,
             )
+        tree_rate_override_report: dict[str, Any]
+        if tree_rate_predictions_csv and float(tree_rate_blend_alpha) > 0.0:
+            worlds_df, tree_rate_override_report = _apply_tree_rate_mean_override_to_worlds(
+                worlds_df,
+                predictions_csv=Path(str(tree_rate_predictions_csv)).expanduser().resolve(),
+                blend_alpha=float(tree_rate_blend_alpha),
+                oreb_share_override_enabled=bool(tree_rate_oreb_share_override_enabled),
+            )
+            if bool(tree_rate_override_report.get("applied")):
+                logger.info("Applied tree rate world override: %s", tree_rate_override_report)
+        else:
+            tree_rate_override_report = {"applied": False, "reason": "disabled"}
         props_uplift_report: dict[str, Any]
         if bool(apply_props_uplift):
             worlds_df, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
@@ -6578,6 +6795,7 @@ def generate_worlds_gtv2_live_task(
             "triton_request_count": int(triton_request_count),
             "force_active_guardrails": force_active_diag,
             "game_date_normalization": game_date_normalization_report,
+            "tree_rate_override": tree_rate_override_report,
             "props_uplift_calibration": props_uplift_report,
             "propless_tail_calibration": propless_tail_report,
             "mid_minutes_tail_calibration": mid_minutes_tail_report,
@@ -8167,6 +8385,16 @@ def nba_live_pipeline_v3_flow(
             sparse_gate_artifact=(
                 str(gtv2_current_cfg.get("sparse_gate_artifact") or "").strip()
                 or None
+            ),
+            tree_rate_predictions_csv=(
+                str(gtv2_current_cfg.get("tree_rate_predictions_csv") or "").strip()
+                or None
+            ),
+            tree_rate_blend_alpha=float(
+                gtv2_current_cfg.get("tree_rate_blend_alpha", 0.0)
+            ),
+            tree_rate_oreb_share_override_enabled=bool(
+                gtv2_current_cfg.get("tree_rate_oreb_share_override_enabled", False)
             ),
         )
 
