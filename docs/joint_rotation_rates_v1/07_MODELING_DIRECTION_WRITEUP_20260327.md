@@ -5185,11 +5185,17 @@ runs throughout the day. Two distinct triggers:
 Tatum's own features were unambiguous throughout: `prior_play_prob = 0.97`,
 `lineup_starter_announced = 1`, `is_out = 0`, `an_implied_minutes ≈ 35–39`.
 
-**Fix:** Players with `prior_play_prob >= 0.85` AND starter force-active now bypass
-the `score_active_allow_flat` gate. When bypassed with zero model minutes, the
-sampler seeds `minutes_for_sampling` from the props-implied anchor (`an_implied_minutes`)
-and runs it through the normal simplex projection, so the result is
-team-budget-consistent.
+**Fix (v1 — reverted):** Initial fix gated the bypass on `prior_play_prob >= 0.85`,
+but this missed questionable starters like Dejounte Murray (`prior_play_prob = 0.55`,
+status Q) who had `active_prob_proxy = 0.9944` but `active_deterministic = 0`.
+
+**Fix (v2 — current):** All projected starters bypass the `score_active_allow_flat`
+gate unconditionally. The `out_player_mask` already removes truly OUT players before
+the bypass check, so only starters who are not OUT get the bypass. Non-starter
+manual force-actives are still gated by the score surface. When bypassed with zero
+model minutes, the sampler seeds `minutes_for_sampling` from the props-implied
+anchor (`an_implied_minutes`) and runs it through the normal simplex projection,
+so the result is team-budget-consistent.
 
 **Verified locally on the Boston game (22501085):** with the score surface still
 showing Tatum at `active_deterministic = 0`:
@@ -5197,13 +5203,15 @@ showing Tatum at `active_deterministic = 0`:
 - Before fix: Tatum gets 0 minutes across all worlds
 - After fix: Tatum gets 34.8 min mean, σ = 2.1, range 28.5–41.5, 100% active
 
-The 0.85 threshold is conservative — it catches confirmed starters and high-
-probability rotation players without overriding the active head for genuinely
-uncertain fringe cases.
+**Second case — Dejounte Murray (1627749), Pelicans, 2026-03-29:** Same active-head
+flickering. Status Q, `is_projected_starter = True`, `prior_play_prob = 0.55`,
+`an_implied_minutes = 26.4`, but `active_deterministic = 0, minutes_deterministic = 0`.
+The v1 fix with the 0.85 threshold would have missed him. The v2 fix (all starters
+bypass) covers this case.
 
 **Remaining concern:** This is a guardrail, not a root-cause fix. The active head
-should not be this sensitive to teammate/props feature shifts for high-confidence
-starters. Longer-term options:
+should not be this sensitive to teammate/props feature shifts for projected starters.
+Longer-term options:
 
 1. Feature engineering: clip or smooth the props book-count and line-std features
    near game time to reduce input-space volatility

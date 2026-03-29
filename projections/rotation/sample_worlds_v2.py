@@ -2612,26 +2612,14 @@ def sample_worlds_for_batch(
             starter_forced_active_flat = starter_forced_active_flat & (~out_player_mask_flat)
             manual_forced_active_flat = manual_forced_active_flat & (~out_player_mask_flat)
             if isinstance(score_active_allow_flat, torch.Tensor):
-                # High-confidence starters bypass the score-surface gate: the active
-                # head can flicker for stars when teammate/props features shift near
-                # tip, so don't let a transient score-surface zero block force-active.
-                high_conf_play_prob = _decode_player_feature_column(
-                    rep_player_features.reshape(
-                        rep_player_features.shape[0], -1, rep_player_features.shape[-1]
-                    ),
-                    config=model_config,
-                    column_name="prior_play_prob",
-                )
-                high_conf_bypass = torch.zeros_like(starter_forced_active_flat)
-                if isinstance(high_conf_play_prob, torch.Tensor):
-                    high_conf_bypass = (
-                        starter_forced_active_flat
-                        & high_conf_play_prob.ge(0.85)
-                    )
-                starter_forced_active_flat = (
-                    (starter_forced_active_flat & score_active_allow_flat)
-                    | high_conf_bypass
-                )
+                # Projected starters bypass the score-surface gate entirely: the
+                # active head can flicker when teammate/props features shift near
+                # tip, so don't let a transient score-surface zero block
+                # force-active for any projected starter.  The out_player_mask
+                # already removes truly OUT players above (line 2611-2613).
+                # Only non-starter manual force-actives are gated by the score
+                # surface.
+                manual_forced_active_flat = manual_forced_active_flat & score_active_allow_flat
                 forced_active_flat = starter_forced_active_flat | manual_forced_active_flat
             forced_minutes_anchor_flat = (
                 rep_forced_active_minutes_anchor.reshape(rep_forced_active_minutes_anchor.shape[0], -1)
