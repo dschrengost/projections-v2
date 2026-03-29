@@ -2612,12 +2612,51 @@ def sample_worlds_for_batch(
             starter_forced_active_flat = starter_forced_active_flat & (~out_player_mask_flat)
             manual_forced_active_flat = manual_forced_active_flat & (~out_player_mask_flat)
             if isinstance(score_active_allow_flat, torch.Tensor):
-                starter_forced_active_flat = starter_forced_active_flat & score_active_allow_flat
+                # High-confidence starters bypass the score-surface gate: the active
+                # head can flicker for stars when teammate/props features shift near
+                # tip, so don't let a transient score-surface zero block force-active.
+                high_conf_play_prob = _decode_player_feature_column(
+                    rep_player_features.reshape(
+                        rep_player_features.shape[0], -1, rep_player_features.shape[-1]
+                    ),
+                    config=model_config,
+                    column_name="prior_play_prob",
+                )
+                high_conf_bypass = torch.zeros_like(starter_forced_active_flat)
+                if isinstance(high_conf_play_prob, torch.Tensor):
+                    high_conf_bypass = (
+                        starter_forced_active_flat
+                        & high_conf_play_prob.ge(0.85)
+                    )
+                starter_forced_active_flat = (
+                    (starter_forced_active_flat & score_active_allow_flat)
+                    | high_conf_bypass
+                )
                 forced_active_flat = starter_forced_active_flat | manual_forced_active_flat
             forced_minutes_anchor_flat = (
                 rep_forced_active_minutes_anchor.reshape(rep_forced_active_minutes_anchor.shape[0], -1)
                 * forced_active_flat.to(dtype=rep_forced_active_minutes_anchor.dtype)
             )
+            # Seed minutes from props anchor for force-active players the model zeroed
+            # out.  This feeds into the normal simplex + uncertainty pipeline so the
+            # result is team-budget-consistent, not a raw override.
+            bypassed_with_zero_minutes = (
+                forced_active_flat
+                & minutes_for_sampling.le(float(DEFAULT_ACTIVE_MINUTES_TOL))
+                & forced_minutes_anchor_flat.gt(0.0)
+            )
+            if bool(bypassed_with_zero_minutes.any()):
+                minutes_for_sampling = torch.where(
+                    bypassed_with_zero_minutes,
+                    forced_minutes_anchor_flat,
+                    minutes_for_sampling,
+                )
+                minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
+                    minutes_for_sampling,
+                    active_mask_for_sampling | forced_active_flat,
+                    out.player_valid_mask,
+                    out.player_team_index,
+                )
             if bool(out_player_mask_flat.any()):
                 active_mask_for_sampling = active_mask_for_sampling & (~out_player_mask_flat)
                 minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
