@@ -2334,18 +2334,23 @@ def sample_worlds_for_batch(
                 raise RuntimeError("label leakage guard failed: sampler forward returned flow outputs")
             active_mask_for_sampling = out.active.active_mask
             minutes_for_sampling = out.minutes.minutes
+            score_active_known_flat: torch.Tensor | None = None
+            score_active_allow_flat: torch.Tensor | None = None
             if isinstance(rep_score_minutes_deterministic, torch.Tensor):
                 score_minutes_flat = rep_score_minutes_deterministic.reshape(
                     rep_score_minutes_deterministic.shape[0], -1
                 ).clamp(min=0.0)
                 if isinstance(rep_score_active_deterministic, torch.Tensor):
-                    score_active_flat = rep_score_active_deterministic.reshape(
+                    score_active_raw_flat = rep_score_active_deterministic.reshape(
                         rep_score_active_deterministic.shape[0], -1
                     )
-                    score_active_flat = torch.isfinite(score_active_flat) & score_active_flat.ge(0.5)
+                    score_active_known_flat = torch.isfinite(score_active_raw_flat)
+                    score_active_flat = score_active_known_flat & score_active_raw_flat.ge(0.5)
                 else:
                     score_active_flat = score_minutes_flat.gt(float(DEFAULT_ACTIVE_MINUTES_TOL))
                 score_active_flat = score_active_flat & out.player_valid_mask.to(dtype=torch.bool)
+                if score_active_known_flat is not None:
+                    score_active_allow_flat = (~score_active_known_flat) | score_active_flat
                 score_minutes_flat = score_minutes_flat * score_active_flat.to(dtype=score_minutes_flat.dtype)
                 minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
                     score_minutes_flat,
@@ -2374,6 +2379,8 @@ def sample_worlds_for_batch(
                     starter_promotion_candidate_worlds.shape[0],
                     -1,
                 )
+                if isinstance(score_active_allow_flat, torch.Tensor):
+                    promotion_candidate_flat = promotion_candidate_flat & score_active_allow_flat
                 blended_minutes, blended_active_mask = blend_promotion_predictions(
                     baseline_minutes=out.minutes.minutes,
                     baseline_active_mask=out.active.active_mask,
@@ -2420,6 +2427,8 @@ def sample_worlds_for_batch(
                     sparse_emergency_candidate_worlds.shape[0],
                     -1,
                 )
+                if isinstance(score_active_allow_flat, torch.Tensor):
+                    sparse_candidate_flat = sparse_candidate_flat & score_active_allow_flat
                 blended_minutes, blended_active_mask = blend_expert_predictions(
                     baseline_minutes=minutes_for_sampling,
                     baseline_active_mask=active_mask_for_sampling,
@@ -2465,6 +2474,8 @@ def sample_worlds_for_batch(
                     bench_riser_candidate_worlds.shape[0],
                     -1,
                 )
+                if isinstance(score_active_allow_flat, torch.Tensor):
+                    bench_candidate_flat = bench_candidate_flat & score_active_allow_flat
                 blended_minutes, blended_active_mask = blend_expert_predictions(
                     baseline_minutes=minutes_for_sampling,
                     baseline_active_mask=active_mask_for_sampling,
@@ -2560,6 +2571,7 @@ def sample_worlds_for_batch(
                 rep_starter_force_active_worlds.reshape(rep_starter_force_active_worlds.shape[0], -1)
                 & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
             )
+            manual_forced_active_flat = forced_active_flat & (~starter_forced_active_flat)
             out_player_mask_flat = _decode_out_player_mask(
                 rep_player_features.reshape(
                     rep_player_features.shape[0],
@@ -2571,6 +2583,10 @@ def sample_worlds_for_batch(
             )
             forced_active_flat = forced_active_flat & (~out_player_mask_flat)
             starter_forced_active_flat = starter_forced_active_flat & (~out_player_mask_flat)
+            manual_forced_active_flat = manual_forced_active_flat & (~out_player_mask_flat)
+            if isinstance(score_active_allow_flat, torch.Tensor):
+                starter_forced_active_flat = starter_forced_active_flat & score_active_allow_flat
+                forced_active_flat = starter_forced_active_flat | manual_forced_active_flat
             forced_minutes_anchor_flat = (
                 rep_forced_active_minutes_anchor.reshape(rep_forced_active_minutes_anchor.shape[0], -1)
                 * forced_active_flat.to(dtype=rep_forced_active_minutes_anchor.dtype)
