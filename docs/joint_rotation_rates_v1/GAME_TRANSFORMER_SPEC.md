@@ -7603,6 +7603,169 @@ Your `L_team_energy` and `L_crps_fpts` are in the right direction but they opera
 
 3. **Curriculum on `lineup_available=1` rows**: Upweight `lineup_available=1` examples by 2-3x in training. Your production regime is under-represented in training data, and that's where all your eval regressions concentrate.
 
+#### Additional 2026-03-28 probe result
+
+A later probe confirmed that simply enriching the shared backbone context is not
+enough. Turning on `backbone_env_enrich_features` did not materially improve
+team differentiation in live replay. Adding explicit side-specific market
+features to the backbone team state did move implied margins in the right
+direction, but only partially and at the cost of under-shooting total scoring.
+
+This strengthens the same architectural conclusion: team asymmetry likely needs
+to be represented as an explicit team-level budget split, not as a weakly
+emergent property of a shared possessions latent plus downstream noise.
+
+#### Additional 2026-03-28 probe result: explicit team-points budget latent
+
+A first explicit team budget split branch has now been tested:
+
+- new supervised `team_points_budget_head`
+- target: side-specific implied totals derived from `vegas_total` and
+  `vegas_spread`
+- predicted team-point budgets encoded back into the backbone team states before
+  possession/event generation
+
+Training behavior:
+
+- run: `/home/daniel/projections-data/training/runs/gtv2_team_points_budget_liveprobe_20260328T214029Z`
+- best epoch: `7`
+- best `val_total = 11.68`
+- the new implied-total head fit extremely well:
+  - `val_team_points_budget_aux: 3.19 -> 0.02`
+
+Live-slate replay behavior:
+
+- artifact:
+  `/home/daniel/projections-data/tmp/gtv2_team_points_budget_liveprobe_20260328T214029Z/team_margin_summary.json`
+- mean absolute implied margin only moved:
+  - current live: `0.93`
+  - explicit team-points latent probe: `1.24`
+  - market: `10.08`
+- mean total points stayed near the live branch:
+  - current live: `230.72`
+  - probe: `228.75`
+
+Interpretation:
+
+- the model can learn the side-specific market split signal directly
+- but passing that split only as a latent perturbation to backbone team state is
+  still too indirect
+- the downstream generative path is not being forced to honor the split in a
+  meaningful way
+
+Updated implication:
+
+- a team-budget split head is directionally correct
+- but it likely needs to become an operative budget object inside the
+  generative path, not just another conditioning feature
+- next step should be a harder team split:
+  - explicit team-level points budgets before player allocation, or
+  - explicit team opportunity budgets derived from a sampled home/away points
+    split
+
+#### Additional 2026-03-28 probe result: operative market-implied team budget
+
+We then tested the harder version directly:
+
+- `team_points_budget_parameterization = market_implied`
+- home/away team budgets are derived directly from `vegas_total` and
+  `vegas_spread`
+- generated player scoring makes are reconciled toward those side-specific
+  budgets with `team_points_reconcile_budget=true`
+- the same budget can be encoded back into backbone team state with
+  `team_points_budget_to_backbone=true`
+
+Eval-only replay on the current live bundle:
+
+- artifact:
+  `/home/daniel/projections-data/tmp/live_bundle_team_points_market_reconcile_20260328/summary.json`
+- current live mean absolute implied margin: `0.93`
+- market-implied reconcile:
+  - `alpha=0.50`: `5.31`
+  - `alpha=0.75`: `7.69`
+  - `alpha=1.00`: `10.07`
+- market target mean absolute margin on that slate: `10.08`
+- spread-sign correctness improved to `6/6`
+
+Interpretation:
+
+- the downstream generator **can** carry a meaningful home/away split when the
+  split is made operative
+- the live tie-collapse is therefore not caused by publish averaging or by
+  player-level aggregation itself
+- the missing object was an operative team budget split upstream of player
+  allocation
+
+Training-consistent probe:
+
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_market_team_points_reconcile_a075_train_20260328T215918Z`
+- replay artifact:
+  `/home/daniel/projections-data/tmp/gtv2_market_team_points_reconcile_a075_train_20260328T215918Z/team_margin_summary.json`
+- best epoch: `6`
+- best `val_total = 11.46`
+- live replay:
+  - mean absolute implied margin: `7.67`
+  - mean total points: `233.46`
+  - spread-sign correctness: `6/6`
+  - team-total MAE vs current live publish: `3.91`
+
+Updated implication:
+
+- a deterministic market-implied team budget is the first branch that actually
+  fixes the spread-collapse failure mode
+- the promising operating region is partial reconciliation rather than a pure
+  market copy:
+  - `alpha=1.0` almost exactly reproduces market spread
+  - `alpha≈0.75` preserves most of the spread recovery while still leaving room
+    for model-side deviation
+- this is materially stronger than:
+  - spread/total auxiliaries
+  - side-market latent enrichment alone
+  - learned team-split heads used only as soft conditioning
+
+#### 60-game production-aligned gate on the market-budget branch
+
+We then ran the same 60-game production-aligned envelope used for the current
+live branch:
+
+- `alpha=0.75` trained branch:
+  - `/home/daniel/projections-data/training/runs/gtv2_market_team_points_60day_eval_20260328T2200Z/summary.csv`
+- `alpha=0.50` eval-only fallback:
+  - `/home/daniel/projections-data/training/runs/gtv2_market_team_points_60day_eval_a050_20260328T2204Z/summary.csv`
+
+Baseline (`current_live`) on that packet:
+
+- `dk_fpts_mae = 5.60`
+- `pts_mae_player = 3.39`
+- `pts_mae_team = 9.86`
+- `spread_mae_vs_vegas = 5.46`
+- `total_mae_vs_vegas = 4.53`
+
+`alpha=0.75` branch:
+
+- `spread_mae_vs_vegas = 1.62`
+- `total_mae_vs_vegas = 2.59`
+- but `pts_mae_team = 16.01`
+- and `pts_bias_mean_team = -8.08`
+- plus `pts_mae_player = 3.68`, `dk_fpts_mae = 5.91`
+
+`alpha=0.50` fallback:
+
+- `spread_mae_vs_vegas = 2.82`
+- `total_mae_vs_vegas = 3.70`
+- but `pts_mae_team = 13.23`
+- and `pts_bias_mean_team = -5.52`
+- plus `pts_mae_player = 3.55`, `dk_fpts_mae = 5.80`
+
+Decision:
+
+- do **not** promote the market-implied team-budget branch yet
+- it solves spread collapse by over-anchoring team points
+- the next iteration should preserve the explicit team split but move away from
+  a direct points-budget anchor toward a softer residual or opportunity-budget
+  constraint
+
 #### Medium-term (architectural)
 
 4. **Consider a two-stage flow**: Stage 1 models team-level budgets `(team_fga, team_fta, team_reb, team_ast, team_stl, team_blk, team_tov)` jointly for both teams. Stage 2 models player shares within those budgets. This explicitly separates "how much total action" from "who gets it" — matching the structure of the sport. Your current `_align_flow_to_backbone_budgets` is already doing this split at inference time; making it part of the generative model would align training and inference.
@@ -7940,3 +8103,4183 @@ post-patch defaults showed:
    7-day live monitoring shows persistent 12-20 tail under-call with stable numerics.
 4. If mean-accuracy improvement is required, move that objective to model-level changes;
    keep this post-processing layer constrained to realism/tail risk control.
+
+### 17.7 Promotion-Hybrid Live Evaluation Status (2026-03-27)
+
+Scope: experimental starter-promotion expert wiring for GTv2 live world generation.
+
+#### 17.7.1 What was added
+
+1. Live GTv2 worlds path now supports an optional promotion-hybrid config loaded from
+   `config/gtv2_inference_current.json`.
+2. The local GTv2 worlds backend can load:
+   - a primary GTv2 bundle
+   - a secondary promotion expert bundle
+   - a promotion-candidate rule based on:
+     - `lineup_starter_announced`
+     - `minutes_from_stints_prior_20 <= 12`
+     - `max(recent_start_pct_10, started_proxy_rate_prior_10, started_proxy_rate_prior_20) <= 0.20`
+3. The worlds sampler supports:
+   - `uplift_only` blend
+   - `replace` blend
+   - optional `promotion_force_active_candidates`
+4. Triton worlds inference explicitly rejects this mode for now. The implementation is
+   local-backend-only until a matching server path exists.
+
+#### 17.7.2 Offline result that justified the experiment
+
+The original 60-day aligned backtest showed a real but modest structural gain from the
+promotion expert when used as a gated hybrid:
+
+- overall minutes MAE improved slightly;
+- promotion-slice predicted minutes increased;
+- promotion-slice active recall improved;
+- the gain survived the normal GTv2 world-generation/post-processing path.
+
+This was enough to justify live-path plumbing behind a flag, but not enough to justify
+promotion to production without slate-level validation.
+
+#### 17.7.3 Live compatibility blocker discovered
+
+The current production GTv2 bundle is **not compatible** with the researched promotion
+expert checkpoint.
+
+Observed on `2026-03-27`:
+
+- current live production bundle: `336` player features
+- promotion expert checkpoint used in research: `377` player features
+
+The hybrid requires exact schema parity between the primary model and the expert:
+
+- identical `feature_columns`
+- identical `game_feature_columns`
+- identical `team_feature_columns`
+- identical feature normalization arrays
+
+Because of that mismatch, the researched promotion expert cannot be enabled directly
+against the current production GTv2 bundle.
+
+#### 17.7.4 Current-slate live replay finding
+
+The `2026-03-26` 3-game slate contained a direct example of the sparse-starter failure:
+
+- DeAndre Jordan
+- `lineup_starter_announced = 1`
+- `minutes_from_stints_prior_20 = 6.98`
+- historical start-rate max `= 0.05`
+- `prior_play_prob = 0.97`
+
+This player was a promotion candidate under the experimental rule.
+
+Current live production output:
+
+- `sim_p_active = 0.350`
+- `minutes_sim_uncond_mean = 2.71`
+- `minutes_p50 = 0.0`
+
+Compatible experimental shadow replay using the clean minutes baseline plus promotion expert:
+
+- `sim_p_active = 0.380`
+- `minutes_sim_uncond_mean = 3.82`
+- `minutes_p50 = 0.0`
+
+Interpretation:
+
+- the hybrid improved the player somewhat;
+- it did **not** clear the actual live failure threshold;
+- the median minutes outcome stayed effectively zero.
+
+#### 17.7.5 Important tracing result
+
+The DeAndre Jordan replay established that the live failure is **not** simply “starter
+signal missing from features.”
+
+In the actual sampler batch:
+
+- `starter_force_active_worlds = True`
+- `force_active_worlds = True`
+
+So the player was already being carried on both starter and force-active masks before
+world generation. Despite that, the final published worlds still had an effectively zero
+median minutes outcome.
+
+Conclusion:
+
+- the remaining failure is downstream of feature construction and mask attachment;
+- it lives in the active/minutes/floor/world path, not in the initial detection of the
+  starter signal.
+
+#### 17.7.6 Experimental force-active candidate check
+
+An additional experimental knob, `promotion_force_active_candidates`, was added and
+tested in shadow mode.
+
+Result on the same DeAndre Jordan slate:
+
+- forcing promotion candidates active after hybrid blending did **not** materially solve
+  the problem;
+- `minutes_p50` only moved from `0.0` to an effectively zero epsilon value;
+- this indicates the remaining blocker is not just candidate membership, but the
+  downstream minutes-floor interaction after activity is set.
+
+#### 17.7.7 Production decision
+
+Do **not** promote the promotion-hybrid path to live production yet.
+
+Status:
+
+- live-path plumbing exists behind config
+- default remains disabled
+- feature-schema incompatibility blocks use with the current production bundle
+- even the compatible shadow replay did not fully solve the observed sparse-starter case
+
+#### 17.7.8 Next actions
+
+1. Keep the hybrid path experimental only.
+2. Use the current findings as input to the full GTv2 retrain/reset effort.
+3. If this path is revisited later, either:
+   - retrain a promotion expert on the current production bundle schema, or
+   - retrain the primary GTv2 bundle and specialist together on the same feature contract.
+4. Trace the exact downstream sampler/floor interaction that allows a player on both
+   force-active masks to still finish with an effectively zero median minutes outcome.
+
+#### 17.7.9 Training-stack assessment and next diagnostic direction
+
+Discussion on `2026-03-27` clarified that the current GTv2 trainer should be viewed as a
+multi-objective research harness rather than a single coherent production recipe.
+
+Current model order is:
+
+1. predict active set
+2. predict minutes conditioned on the active set
+3. predict joint stat tensor / worlds conditioned on the encoder state and, optionally,
+   minutes
+
+Relevant implementation points:
+
+- active -> minutes -> flow order is implemented in `projections/rotation/game_transformer_v2.py`
+- Phase 2 explicitly ramps in `L_flow_nll` while decaying the active/minutes anchor weights
+- optional heads and losses can further couple:
+  - possession backbone
+  - efficiency head
+  - usage-share head
+  - emergent share auxiliaries
+  - market / props / direct-stat auxiliaries
+
+Assessment:
+
+- the gameflow concept itself remains valid; the original intent was to model joint
+  game correlation structure without a possession-by-possession Markov simulator
+- the current risk is not obvious lack of flow capacity, but excessive coupling between:
+  - upstream rotation/minutes errors
+  - flow likelihood training
+  - downstream stat/market auxiliaries
+- there is also an important train/inference mismatch:
+  - minutes can be teacher-forced during training
+  - flow minutes-conditioning can also be teacher-forced during training
+  - at inference, flow depends on predicted rotation/minutes state
+
+Operational conclusion:
+
+- current minutes/rotation quality is good enough to use as a **research conditioning
+  layer**
+- current minutes/rotation quality is **not** good enough to be treated as final/frozen
+  for production
+
+Recommended next diagnostic:
+
+1. keep the clean minutes baseline as the upstream control
+2. evaluate the flow/world path under two conditions:
+   - predicted rotation/minutes state
+   - oracle rotation/minutes state from labels
+3. use the gap between those two settings to answer whether the primary bottleneck is:
+   - upstream rotation/minutes quality, or
+   - the flow/stat generation stack itself
+
+This diagnostic path is preferred over adding more downstream losses before the upstream
+minutes model is trustworthy.
+
+#### 17.7.10 Direct-stat supervision and `v2` flow target findings
+
+Follow-up experiments on `2026-03-27` added grouped direct-stat supervision to the
+Phase 2 trainer.
+
+Implementation summary:
+
+- grouped direct-stat losses were added in `scripts/rotation/train_game_transformer_v2.py`
+- two grouped losses are now available:
+  - `direct_boxscore_aux`
+  - `direct_opportunity_aux`
+- `direct_boxscore_aux` supervises:
+  - `PTS`, `REB`, `AST`, `STL`, `BLK`, `3PM`, `FTM`, `TOV`
+- `direct_opportunity_aux` supervises:
+  - `FGA`, `FTA`
+
+Loss-design conclusion:
+
+- raw `FPTS` supervision is too compressed to diagnose or correct the downstream
+  stat-generation stack
+- direct per-stat supervision is more informative, but it must be aligned with the
+  factorization of the flow target schema
+
+Observed results:
+
+1. `v1` flow target schema + grouped direct-stat supervision:
+   - improved some high-usage / star slices
+   - did **not** produce a clean overall improvement
+   - degraded coverage and possession calibration
+   - was not considered a keeper
+
+2. `v2` flow target schema + separate efficiency head + stronger opportunity loss:
+   - produced the first materially promising downstream result
+   - best observed combination was:
+     - `flow_target_schema=v2`
+     - `w_direct_boxscore_aux=0.05`
+     - `w_direct_opportunity_aux=0.15`
+     - inference decode: `make_model=beta_binomial_all`
+     - `bb_use_learned_efficiency=1`
+
+What improved on the 12-game / 64-world comparison versus the current baseline bundle:
+
+- overall `PTS` MAE improved slightly
+- `high_usage`, `star`, and `elite` point slices improved materially
+- `high_usage` / `star` / `elite` FGA allocation improved materially
+- top-1 and top-2 point-share errors improved
+- FT% calibration improved materially
+- total-game MAE versus actual stayed approximately flat
+
+What remained weak:
+
+- possession calibration worsened
+- interval coverage (`p90`, `p95`) worsened
+- FG% calibration worsened modestly
+
+Interpretation:
+
+- the cleaner factorization appears directionally correct:
+  - flow should emphasize attempts / opportunity structure
+  - efficiency should own make-rate structure
+- the remaining problem is no longer mainly player-share allocation
+- the remaining problem is distribution calibration and game-environment calibration
+
+Current working conclusion:
+
+- keep the `v2 + efficiency + direct opportunity aux + beta_binomial_all` path as the
+  active experimental branch
+- do **not** promote it yet
+- next iteration should focus on:
+  - possession / backbone calibration
+  - world coverage calibration
+  - allocation-source blending only if it helps those metrics without giving back the
+    share improvements
+
+Additional follow-up observations from the same session:
+
+- inference-side allocation sweeps showed:
+  - `allocation_source=emergent` with `beta_binomial_all` is the best current
+    balanced decode
+  - `allocation_source=usage_head` further improves high-usage / star point slices and
+    overall player `PTS` MAE
+  - but `usage_head` and more aggressive `blend` settings worsen interval coverage and
+    team-total accuracy enough that they should remain experimental
+- a possession-focused follow-up fine-tune from the promising `v2` checkpoint, with:
+  - stronger `w_poss_nll`
+  - stronger `w_backbone_nll`
+  - stronger `w_poss_regression`
+  - and a slight unfreeze of the game-level projection path
+  did **not** improve `val_total_ex_possreg` and is currently considered a negative
+  result
+
+#### 17.7.11 Calibration split: possessions, decode dispersion, and minutes uncertainty
+
+Follow-up review clarified that "calibration" was covering at least three separate
+problems:
+
+1. possession / game-environment calibration
+2. decode-side dispersion / interval coverage
+3. minutes-uncertainty propagation into worlds
+
+Diagnostic summary:
+
+1. possession-focused fine-tune:
+   - artifact:
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_poss_ft_20260327T040459Z`
+   - result:
+     - negative
+     - stronger possession/backbone losses did not improve the ex-possession
+       objective
+   - conclusion:
+     - possession calibration still matters, but higher loss weight alone is not the
+       fix
+
+2. decode dispersion sweep:
+   - artifacts:
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/allocation_variant_summary.json`
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/candidate_eval_12g64w_beta/make_rate_eval.json`
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/candidate_eval_12g64w_beta_wider/make_rate_eval.json`
+   - result:
+     - `allocation_source=emergent` with `beta_binomial_all` remains the best balanced
+       decode
+     - `usage_head` and more aggressive `blend` settings improve star/high-usage means
+       further, but worsen coverage and team-total behavior
+     - widening beta-binomial concentrations at inference did not materially fix
+       under-coverage
+   - conclusion:
+     - decode choice matters, but the coverage problem is not a trivial
+       concentration-tuning issue
+
+3. minutes-uncertainty propagation audit:
+   - artifacts:
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/minutes_uncertainty_diagnostic.json`
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/minutes_uncertainty_active_signature_diagnostic.json`
+   - result:
+     - meaningful-player active-only minute variance exists at the world level
+     - however, once worlds are grouped by exact team active-mask signature, weighted
+       minute std within the same signature is `0.0` for:
+       - baseline
+       - `v2_beta`
+       - `v2_usage_beta`
+   - interpretation:
+     - minutes are deterministic conditional on the sampled team active mask
+     - current minutes uncertainty is therefore coming from discrete active-set
+       branching, not from a continuous minutes distribution over the same rotation
+       state
+     - this is a likely contributor to interval under-dispersion
+
+4. first inference-side minutes-uncertainty experiment:
+   - implementation:
+     - added an inference-only sampler path in `sample_worlds_v2.py`
+     - active players receive Gaussian minute noise
+     - noise scale uses hurdle `sigma` when available, otherwise trailing
+       `minutes_from_stints_std_prior_*` priors
+     - noisy minutes are projected back to team-feasible 240-minute allocations
+   - artifacts:
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/candidate_eval_12g64w_beta_minunc_s1p0/make_rate_eval.json`
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/candidate_eval_12g64w_beta_minunc_s1p5/make_rate_eval.json`
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/minutes_uncertainty_backtest_compare.json`
+   - result:
+     - `p90_coverage` improved slightly:
+       - `0.8583 -> 0.8639` at scale `1.0`
+       - `0.8583 -> 0.8667` at scale `1.5`
+     - `p95_coverage` stayed flat at `0.9111`
+     - possession metrics improved slightly
+     - but:
+       - `PTS` MAE worsened by about `+0.32` to `+0.35`
+       - star-slice `PTS` MAE worsened by about `+0.63`
+       - total-game MAE vs actual worsened by about `+0.20`
+   - conclusion:
+     - minutes uncertainty is a real lever
+     - but naive independent Gaussian sampling is not good enough as the mainline fix
+     - a better version likely needs:
+       - more selective uncertainty by player/context
+       - or a learned/coherent team-level minutes uncertainty model
+
+5. follow-up inference-side uncertainty variants:
+   - selective Gaussian:
+     - preserve top-3 minute players per team
+     - taper uncertainty down as predicted minutes rise
+     - exact re-imposition of protected player minutes after projection
+   - residual-share Dirichlet:
+     - preserve top-3 minute players per team exactly
+     - sample the residual active-pool minute shares from a Dirichlet-style
+       distribution centered on the baseline allocation
+   - artifacts:
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/minutes_uncertainty_backtest_compare_v2.json`
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_directstats_ft_20260327T035212Z/minutes_uncertainty_dirichlet_compare.json`
+   - result:
+     - selective Gaussian stayed very close to the naive Gaussian result:
+       - slight `p90` improvement
+       - flat `p95`
+       - continued regression in `PTS` MAE and star-slice `PTS` MAE
+     - residual-share Dirichlet improved player-level means slightly, but caused a
+       large regression in team total MAE versus actual (about `+2.38`)
+   - conclusion:
+     - inference-only uncertainty injection has diminishing returns
+     - the remaining path should move toward a learned minutes uncertainty model
+       rather than further sampler-only perturbations
+
+Updated operating conclusion:
+
+- the `v2 + efficiency + direct opportunity aux + beta_binomial_all` branch remains the
+  correct experimental line
+- the next iteration should not jump to a full retrain yet
+- the next substantive modeling question is whether the world generator needs explicit
+  minutes uncertainty, rather than only:
+  - active-set sampling
+  - flow sampling
+  - make-rate sampling
+
+6. learned minutes-distribution follow-up:
+   - training run:
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_ft_20260327T050500Z`
+   - key training changes:
+     - enabled minutes hurdle head with learned `sigma`
+     - enabled `flow_use_minutes_conditioning=true`
+     - warm-started from the prior `v2` direct-stats checkpoint
+     - froze the shared encoder / active head to isolate the minutes-conditioned
+       downstream path
+   - evaluation artifacts:
+     - no sampler uncertainty:
+       - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_ft_20260327T050500Z/candidate_eval_12g64w_nominunc/make_rate_eval.json`
+     - learned-sigma sampler path:
+       - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_ft_20260327T050500Z/candidate_eval_12g64w_learnedsigma/make_rate_eval.json`
+     - comparison table:
+       - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_ft_20260327T050500Z/compare_baseline_vs_minutesdist.json`
+     - same-signature variance diagnostic:
+       - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_ft_20260327T050500Z/learned_minutes_same_signature_diagnostic.json`
+   - result versus prior `v2_beta` control:
+     - no sampler uncertainty:
+       - `pts_mae`: `10.95 -> 9.78`
+       - `total_mae_vs_actual`: `16.93 -> 13.17`
+       - `total_mae_vs_vegas`: `9.56 -> 5.23`
+       - `p90_coverage`: `0.858 -> 0.864`
+       - `p95_coverage`: `0.911 -> 0.919`
+       - `poss_mae`: `4.69 -> 4.09`
+       - `game_poss_mae_vs_est`: `1.74 -> 1.44`
+       - `top1_share_mae_pts`: `0.0442 -> 0.0333`
+       - `top2_share_mae_pts`: `0.0645 -> 0.0489`
+     - learned-sigma sampler path:
+       - `pts_mae`: `10.95 -> 9.84`
+       - `total_mae_vs_actual`: `16.93 -> 12.96`
+       - `total_mae_vs_vegas`: `9.56 -> 4.28`
+       - `p90_coverage`: `0.858 -> 0.861`
+       - `p95_coverage`: `0.911 -> 0.925`
+       - `poss_mae`: `4.69 -> 4.00`
+       - `game_poss_mae_vs_est`: `1.74 -> 0.86`
+   - tradeoff:
+     - the trained minutes-distribution model is a clear improvement even with no
+       sampler-side uncertainty
+     - learned-sigma sampling improves total-game / possession calibration and
+       `p95` coverage
+     - but learned-sigma sampling gives back some player-level mean quality,
+       especially the `25-34` actual-point star slice
+   - same-signature minute variance:
+     - prior control: exactly `0.0`
+     - learned run:
+       - mean same-signature minute std: `0.89`
+       - `32.5%` of meaningful player/signature groups have positive within-signature
+         minute variance
+   - updated conclusion:
+     - the learned minutes-distribution branch fixed the original structural defect:
+       minutes are no longer deterministic conditional on active signature
+     - most of the gain appears to come from training with minutes conditioning and
+       the learned minutes-distribution representation itself
+     - sampler-side learned-sigma injection should be treated as an optional
+       calibration knob, not the core mechanism
+
+7. follow-up: annealed flow minutes teacher forcing:
+   - training run:
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_mtfanneal_20260327T050033Z`
+   - change:
+     - annealed `flow_minutes_teacher_forcing_prob` from `1.0` to `0.0`
+       across training instead of keeping it fully teacher-forced
+   - artifact:
+     - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_mtfanneal_20260327T050033Z/compare_vs_minutesdist_control.json`
+   - result versus `minutesdist_no_minunc`:
+     - `pts_mae`: `9.78 -> 9.41`
+     - `total_mae_vs_actual`: `13.17 -> 12.99`
+     - `total_mae_vs_vegas`: `5.23 -> 4.71`
+     - `high_usage_mae_pts_18plus`: `5.88 -> 5.54`
+     - `star_mae_pts_25_34`: `7.08 -> 6.37`
+     - `elite_mae_pts_35plus`: `12.96 -> 12.65`
+     - `p90_coverage`: `0.864 -> 0.881`
+     - `p95_coverage`: `0.919 -> 0.931`
+     - `poss_mae`: `4.09 -> 4.01`
+   - interpretation:
+     - the remaining star-slice regression was largely a train/inference mismatch
+       in flow minutes conditioning
+     - annealing flow minutes teacher forcing is a better fix than more
+       sampler-side uncertainty injection
+   - updated conclusion:
+     - `minutesdist_mtfanneal` is now the best mainline branch
+     - learned-sigma sampler injection remains a secondary calibration variant,
+       not the default control
+
+8. 60-game production-aligned backtest:
+   - harness:
+     - `scripts/rotation/run_gtv2_promotion_alignment.py`
+   - run:
+     - `/home/daniel/projections-data/training/runs/gtv2_minutesdist_backtest_20260327T050908Z`
+   - artifacts:
+     - `/home/daniel/projections-data/training/runs/gtv2_minutesdist_backtest_20260327T050908Z/summary.csv`
+     - `/home/daniel/projections-data/training/runs/gtv2_minutesdist_backtest_20260327T050908Z/compare_vs_baseline.csv`
+   - setup:
+     - 60 games from the 60-day validation slice
+     - 128 worlds per game
+     - production-aligned post-processing enabled
+     - variants:
+       - `prod_live_exact`
+       - `minutesdist_mtfanneal`
+       - `minutesdist_mtfanneal_learnedsigma`
+   - result versus `prod_live_exact`:
+     - `minutesdist_mtfanneal`:
+       - `dk_fpts_mae`: `5.650 -> 5.613`
+       - `minutes_mae`: `3.718 -> 3.721` essentially flat/slightly worse
+       - `active_acc_at4`: `0.9206 -> 0.9183` slightly worse
+       - `pts_mae_player`: `3.548 -> 3.494`
+       - `pts_mae_team`: `10.777 -> 10.226`
+       - `spread_mae_vs_vegas`: `5.577 -> 5.023`
+       - `total_mae_vs_vegas`: `4.391 -> 3.651`
+       - `poss_mae`: `5.116 -> 4.269`
+     - `minutesdist_mtfanneal_learnedsigma`:
+       - slightly better `dk_fpts_mae` / `pts_mae_player` than `minutesdist_mtfanneal`
+       - but slightly worse minutes/active and weaker spread/total quality
+   - caveats:
+     - the sampled 60-game window had `0` starter-promotion slice rows under the
+       current definition, so this backtest does not directly validate the sparse
+       surprise-starter failure mode
+     - `p90` calibration improved, but `p95` calibration error was slightly worse
+       than production on this broader sample
+     - `REB`, `AST`, `STL`, and `active_acc_at4` were flat to slightly worse
+   - updated conclusion:
+     - `minutesdist_mtfanneal` is now broad-backtest credible and the best current
+       promotion candidate
+     - learned-sigma remains a secondary calibration A/B
+     - production promotion should still be flag-gated until sparse surprise-starter
+       cases are checked explicitly
+
+9. targeted sparse-starter replay and hybrid expert:
+   - target case source:
+     - `/home/daniel/projections-data/training/runs/gtv2_minutesdist_backtest_20260327T050908Z/target_sparse_starter_cases.csv`
+   - full replay:
+     - `/home/daniel/projections-data/training/runs/gtv2_sparse_replay_full_20260327T052101Z`
+   - replay result:
+     - broad `minutesdist_mtfanneal` branch was still worse than `prod_live_exact`
+       on the original sparse-starter failure class:
+       - starter-promotion predicted minutes mean:
+         - `12.44 -> 11.99`
+       - starter-promotion minutes MAE:
+         - `9.86 -> 10.43`
+       - starter-promotion active recall @4:
+         - `0.909 -> 0.818`
+   - implication:
+     - the broad branch had not actually fixed the original sparse-starter problem
+       despite being much better in aggregate
+
+10. sparse expert specialist:
+    - training run:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_sparseexpert_20260327T052217Z`
+    - setup:
+      - initialized from `minutesdist_mtfanneal`
+      - broader sparse mask
+      - `w_sparse_starter_underpred_loss=0.10`
+      - intended for gated hybrid use, not full replacement
+    - hybrid replay:
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_replay_hybrid_20260327T052313Z`
+    - replay result versus base `minutesdist_mtfanneal`:
+      - starter-promotion predicted minutes mean:
+        - `11.99 -> 13.64`
+      - starter-promotion minutes MAE:
+        - `10.43 -> 10.06`
+      - starter-promotion active recall @4:
+        - unchanged at `0.818`
+      - starter-promotion low-8 rate:
+        - `0.364 -> 0.273`
+    - case-level uplift artifact:
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_replay_hybrid_20260327T052313Z/target_case_compare.csv`
+    - broad-window hybrid check:
+      - `/home/daniel/projections-data/training/runs/gtv2_broad_hybrid_20260327T052345Z`
+    - broad result:
+      - hybrid was identical to base on the 60-game window because the promotion
+        slice did not occur there
+    - updated conclusion:
+      - `minutesdist_mtfanneal` remains the best broad base model
+      - a gated sparse expert is the most promising path for the original
+        sparse-starter failure class
+      - future iteration should tune the promotion gate / expert quality rather
+        than destabilize the broad branch again
+  - narrowed sparse expert follow-up:
+    - policy sweep:
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_hybrid_policy_sweep_20260327T053500Z/summary.csv`
+    - result:
+      - `uplift_only` remained the best promotion policy
+      - `force_active_candidates` did not improve sparse recall
+      - full expert replacement was worse than uplift-only
+    - implication:
+      - the remaining gap was in expert quality, not in blend policy
+  - heads-only sparse expert:
+    - run:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_sparseexpert_heads_v14_20260327T054500Z`
+    - setup:
+      - warm-start from the first sparse expert
+      - freeze all shared / downstream flow components
+      - train only `active_head` and `minutes_head`
+      - keep the base branch flow/stat generator unchanged in the hybrid path
+    - comparison replay:
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_hybrid_heads_compare_v14_20260327T054650Z/summary.csv`
+    - result versus base:
+      - starter-promotion predicted minutes mean:
+        - `11.95 -> 13.73`
+      - starter-promotion minutes MAE:
+        - `10.57 -> 10.01`
+      - starter-promotion active recall @4:
+        - `0.818 -> 0.909`
+      - starter-promotion low-8 rate:
+        - `0.364 -> 0.273`
+    - interpretation:
+      - best current structure is:
+        - base model: `minutesdist_mtfanneal`
+        - sparse overlay: heads-only gated sparse expert
+      - this closes most of the remaining sparse replay gap without reopening
+        broad-branch drift
+  - broader sparse replay validation:
+    - artifacts:
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_hybrid_broadreplay_20260327T055000Z/summary.csv`
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_hybrid_broadreplay_20260327T055000Z/target_rows.csv`
+    - widened replay definition:
+      - `lineup_starter_announced=1`
+      - `minutes_from_stints_prior_20 <= 14`
+      - `max(recent_start_pct_10, started_proxy_rate_prior_10, started_proxy_rate_prior_20) <= 0.25`
+      - actual minutes `>= 16`
+    - coverage:
+      - `22` player rows across `18` games
+    - result for `hybrid_heads_v14` versus base:
+      - starter-promotion predicted minutes mean:
+        - `10.37 -> 12.27`
+      - starter-promotion minutes MAE:
+        - `8.85 -> 8.43`
+      - starter-promotion active recall @4:
+        - unchanged at `0.818`
+      - starter-promotion low-8 rate:
+        - `0.364 -> 0.273`
+      - overall replay `dk_fpts_mae`:
+        - `5.864 -> 5.817`
+      - overall replay `minutes_mae`:
+        - `4.378 -> 4.362`
+    - conclusion:
+      - the heads-only sparse overlay generalized to the widened replay
+      - it slightly outperformed the first sparse expert on that replay
+      - current best experimental sparse path is:
+        - base: `minutesdist_mtfanneal`
+        - overlay: `hybrid_heads_v14`
+  - oversampled promotion specialist:
+    - trainer update:
+      - added broad sparse-candidate example sampling to
+        `/home/daniel/projects/projections-v2/scripts/rotation/train_game_transformer_v2.py`
+      - candidate games are defined using the same pre-tip features as the
+        promotion overlay gate
+    - specialist run:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_sparseexpert_promote_20260327T055700Z`
+    - comparison replay:
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_hybrid_promote_compare_20260327T055900Z/summary.csv`
+    - result on the broadened replay:
+      - starter-promotion slice size:
+        - `19 -> 31`
+      - starter-promotion next-up rows:
+        - `11 -> 20`
+      - starter-promotion predicted minutes mean:
+        - `10.37 -> 18.25`
+      - starter-promotion minutes MAE:
+        - `8.85 -> 7.87`
+      - starter-promotion active recall @4:
+        - `0.818 -> 0.950`
+      - starter-promotion under-10 rate:
+        - `0.364 -> 0.200`
+      - starter-promotion low-8 rate:
+        - `0.364 -> 0.100`
+      - replay-level `dk_fpts_mae`:
+        - `5.864 -> 5.812`
+      - replay-level `minutes_mae`:
+        - `4.378 -> 4.355`
+      - replay-level `poss_mae`:
+        - `3.763 -> 4.101`
+    - interpretation:
+      - broad-gate oversampling plus promotion-delta supervision is the best
+        sparse-starter training recipe so far
+      - this variant is more aggressive than `hybrid_heads_v14`
+      - keep it experimental until it survives a longer shadow replay
+  - fair same-gate comparison:
+    - artifact:
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_hybrid_promote_faircompare_20260327T060100Z/summary.csv`
+    - setup:
+      - both overlays evaluated under the same broadened gate
+        (`prior_minutes<=14`, `hist_start_rate<=0.25`)
+    - result:
+      - `hybrid_promote_gate14` was best on sparse minutes behavior:
+        - starter-promotion predicted minutes mean:
+          - `18.25` vs `16.25`
+        - starter-promotion minutes MAE:
+          - `7.87` vs `8.11`
+        - replay-level `minutes_mae`:
+          - `4.355` vs `4.375`
+      - `hybrid_heads_v14_gate14` remained slightly better on replay-level
+        `dk_fpts_mae`:
+        - `5.799` vs `5.812`
+    - conclusion:
+      - oversampled promotion specialist is the best branch if the objective is
+        the sparse-starter minutes failure itself
+      - heads-only overlay still has a small edge on mixed replay-level FPTS
+      - both beat the base model on the broadened sparse replay
+  - longer replay on the full broad candidate pool:
+    - artifact:
+      - `/home/daniel/projections-data/training/runs/gtv2_sparse_hybrid_longreplay_20260327T060500Z/summary.csv`
+    - candidate universe:
+      - all rows with
+        - `lineup_starter_announced=1`
+        - `minutes_from_stints_prior_20 <= 14`
+        - `max(recent_start_pct_10, started_proxy_rate_prior_10, started_proxy_rate_prior_20) <= 0.25`
+    - coverage:
+      - `88` candidate rows across `38` games
+    - result:
+      - `hybrid_promote_gate14` was best on the activation objective:
+        - starter-promotion active recall @4:
+          - `1.00`
+        - starter-promotion low-8 rate:
+          - `0.10`
+        - starter-promotion predicted minutes mean:
+          - `11.83`
+      - `hybrid_heads_v14_gate14` was next:
+        - starter-promotion active recall @4:
+          - `0.95`
+        - starter-promotion low-8 rate:
+          - `0.15`
+      - base:
+        - starter-promotion active recall @4:
+          - `0.90`
+        - starter-promotion low-8 rate:
+          - `0.20`
+    - tradeoff:
+      - base remained best on overall replay `dk_fpts_mae` / `minutes_mae`
+      - overlays sacrificed some overall replay quality to strengthen sparse
+        candidate activation materially
+    - locked experimental decision:
+      - broad base model:
+        - `minutesdist_mtfanneal`
+      - sparse activation overlay:
+        - `hybrid_promote_gate14`
+      - rationale:
+        - this best matches the intended workflow where sparse surprise starters
+          only need to be active and projectable, after which manual boosting is
+          acceptable
+
+  - `2026-03-27`: bench-riser minutes follow-up
+    - motivation:
+      - outside sparse starters, the largest remaining minutes weakness was
+        high-minute non-starters / bench risers getting clipped
+    - evaluator update:
+      - added `bench_riser_diagnostics` to
+        `scripts/rotation/eval_game_transformer_v2.py`
+      - slices:
+        - `bench_riser_candidate`
+        - `bench_riser_next_up`
+        - `bench_core_next_up`
+      - failure rates:
+        - `bench_riser_underprediction_rate`
+        - `bench_core_underprediction_rate`
+    - base branch 60d result:
+      - artifact:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_mtfanneal_20260327T050033Z/eval_slices_60d.json`
+      - `bench_riser_underprediction_rate = 0.174`
+      - `bench_core_underprediction_rate = 0.043`
+      - `bench_riser_next_up` predicted mean:
+        - `20.73` vs actual `25.63`
+      - `bench_core_next_up` predicted mean:
+        - `25.92` vs actual `35.19`
+    - training intervention tested:
+      - added `bench_riser_underpred_loss` to the trainer
+      - warm-start, heads-only fine-tunes from `minutesdist_mtfanneal`
+    - experiment artifacts:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_benchriser_w010_20260327T124800Z`
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_benchriser_w025_20260327T124800Z`
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_benchriser_narrow_w005_20260327T125500Z`
+    - conclusion:
+      - not a keeper
+      - the direct penalty reduced bench-riser underprediction rates
+      - but it broadly over-lifted the non-starter pool and pushed overall
+        minutes MAE from `4.12` to about `9.95`
+      - even the narrower variant was not safe
+    - working decision:
+      - keep the new bench-riser diagnostics
+      - do not keep the direct bench-riser underprediction loss in the base
+        recipe
+      - if this bucket is prioritized later, prefer a gated specialist / overlay
+        over a monolithic base-loss change
+
+  - `2026-03-27`: bench-riser specialist overlay follow-up
+    - specialist run:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_benchspecialist_20260327T131500Z`
+    - training shape:
+      - warm-start from `minutesdist_mtfanneal`
+      - freeze everything except `active_head` and `minutes_head`
+      - oversample games containing narrow bench-riser candidates
+      - use a narrow bench-riser underprediction loss
+    - working inference gate:
+      - non-starter
+      - `hist_start_rate <= 0.35`
+      - `minutes_from_stints_prior_20 >= 12`
+      - `prior_play_prob >= 0.80`
+      - `an_implied_minutes >= 12`
+      - uplift-only blend into the base model
+    - artifact:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_benchspecialist_20260327T131500Z/hybrid_gate_eval.json`
+    - result:
+      - overall minutes MAE:
+        - base `4.116`
+        - hybrid `4.197`
+      - gated `20+` bench-riser rows:
+        - MAE `3.699 -> 3.568`
+        - bias `-2.084 -> +1.319`
+      - gated `32+` bench-riser rows:
+        - MAE `7.921 -> 6.439`
+        - bias `-7.835 -> -6.353`
+    - conclusion:
+      - specialist route is viable
+      - broad non-starter gates remain unsafe
+      - a narrow bench-riser overlay is now more promising than any direct
+        base-loss change tested so far
+
+  - `2026-03-27`: sparse + bench overlay interaction check
+    - replay root:
+      - `/home/daniel/projections-data/training/runs/gtv2_hybrid_interaction_20260327T133500Z`
+    - replay set:
+      - 60-day validation union of games where either overlay gate would fire
+      - `237` games selected, `236` evaluated
+      - gate rows in that window:
+        - starter gate: `21`
+        - bench gate: `553`
+    - implementation note:
+      - the bench expert used the same feature schema as the base branch but a
+        different player-feature normalization
+      - sampler integration now renormalizes player features from the base
+        normalization into the bench expert normalization before the bench
+        expert forward pass
+    - variants compared:
+      - `base`
+      - `starter_only`
+      - `bench_only`
+      - `starter_and_bench`
+    - result:
+      - the overlays did not materially interfere with each other
+      - starter slice:
+        - base:
+          - predicted minutes mean `16.45`
+          - minutes MAE `8.60`
+          - active recall `0.857`
+          - under-10 rate `0.143`
+        - starter only:
+          - predicted minutes mean `23.90`
+          - minutes MAE `7.01`
+          - active recall `1.00`
+          - under-10 rate `0.063`
+        - starter and bench:
+          - predicted minutes mean `23.32`
+          - minutes MAE `6.97`
+          - active recall `1.00`
+          - under-10 rate `0.063`
+      - bench slice:
+        - base:
+          - predicted minutes mean `22.69`
+          - minutes MAE `4.55`
+          - under-16 rate `0.0056`
+        - bench only:
+          - predicted minutes mean `26.22`
+          - minutes MAE `5.69`
+          - under-16 rate `0.0`
+        - starter and bench:
+          - predicted minutes mean `26.21`
+          - minutes MAE `5.68`
+          - under-16 rate `0.0`
+      - broad replay tradeoff:
+        - combined overlay replay minutes MAE:
+          - `4.156 -> 4.248`
+    - working decision:
+      - keep `minutesdist_mtfanneal` as the base branch
+      - keep both overlays experimental and optional
+      - overlay precedence:
+        - starter overlay first
+        - bench overlay second
+        - bench overlay never applies to starter rows
+
+  - `2026-03-27`: base minutes status before switching focus
+    - artifact:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_mtfanneal_20260327T050033Z/eval_slices_60d.json`
+    - stable cores / normal starters:
+      - strong
+      - starters:
+        - `n = 1110`
+        - actual minutes mean `29.82`
+        - predicted minutes mean `29.80`
+        - active recall `0.995`
+        - predicted low-minute rate `<8`: `0.0054`
+      - starter next-up underprediction rate:
+        - `0.0039`
+    - remaining broad minutes weaknesses:
+      - sparse / promoted starters
+      - high-minute non-starters / bench risers
+    - conclusion:
+      - base minutes branch is not broadly weak on stable cores
+      - remaining issues are regime-specific rather than a general
+        starter-minutes failure
+
+  - `2026-03-27`: rates / game-context training map before next retrain
+    - current GTv2 execution order remains:
+      - active set
+      - minutes
+      - joint flow
+      - optional efficiency head
+      - optional possession head + team event backbone + optional 3PA share
+      - optional usage-share head
+    - current modeled responsibilities:
+      - `flow_target_schema=v2`:
+        - flow owns attempts / opportunity / peripheral count generation
+      - efficiency head:
+        - owns `FT`, `FG2`, `FG3` make-rate uncertainty via Beta-Binomial
+      - possession backbone:
+        - owns game possessions and team event-rate structure
+      - usage-share head:
+        - owns within-team `FGA`, `FTA`, `TOV` share logits
+    - current trainer still couples all of the following into one scalar loss:
+      - rotation losses:
+        - count / member / minutes / hurdle / role / promotion / sparse / bench
+      - flow and decision losses:
+        - flow NLL
+        - CRPS FPTS
+        - team energy
+      - possession / backbone losses:
+        - possession Student-t NLL
+        - possession regression
+        - backbone NLL
+        - 3PA share NLL
+      - efficiency / usage losses:
+        - efficiency Beta-Binomial NLL
+        - efficiency mean aux
+        - usage-share CE
+      - emergent auxiliary losses:
+        - emergent share CE
+        - AST / REB structure aux
+        - spread / total aux
+        - props aux
+        - direct stat aux
+        - grouped direct boxscore / opportunity aux
+    - diagnosis:
+      - rates/game-context side is still over-coupled
+      - `v2` remains the correct factorization:
+        - flow for attempts / opportunity / peripherals
+        - efficiency head for make rates
+      - possession backbone should stay separate from flow rather than being
+        merged into it
+      - usage-share head is likely redundant in the first stripped recipe
+      - market / props / direct-stat auxiliaries should remain off initially
+    - recommended next stripped recipe:
+      - keep `minutesdist_mtfanneal` fixed upstream
+      - enable:
+        - `flow_target_schema=v2`
+        - `enable_efficiency_head=true`
+        - `w_flow_nll > 0`
+        - `w_direct_opportunity_aux > 0`
+        - `w_direct_boxscore_aux` small but non-zero
+      - disable:
+        - `enable_usage_share_head`
+        - `enable_possession_backbone`
+        - `w_crps_fpts`
+        - `w_team_energy`
+        - `w_spread_aux`
+        - `w_total_aux`
+        - `w_props_*`
+        - direct stat point losses
+    - sequencing:
+      - train `v2 flow + efficiency` first
+      - evaluate means / share structure / coverage
+      - only then revisit possession calibration, usage-share head, and
+        market-facing auxiliaries
+
+  - `2026-03-27`: first stripped rates/game-context run
+    - run:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_effonly_stripped_20260327T135311Z`
+    - recipe:
+      - warm-start from `minutesdist_mtfanneal`
+      - freeze:
+        - shared representation:
+          - `player_proj`
+          - `game_proj`
+          - `game_token`
+          - `team_tokens`
+          - `token_type_embedding`
+          - `side_embedding`
+          - `encoder`
+          - `final_norm`
+        - upstream minutes stack:
+          - `active_head`
+          - `minutes_head`
+        - optional team-context heads:
+          - `possession_head`
+          - `event_backbone`
+          - `three_pa_share_head`
+          - `usage_share_head`
+      - trainable path:
+        - `flow_head`
+        - `efficiency_head`
+      - active settings:
+        - `flow_target_schema=v2`
+        - `flow_use_minutes_conditioning=true`
+        - `enable_efficiency_head=true`
+        - `w_flow_nll=1.0`
+        - `w_direct_opportunity_aux=0.15`
+        - `w_direct_boxscore_aux=0.05`
+        - `w_efficiency_nll=1.0`
+      - explicitly zeroed:
+        - usage-share loss
+        - possession / backbone losses
+        - CRPS / team-energy
+        - spread / total aux
+        - props aux
+        - direct point-stat auxiliaries
+    - training result:
+      - stable
+      - minutes branch remained fixed
+      - best checkpoint:
+        - epoch `8`
+        - `best_val_total = 7.7164`
+    - broad 60-game / 128-world replay:
+      - root:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_effonly_stripped_20260327T135311Z/broad_eval_60g128w`
+      - versus `minutesdist_mtfanneal`:
+        - improved:
+          - `dk_fpts_mae`: `5.613 -> 5.564`
+          - `pts_mae_player`: `3.494 -> 3.462`
+          - `reb_mae_player`: `1.692 -> 1.673`
+          - `stl_mae_player`: `0.533 -> 0.522`
+          - `blk_mae_player`: `0.457 -> 0.431`
+          - `spread_mae_vs_vegas`: `5.023 -> 4.894`
+          - `p90 calibration error abs`: `0.0078 -> 0.0033`
+          - `p95 calibration error abs`: `0.0133 -> 0.0044`
+          - top-share points bias moved closer to zero
+        - unchanged:
+          - `minutes_mae`
+          - `active_acc_at4`
+          - `poss_mae`
+        - worse:
+          - `ast_mae_player`: `1.102 -> 1.141`
+          - `pts_mae_team`: `10.226 -> 10.503`
+          - `total_mae_vs_vegas`: `3.651 -> 5.585`
+          - team points bias became more negative:
+            - `-1.20 -> -2.47`
+    - conclusion:
+      - stripped `flow + efficiency` improves player-level means and share
+        calibration
+      - but fully removing team/game-context supervision gives back too much
+        team-total calibration
+      - next iteration should add back a narrow context family only:
+        - light spread / total aux
+        - or light possession / backbone supervision
+      - do not re-enable usage-share, props, or the full direct-stat stack yet
+
+  - `2026-03-27`: narrow re-coupling follow-up on rates branch
+    - light spread/total aux:
+      - run:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_spreadtotal_20260327T135852Z`
+      - added only:
+        - `w_spread_aux=0.05`
+        - `w_total_aux=0.10`
+      - result:
+        - worse than the fully stripped branch
+        - especially bad on team/game calibration:
+          - `total_mae_vs_vegas`: `5.585 -> 7.610`
+          - `pts_mae_team`: `10.503 -> 10.738`
+      - conclusion:
+        - market-facing spread/total aux is not the right recovery path
+
+    - full possession-light variant:
+      - run:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_posslight_20260327T140101Z`
+      - added:
+        - `w_poss_nll=0.10`
+        - `w_backbone_nll=0.10`
+        - `w_three_pa_nll=0.05`
+        - `w_poss_regression=0.05`
+      - result:
+        - partly recovered team-context metrics relative to the stripped branch
+        - but degraded possession quality:
+          - `poss_mae`: `4.269 -> 5.189`
+      - conclusion:
+        - retraining the possession head directly is too unstable in this recipe
+
+    - backbone-light variant:
+      - run:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_backbonelight_20260327T140309Z`
+      - recipe:
+        - keep `possession_head` frozen
+        - train:
+          - `flow_head`
+          - `efficiency_head`
+          - `event_backbone`
+          - `three_pa_share_head`
+        - weights:
+          - `w_backbone_nll=0.10`
+          - `w_three_pa_nll=0.05`
+          - `w_poss_nll=0.0`
+          - `w_poss_regression=0.0`
+      - broad 60-game / 128-world replay:
+        - root:
+          - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_backbonelight_20260327T140309Z/broad_eval_60g128w`
+        - versus `minutesdist_mtfanneal`:
+          - improved:
+            - `dk_fpts_mae`: `5.613 -> 5.564`
+            - `pts_mae_player`: `3.494 -> 3.463`
+            - `spread_mae_vs_vegas`: `5.023 -> 4.727`
+            - coverage errors:
+              - `p90`: `0.0078 -> 0.0022`
+              - `p95`: `0.0133 -> 0.0033`
+          - preserved possession quality:
+            - `poss_mae`: `4.269 -> 4.269`
+          - still worse than base on some team/game means:
+            - `pts_mae_team`: `10.226 -> 10.445`
+            - `total_mae_vs_vegas`: `3.651 -> 4.927`
+      - working decision:
+        - `eff_backbonelight` is the best current rates/game-context branch
+        - useful structure comes from the event backbone, not from retraining the
+          possession head or adding spread/total aux directly
+
+  - `2026-03-27`: isolated possession-context retrain
+    - run:
+      - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_possisolated_20260327T141358Z`
+    - init checkpoint:
+      - `eff_backbonelight`
+    - freeze:
+      - shared representation
+      - active/minutes
+      - flow head
+      - efficiency head
+      - usage-share head
+    - train only:
+      - `possession_head`
+      - `event_backbone`
+      - `three_pa_share_head`
+    - losses:
+      - `w_poss_nll=0.20`
+      - `w_backbone_nll=0.15`
+      - `w_three_pa_nll=0.05`
+      - `w_poss_regression=0.10`
+      - checkpoint metric:
+        - `val_total_ex_possreg`
+    - training result:
+      - early-stopped quickly
+      - best checkpoint was epoch `1`
+      - indicates the isolated environment block was already near its local
+        optimum under the current objective
+    - broad 60-game / 128-world replay:
+      - root:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_possisolated_20260327T141358Z/broad_eval_60g128w`
+      - versus `eff_backbonelight`:
+        - improved:
+          - `total_mae_vs_vegas`: `4.927 -> 4.667`
+          - `total_corr_vs_vegas`: `0.907 -> 0.940`
+          - team points bias moved closer to base:
+            - `-2.074 -> -1.291`
+          - coverage improved further:
+            - `p90`: `0.0022 -> 0.0006`
+            - `p95`: `0.0033 -> 0.0017`
+        - worse:
+          - `dk_fpts_mae`: `5.564 -> 5.570`
+          - `pts_mae_player`: `3.463 -> 3.475`
+          - `pts_mae_team`: `10.445 -> 10.593`
+          - `poss_mae`: `4.269 -> 4.734`
+    - working interpretation:
+      - isolated possession retraining improves totals, but at the cost of pace
+        quality and a small giveback in player/team mean accuracy
+      - `eff_backbonelight` remains the best mainline branch
+      - `poss_isolated` is best understood as a calibration variant rather than
+        a full replacement
+
+  - `2026-03-27`: environment feature pass
+    - motivation:
+      - explicit GTv2 game/team context was still too thin
+      - existing environment columns (`is_b2b`, season pace, season ratings)
+        were present in the dataset, but only as player features
+    - implementation detail:
+      - enabling `team_feature_columns` exposed a bug in
+        `build_game_level_examples`
+      - the per-game boolean team mask was being aligned against the full
+        `team_feats_df` index instead of the per-game slice
+      - fixed in:
+        - `/home/daniel/projects/projections-v2/projections/rotation/game_transformer_v2.py`
+      - regression coverage added in:
+        - `/home/daniel/projects/projections-v2/tests/rotation/test_game_transformer_v2.py`
+    - explicit team context experiment:
+      - run:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_envctx_20260327T150500Z`
+      - team feature cols:
+        - `is_b2b`
+        - `team_pace_szn`
+        - `team_off_rtg_szn`
+        - `team_def_rtg_szn`
+        - `opp_pace_szn`
+        - `opp_def_rtg_szn`
+      - broad replay:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_envctx_20260327T150500Z/broad_eval_60g128w`
+      - versus `minutesdist_mtfanneal`:
+        - improved:
+          - `pts_mae_team`: `10.226 -> 9.985`
+          - `total_mae_vs_vegas`: `3.651 -> 2.591`
+          - `total_corr_vs_vegas`: `0.901 -> 0.956`
+          - `poss_mae`: `4.269 -> 4.256`
+        - worse:
+          - `dk_fpts_mae`: `5.613 -> 5.699`
+          - `pts_mae_player`: `3.494 -> 3.508`
+          - `minutes_mae`: `3.721 -> 3.883`
+          - `active_acc_at4`: `0.918 -> 0.898`
+          - `spread_mae_vs_vegas`: `5.023 -> 5.648`
+    - follow-up check:
+      - reran the same recipe with `team_tokens` frozen:
+        - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_envctx_projonly_20260327T152000Z`
+      - training behavior was numerically almost identical
+      - interpretation:
+        - the tradeoff is not coming from `team_tokens`
+        - it comes from routing richer environment context through the shared
+          GTv2 sequence at all
+    - working conclusion:
+      - explicit environment features clearly matter
+      - but shared-sequence injection is too blunt for the current factorization
+      - next environment step should be narrower:
+        - head-specific or late-fusion conditioning for possession / event
+          backbone / flow
+      - `eff_backbonelight` remains the best mainline rates branch
+
+### 2026-03-27 Late: Environment Context Branch Closed
+
+Follow-up experiments on environment routing were negative overall.
+
+Tested variants:
+- `eff_envadapter`: late-fused env adapter MLP into possession/backbone only
+- `eff_envlate_trainposs`: corrected raw late-fused branch with trainable possession head
+- `eff_envrich`: richer derived late-fused environment features (implied totals, spread magnitude, matchup deltas)
+
+All three regressed materially on the 60-game / 128-world replay relative to `eff_backbonelight`.
+
+Representative results:
+- `eff_backbonelight`
+  - `dk_fpts_mae = 5.564`
+  - `pts_mae_team = 10.445`
+  - `total_mae_vs_vegas = 4.927`
+  - `poss_mae = 4.269`
+- `eff_envadapter`
+  - `dk_fpts_mae = 5.588`
+  - `pts_mae_team = 14.133`
+  - `total_mae_vs_vegas = 22.503`
+  - `poss_mae = 9.639`
+- `eff_envlate_trainposs`
+  - `dk_fpts_mae = 5.594`
+  - `pts_mae_team = 13.785`
+  - `total_mae_vs_vegas = 21.229`
+  - `poss_mae = 9.076`
+- `eff_envrich`
+  - `dk_fpts_mae = 5.580`
+  - `pts_mae_team = 13.128`
+  - `total_mae_vs_vegas = 18.602`
+  - `poss_mae = 8.018`
+
+Decision:
+- keep `eff_backbonelight` as the active experimental rates/game-context branch
+- do not continue the current environment-routing branch without a larger redesign of the possession/game-context pathway
+
+### 2026-03-27 Evening: Side-Channel Environment Redesign
+
+We then tested a larger redesign intended to bypass the frozen shared encoder.
+
+Implementation:
+- added `env_side_channel_encoder` to `GameTransformerV2`
+- direct environment embedding conditions:
+  - `flow_head`
+  - `possession_head`
+  - `event_backbone`
+  - `three_pa_share_head`
+- shared encoder / active / minutes remained frozen
+
+Training run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envside_20260327T181500Z`
+- best checkpoint metric:
+  - `best_val_total = 7.6613`
+- this was the best training-side environment-routing result to date
+
+Broad replay:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envside_20260327T181500Z/broad_eval_60g128w_rerun`
+
+Representative results versus `base_minutesdist_mtfanneal`:
+- `dk_fpts_mae`: `5.613 -> 5.627`
+- `pts_mae_player`: `3.494 -> 3.499`
+- `pts_mae_team`: `10.226 -> 13.339`
+- `spread_mae_vs_vegas`: `5.023 -> 5.318`
+- `total_mae_vs_vegas`: `3.651 -> 19.333`
+- `poss_mae`: `4.269 -> 9.672`
+
+Decision:
+- despite the improved training proxy, this design failed badly on replay
+- do not continue the current side-channel implementation
+- keep `eff_backbonelight` as the active experimental rates/game-context branch
+- if environment modeling is revisited, treat it as a larger architecture effort
+  with replay-first validation
+
+### 2026-03-27 Night: Full Retrain With Shared Environment Features
+
+We also tested a full shared-path retrain to answer the remaining question:
+would explicit environment features work if the shared encoder were allowed to
+adapt from the beginning of the rates retrain instead of being frozen?
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envfullretrain_20260327T190500Z`
+
+Setup:
+- init from:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_backbonelight_20260327T140309Z/model.pt`
+- shared `team_feature_columns`:
+  - `is_b2b`
+  - `team_pace_szn`
+  - `team_off_rtg_szn`
+  - `team_def_rtg_szn`
+  - `opp_pace_szn`
+  - `opp_def_rtg_szn`
+- encoder trainable with reduced LR (`encoder_lr_scale = 0.5`)
+- same stripped `v2 + efficiency + backbone-light` objective
+
+Training:
+- best epoch: `11`
+- best `val_total = 7.5844`
+- this was better than `eff_backbonelight` on the training checkpoint metric
+
+Broad replay:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envfullretrain_20260327T190500Z/broad_eval_60g128w`
+
+Representative results versus `base_minutesdist_mtfanneal`:
+- improved:
+  - `dk_fpts_mae`: `5.613 -> 5.576`
+  - `pts_mae_player`: `3.494 -> 3.437`
+- worse:
+  - `pts_mae_team`: `10.226 -> 12.704`
+  - `spread_mae_vs_vegas`: `5.023 -> 5.324`
+  - `total_mae_vs_vegas`: `3.651 -> 17.313`
+  - `poss_mae`: `4.269 -> 7.981`
+
+Representative results versus `eff_backbonelight`:
+- slightly better player points:
+  - `pts_mae_player`: `3.463 -> 3.437`
+- materially worse environment:
+  - `pts_mae_team`: `10.445 -> 12.704`
+  - `total_mae_vs_vegas`: `4.927 -> 17.313`
+  - `poss_mae`: `4.269 -> 7.981`
+
+Decision:
+- this full retrain is not a keeper
+- the negative result is stronger than the partial routing experiments because it
+  removes the frozen-encoder explanation
+- `eff_backbonelight` remains the best retained rates/game-context branch
+- if game context is revisited, it should be as a larger redesign of the
+  environment/world-generation contract rather than another incremental retrain
+
+### 2026-03-27 Night: `envfullretrain` Failure Is Pre-World, Not Postprocess
+
+We compared `envfullretrain` before and after the production world
+post-processing stack.
+
+Result:
+- the branch is already bad in `raw_worlds.parquet`
+- realism controls / contract repair only change it marginally
+
+Representative comparison:
+- `eff_backbonelight`
+  - raw:
+    - `team_pts_mae = 10.439`
+    - `poss_mae = 4.267`
+    - `total_mae_vs_vegas = 4.924`
+  - post:
+    - `team_pts_mae = 10.438`
+    - `poss_mae = 4.269`
+    - `total_mae_vs_vegas = 5.119`
+- `envfullretrain`
+  - raw:
+    - `team_pts_mae = 12.701`
+    - `poss_mae = 7.991`
+    - `total_mae_vs_vegas = 17.299`
+  - post:
+    - `team_pts_mae = 12.791`
+    - `poss_mae = 7.981`
+    - `total_mae_vs_vegas = 17.632`
+
+Direct head diagnostic:
+- `eff_backbonelight`
+  - possession-head mean vs estimated possessions:
+    - `MAE = 1.94`
+    - mean `102.03`
+- `envfullretrain`
+  - possession-head mean vs estimated possessions:
+    - `MAE = 7.58`
+    - mean `95.97`
+
+Conclusion:
+- `envfullretrain` fails before postprocessing
+- the collapse starts at the possession/backbone prediction layer
+
+### 2026-03-27 Night: `envteamonly` Cleaner Shared-Team-Context Retrain
+
+We then ran a cleaner shared-team-context retrain that did **not** change
+`backbone_env_feature_columns`, so the possession/backbone heads warm-started
+instead of being shape-reset.
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_20260327T193500Z`
+
+Setup:
+- init from:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_eff_backbonelight_20260327T140309Z/model.pt`
+- only new warm-start misses:
+  - `team_proj.weight`
+  - `team_proj.bias`
+- `team_feature_columns`:
+  - `is_b2b`
+  - `team_pace_szn`
+  - `team_off_rtg_szn`
+  - `team_def_rtg_szn`
+  - `opp_pace_szn`
+  - `opp_def_rtg_szn`
+- `backbone_env_feature_columns = []`
+
+Training:
+- best `val_total = 7.5643`
+
+Broad replay:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_20260327T193500Z/broad_eval_60g128w`
+
+Representative results versus `base_minutesdist_mtfanneal`:
+- improved:
+  - `dk_fpts_mae`: `5.613 -> 5.576`
+  - `minutes_mae`: `3.721 -> 3.705`
+  - `pts_mae_player`: `3.494 -> 3.458`
+  - `pts_mae_team`: `10.226 -> 10.090`
+  - `total_mae_vs_vegas`: `3.651 -> 3.278`
+- worse:
+  - `active_acc_at4`: `0.918 -> 0.908`
+  - `spread_mae_vs_vegas`: `5.023 -> 5.282`
+  - `poss_mae`: `4.269 -> 4.366`
+
+Representative results versus `eff_backbonelight`:
+- improved:
+  - `pts_mae_team`: `10.445 -> 10.090`
+  - `total_mae_vs_vegas`: `4.927 -> 3.278`
+  - `pts_mae_player`: `3.463 -> 3.458`
+- slightly worse:
+  - `dk_fpts_mae`: `5.564 -> 5.576`
+  - `poss_mae`: `4.269 -> 4.366`
+  - `spread_mae_vs_vegas`: `4.727 -> 5.282`
+
+Direct possession-head diagnostic:
+- `envteamonly` mean possessions vs estimated possessions:
+  - `MAE = 2.66`
+  - mean `101.57`
+- this is close to the healthy `eff_backbonelight` behavior and far better than
+  `envfullretrain`
+
+Decision:
+- `envteamonly` is the first game-context branch on this path that survives
+  broad replay
+- it is now the best candidate if the priority is total/team calibration
+- tradeoff remains:
+  - better totals and team points
+  - slightly worse spread and active accuracy
+
+### 2026-03-27 Night: `envteamonly_spread001` Narrow Spread Follow-Up
+
+We ran a minimal spread-only continuation pass from `envteamonly` to test whether
+spread could be recovered without giving back the new total/team-context gains.
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_spread001_20260327T201500Z`
+
+Setup:
+- init from:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_20260327T193500Z/model.pt`
+- same feature contract and architecture as `envteamonly`
+- only meaningful change:
+  - `w_spread_aux = 0.01`
+- no `total` aux
+- lower LR continuation pass
+
+Training:
+- best `val_total = 7.5296`
+
+Broad replay:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_spread001_20260327T201500Z/broad_eval_60g128w`
+
+Representative results versus `envteamonly`:
+- improved:
+  - `minutes_mae`: `3.705 -> 3.675`
+  - `active_acc_at4`: `0.908 -> 0.912`
+  - `spread_mae_vs_vegas`: `5.282 -> 5.214`
+  - `reb_mae_player`: `1.693 -> 1.679`
+  - `stl_mae_player`: `0.5213 -> 0.5179`
+- worse:
+  - `dk_fpts_mae`: `5.576 -> 5.598`
+  - `pts_mae_player`: `3.458 -> 3.465`
+  - `pts_mae_team`: `10.090 -> 10.281`
+  - `total_mae_vs_vegas`: `3.278 -> 5.588`
+  - `poss_mae`: `4.366 -> 4.381`
+  - team points bias: `-1.352 -> -2.642`
+
+Tail audit on actual high-DK outcomes:
+- artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_spread001_20260327T201500Z/broad_eval_60g128w/tail_slice_eval.csv`
+- actual DK `>= 45`:
+  - `eff_backbonelight`: `p95 = 0.713`
+  - `envteamonly`: `p95 = 0.694`
+  - `envteamonly_spread001`: `p95 = 0.593`
+- actual DK `>= 55`:
+  - `eff_backbonelight`: `p95 = 0.469`
+  - `envteamonly`: `p95 = 0.438`
+  - `envteamonly_spread001`: `p95 = 0.281`
+
+Interpretation:
+- the spread pass did not widen healthy tails
+- it made the branch more conservative on true ceiling outcomes
+- the small spread/active gains do not justify the loss in total-game quality and
+  top-end tail coverage
+
+Decision:
+- keep `envteamonly` as the retained game-context branch
+- treat `envteamonly_spread001` as a dead end
+
+### 2026-03-27 Night: Clean Scratch Checks Before Live Consideration
+
+Before considering live promotion, we tested whether the `envteamonly` branch was
+benefiting materially from the warm-start chain.
+
+#### Attempt A: direct scratch under continuation recipe
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_fullscratch_20260327T174308Z`
+
+Recipe:
+- same high-level contract as `envteamonly`
+- no `init_model_pt`
+- random initialization
+- immediate phase-2 flow with team-context columns and backbone losses on
+
+Result:
+- failed in epoch 1
+- phase-2 instability triggered immediately:
+  - `train_flow_nll = 48.69`
+  - `phase2_backoff_count = 3`
+  - rollback requested at batch 6
+  - validation metrics were `NaN`
+
+Interpretation:
+- the final continuation recipe is not self-starting from random init
+- this does **not** prove warm-starts are mandatory, but it does prove the
+  continuation schedule cannot be reused as a scratch schedule
+
+#### Attempt B: staged scratch with delayed phase-2 flow
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_fullscratch_stable_20260327T174455Z`
+
+Recipe adjustments:
+- no `init_model_pt`
+- lower LR: `5e-4`
+- delayed flow:
+  - `phase2_flow_delay_epochs = 2`
+  - `phase2_flow_warmup_epochs = 8`
+  - `phase2_anchor_end_weight = 0.75`
+- relaxed instability guard:
+  - `phase2_nll_guard_abs = 250`
+  - `phase2_max_backoffs_before_rollback = 20`
+- kept:
+  - `flow_target_schema = v2`
+  - minutes hurdle head
+  - flow minutes conditioning with `1.0 -> 0.0` TF anneal
+  - efficiency head
+  - possession backbone
+  - team context columns
+  - `w_direct_boxscore_aux = 0.05`
+  - `w_direct_opportunity_aux = 0.15`
+  - `w_efficiency_nll = 1.0`
+  - `w_poss_nll = 0.10`
+  - `w_backbone_nll = 0.10`
+  - `w_three_pa_nll = 0.05`
+
+Training:
+- stable
+- best checkpoint:
+  - epoch `3`
+  - `best_val_total = 8.4672`
+
+Comparison to retained warm-start branch:
+- `envteamonly`:
+  - best epoch `12`
+  - `best_val_total = 7.5643`
+
+Decision:
+- the scratch recipe can be stabilized with a curriculum
+- but the stabilized scratch run still underperforms the retained warm-start
+  branch by a large enough margin that a full 60-game replay is not justified
+- current conclusion:
+  - the branch is still benefiting materially from staged warm-starts
+  - do **not** replace `envteamonly` with the scratch recipe at this point
+
+### 2026-03-27 Night: Productionization Plan For `envteamonly`
+
+Current recommendation:
+- productionize the **base** `envteamonly` branch first
+- do **not** block productionization on sparse-starter / bench-riser overlays
+- keep overlays as experimental stage-2 additions after the base bundle is live
+
+Rationale:
+- `envteamonly` is the first game-context branch that survives broad replay
+- live GTv2 already has the needed parity / preflight scaffolding
+- the live `features_minutes_v1` artifact already contains the required new
+  team-context columns:
+  - `is_b2b`
+  - `team_pace_szn`
+  - `team_off_rtg_szn`
+  - `team_def_rtg_szn`
+  - `opp_pace_szn`
+  - `opp_def_rtg_szn`
+- the GTv2 publish path does **not** feed final projections back through
+  `rotation_set_minutes_live`; finalization merges ownership and display fields
+  onto GTv2 world summaries but does not re-run the legacy rotation-share model
+
+#### Scope boundaries
+
+What this promotion **is**:
+- promoting a new GTv2 bundle for `live_nba_pipeline_v3.py`
+- keeping the current GTv2 world-generation/post-processing contract initially
+- switching the active GTv2 bundle pointer/config
+
+What this promotion is **not**:
+- replacing `config/minutes_current_run.json`
+- replacing `config/rotation_set_minutes_live.json`
+- enabling bench-riser overlay in live
+- changing live post-processing knobs at the same time as bundle promotion
+
+#### Required artifacts and files
+
+Bundle / artifacts:
+- candidate run:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_20260327T193500Z`
+- bundle root:
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/`
+- required bundle files:
+  - `model.pt`
+  - `config.json`
+  - `parity_manifest.json`
+  - `promotion_meta.json`
+
+Config / runtime:
+- `config/gtv2_inference_current.json`
+- `prefect_flows/live_nba_pipeline_v3.py`
+- Triton path, if active:
+  - `scripts/triton/setup_gtv2_model_repo.py`
+  - `scripts/triton/model_repository/gtv2_scorer/`
+
+#### Productionization checklist
+
+1. Freeze and package a promoted GTv2 bundle
+- Use `scripts/rotation/promote_game_transformer_v2_bundle.py`
+- Source should be the retained `envteamonly` run
+- Implementation note:
+  - the current promotion script assumes a phase-3 multiseed `candidate_root/seed_*`
+    layout
+  - `envteamonly` is a direct run directory, so productionization needs either:
+    - a small extension to the script to accept `--run-dir`, or
+    - a one-off manual bundle packaging step that writes the same required files
+- Verify the emitted `parity_manifest.json` records:
+  - `feature_columns`
+  - `game_feature_columns`
+  - `team_feature_columns`
+  - transform manifest / integrity hash
+
+2. Validate live feature parity against the promoted bundle
+- Run the live feature build path against a recent slate with the new bundle:
+  - `build_features_gtv2_live_task`
+- Required pass conditions:
+  - no missing `team_feature_columns`
+  - transform manifest matches bundle parity manifest
+  - preflight parity passes fail-closed checks
+
+3. Keep current GTv2 world post-processing defaults for first promotion
+- Do **not** simultaneously retune:
+  - props uplift
+  - propless tail calibration
+  - mid-minutes tail calibration
+  - realism controls
+- Reason:
+  - offline replay results for `envteamonly` already include the current world path
+  - tails are still conservative, but changing post-process at the same time would
+    confound bundle quality and rollback analysis
+
+4. Promote only the base branch in `gtv2_inference_current.json`
+- Point `bundle_dir` at the new promoted bundle / `bundle_current`
+- Keep:
+  - `promotion_hybrid_enabled = false`
+  - no bench overlay fields
+- Reason:
+  - base branch has the strongest broad evidence
+  - sparse / bench overlays should be added only after base live behavior is stable
+
+5. Run live shadow first
+- Execute `live_nba_pipeline_v3.py` with the promoted bundle in replay/shadow mode
+- Capture:
+  - `feature_runtime_manifest.json`
+  - `preflight_report.json`
+  - `postflight_report.json`
+  - `world_contracts_summary.json`
+- Compare against the prior production GTv2 bundle on:
+  - `dk_fpts_mean`
+  - `team totals`
+  - `possession sanity`
+  - ceiling slices / top-end tails
+
+6. If Triton is active, refresh the server-side bundle pointer
+- Update `config/gtv2_inference_current.json`
+- Re-run:
+  - `scripts/triton/setup_gtv2_model_repo.py`
+- Smoke test:
+  - `scripts/triton/smoke_test_gtv2.py`
+
+7. Canary promotion
+- Publish the new GTv2 bundle behind the normal live flow
+- Monitor:
+  - nightly calibration report
+  - team-total drift
+  - tail / high-DK undercoverage
+  - force-active / sparse-starter known misses
+
+#### Expected code changes
+
+Minimal code changes should be sufficient for base promotion:
+- no required changes to `projections/pipeline/gtv2_live_features.py`
+  because the live minutes feature frame already contains the new team-context columns
+- no required changes to `prefect_flows/live_nba_pipeline_v3.py`
+  for base `envteamonly`
+- likely required changes only to:
+  - bundle promotion / pointer update
+  - optional Triton repo refresh
+
+#### Known follow-up items after base promotion
+
+1. Sparse-starter overlay
+- current live config supports only `promotion_hybrid_*`
+- can be introduced later if needed once the base bundle is stable live
+
+2. Bench-riser overlay
+- not yet wired into live config
+- would require:
+  - new config fields in `config/gtv2_inference_current.json`
+  - live pipeline wiring parallel to the promotion overlay
+  - careful FPTS-bias audit on gated bench rows before enablement
+
+3. Tail calibration
+- `envteamonly` is acceptable broadly, but still conservative on true ceiling outcomes
+- first production promotion should keep current tail controls fixed
+- future work should tune tail behavior separately from base bundle promotion
+
+#### Recommended rollout order
+
+1. promote packaged `envteamonly` bundle
+2. run live shadow / replay parity checks
+3. update active GTv2 bundle pointer/config
+4. canary in live
+5. only after stability:
+   - consider sparse overlay
+   - consider bench overlay
+   - consider tail calibration retuning
+
+### 2026-03-27 Night: `envteamonly` Production Cutover
+
+We proceeded directly to live cutover for the base `envteamonly` branch without an
+additional shadow-only phase.
+
+Promoted bundle:
+- source run:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_20260327T193500Z`
+- promoted bundle:
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/envteamonly_20260327T193500Z_prod_20260327T182500Z`
+- live selector:
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/bundle_current`
+    now points to the promoted bundle above
+
+Rollback target at cutover time:
+- prior live bundle:
+  - `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/phase3_game_transformer_v2_phase3_candidate_from_confirm_baseline_vs_flowup_20260303T022935Z_run_20260303T145119Z`
+
+Bundle metadata:
+- `artifact_hash`:
+  - `1d422675a672b3f4ce8ae9b5cd052ce3854df17bf94970e496029b4385d42827`
+- `parity_manifest_hash`:
+  - `d2e09fde242f53e537ac468c8357e95804deb6803184c219f195a18d4175c2c9`
+
+Config state after cutover:
+- `config/gtv2_inference_current.json`
+  - `bundle_dir = /home/daniel/projections-data/artifacts/game_transformer_v2/bundle_current`
+  - `model_version = envteamonly_20260327T193500Z`
+  - `promotion_hybrid_enabled = false`
+- `/home/daniel/prod/projections-v2/config/gtv2_inference_current.json`
+  was synced to the same payload so runtime stamps in the prod checkout reflect the
+  active bundle
+
+Triton serving state:
+- active server config remains:
+  - `config/gtv2_inference_server.json`
+  - `backend = triton`
+  - `triton_endpoint = localhost:18000`
+  - `model_name = gtv2_scorer`
+- the Triton model repo was refreshed to point at the promoted bundle
+- the installed user service now runs from:
+  - `/home/daniel/prod/projections-v2`
+- the prod checkout was explicitly synced with the required GTv2 runtime changes before
+  restarting Triton so Prefect and Triton resolve the same code path
+- source unit updated:
+  - `infra/systemd/triton-gtv2.service`
+- example unit updated:
+  - `scripts/triton/triton-inference.service.example`
+
+Critical operational note:
+- The first live run failed in live-only GTv2 post-processing, not in model inference.
+- Root cause:
+  - `_apply_propless_tail_calibration_to_worlds(...)` in
+    `prefect_flows/live_nba_pipeline_v3.py` segfaulted inside pandas/native code on
+    the large combined worlds frame.
+- That path was outside the validated research envelope for the promoted branch.
+- Live was then realigned to the validated envelope:
+  - `apply_props_uplift = false`
+  - `apply_propless_tail_calibration = false`
+  - `apply_mid_minutes_tail_calibration = false`
+  - `apply_world_realism_controls = true`
+- The Prefect deployment `nba-live-pipeline-v3/nba-live-pipeline` was redeployed with
+  those defaults from `/home/daniel/prod/projections-v2/prefect.yaml`.
+- The first Triton smoke from the prod checkout then failed because the prod runtime
+  was missing the updated `JointGameFlow` signature used by the promoted bundle.
+- After syncing the missing runtime files into `/home/daniel/prod/projections-v2` and
+  restarting `triton-gtv2.service`, the smoke passed again.
+
+Validation completed:
+- Triton readiness:
+  - `http://localhost:18000/v2/health/ready`
+  - `ready = true`
+- Triton end-to-end smoke:
+  - features:
+    - `/home/daniel/projections-data/live/features_gtv2_v1/2026-03-27/run=20260327T184459Z/features.parquet`
+  - outputs:
+    - `score rows = 300`
+    - `world rows = 76800` (`256` worlds)
+  - contract checks:
+    - `total_violations = 0`
+
+Follow-up runtime contract fix after first manual rebuild:
+- A manual Cleveland-Miami rebuild exposed a separate GTv2 inference bug:
+  - `Dean Wade` (`player_id=1629731`) had `is_out=1` and `prior_play_prob=0.0` in the
+    live feature row, but the raw GTv2 worlds still gave him ~`15` mean minutes and
+    ~`100%` active rate.
+- Root cause:
+  - GTv2 treated `is_out` only as an input feature, not as a hard inference-time
+    availability constraint.
+  - The deterministic score path and the world-sampling path were both capable of
+    leaking OUT players through if model outputs drifted.
+- Fix applied without retraining:
+  1. attach `gtv2_config` to the loaded model at inference runtime
+  2. decode `is_out` from normalized player features inside `sample_worlds_v2.py`
+  3. hard-mask OUT players before minutes projection / active sampling
+  4. hard-zero OUT players again in the deterministic `score` output as a safety check
+- Verification:
+  - targeted regression tests passed:
+    - `tests/rotation/test_sample_worlds_v2.py`
+    - `tests/pipeline/test_gtv2_inference_runtime.py`
+  - fresh Triton smoke from the prod checkout showed:
+    - Dean Wade `score` row: `minutes_deterministic=0`, `active_deterministic=0`
+    - Dean Wade `worlds` rows: `active_rate=0.0`, `minutes=0.0`, `dk_fpts=0.0`
+
+Production status after this cutover:
+- base `envteamonly` bundle is now the live GTv2 selector through `bundle_current`
+- Prefect and Triton are both running from `/home/daniel/prod/projections-v2`
+- live GTv2 post-processing now matches the validated envelope for this branch
+- Triton is serving the promoted bundle successfully
+- sparse-starter and bench-riser overlays remain disabled / experimental
+
+
+## 2026-03-27 Live Deployment Findings
+
+### Runtime Contract Fix
+- Live exposure of `Dean Wade` while `is_out=1` revealed a missing hard availability contract in GTv2 runtime/world generation.
+- Root cause was not Triton or post-processing. `is_out` was only a feature, not a hard inference-time mask.
+- Fixed in runtime by hard-masking out players before active/minutes sampling and hard-zeroing deterministic score output as a safety contract.
+- Verified in served Triton path: OUT players now have `minutes=0`, `active=0`, `dk_fpts=0` in score/world outputs.
+
+### Live Calibration Findings
+- After aligning live post-processing to the validated envelope, the current promoted `envteamonly` branch showed major raw-world calibration problems that were not acceptable for live use.
+- These failures are present already in `worlds_raw.parquet`, so they are not caused by realism controls, contract repair, or unified finalize overlay.
+- Concrete live examples on `2026-03-27`:
+  - `Andrew Nembhard`: raw GTv2 `ast_mean ~= 2.93` vs market assist line `7.67`.
+  - `CHI@OKC`: raw GTv2 team means roughly `132.9` and `134.0` on a market total of `239.0`, with spread compressed toward a coinflip despite `OKC -18.5`.
+- Full-slate raw-world diagnostics on the live run showed:
+  - assists vs props: mean diff about `-0.66`, corr about `0.70`
+  - points vs props: mean diff about `-0.71`, corr about `0.79`
+  - mean absolute team-total error vs market about `33` points across the 10-game slate
+
+### Interpretation
+- The core issue is not the OUT-player bug and not missing live-only calibration.
+- The current `envteamonly` recipe is underconstrained in the exact areas that failed live:
+  - `w_usage_share_nll = 0.0`
+  - `w_ast_share_aux = 0.0`
+  - `w_reb_share_aux = 0.0`
+  - `w_emergent_share_aux = 0.0`
+  - `w_poss_nll = 0.0`
+  - `w_poss_regression = 0.0`
+- That leaves the branch too free to:
+  - run game environments too hot
+  - flatten star/playmaker allocation
+  - suppress assist-driven players relative to market/props
+
+### Deployment Status
+- Live deployment surfaced a real modeling gap that was not acceptable to keep as the production default.
+- Before any further modeling iteration, the next required check is strict input alignment:
+  - verify every training feature is present in live GTv2 features
+  - verify priors/context fields are populated and scaled as expected
+  - verify the live builder is reproducing the training contract exactly
+- Only after input alignment is confirmed should the next modeling step proceed.
+
+
+### Input Alignment Audit (Post-Live Cutover)
+- Promoted bundle contract and live GTv2 feature build were checked directly against the served bundle config.
+- Result: strict schema alignment passed.
+  - expected player features: `336`
+  - expected game features: `6`
+  - expected team features: `6`
+  - missing expected columns: `0`
+  - unexpected extra columns: `0`
+- Live builder is loading the promoted bundle spec via `load_gtv2_feature_spec(...)` and applying the same lineup/game-context feature contracts used in training.
+- Live build used the expected pre-tip priors fallback mode because same-day game-id priors partitions do not exist pre-tip. This affected fringe players more than core calibration examples and did not explain the observed assist suppression.
+
+### Projection Semantics Caveat
+- `summarize_worlds_to_projections(...)` writes conditional-on-active summary fields for:
+  - `pts_mean`
+  - `reb_mean`
+  - `ast_mean`
+  - `dk_fpts_mean`
+  - `minutes_sim_mean`
+- Unconditional means live in the corresponding `*_mean_uncond` fields or can be recomputed directly from `worlds.parquet`.
+- This matters for evaluation: aggregating `pts_mean` to team totals will overstate game environments because those fields are conditional on active worlds. Team/game calibration should be judged from raw worlds or unconditional summary fields, not conditional player means.
+
+### First Post-Alignment Modeling Retry
+- Warm-started a new branch from `envteamonly` with:
+  - `w_usage_share_nll = 0.05`
+  - `w_emergent_share_aux = 0.05`
+  - `w_ast_share_aux = 0.05`
+  - `w_reb_share_aux = 0.02`
+  - `w_poss_nll = 0.05`
+  - kept `w_poss_regression = 0.0`, `w_spread_aux = 0.0`, `w_total_aux = 0.0`
+- Training checkpoint improved on the internal `val_total` proxy, but live-style eval was only a partial win:
+  - Andrew Nembhard assists improved slightly (`~2.96 -> ~3.08`) but remained far below market (`7.67`)
+  - slate assist-vs-props mean diff improved modestly (`~-0.74 -> ~-0.54`)
+  - point-vs-props calibration worsened
+  - raw-world team total alignment worsened modestly on the live slate sample
+- Conclusion: share + light possession structure alone is not enough. The next modeling pass should target player stat calibration directly in-training rather than re-enabling post-hoc uplift.
+
+### Live Surface Semantics Fix
+- Patched the live GTv2 projection surface so default summary columns now use unconditional moments.
+- Preserved prior conditional values under explicit aliases:
+  - `dk_fpts_mean_cond`
+  - `minutes_sim_mean_cond`
+  - `pts_mean_cond`
+  - `reb_mean_cond`
+  - `ast_mean_cond`
+  - `stl_mean_cond`
+  - `blk_mean_cond`
+  - `tov_mean_cond`
+- Applied this normalization when writing:
+  - `artifacts/gtv2_worlds/.../projections.parquet`
+  - `artifacts/projections/.../projections.parquet`
+- Synced the same pipeline code into `/home/daniel/prod/projections-v2` so Prefect and Triton-adjacent runtime paths agree on semantics.
+
+### Post-Fix Read
+- After correcting surface semantics, the main live issue remains genuine player stat allocation rather than a display-layer misunderstanding.
+- Example on the current live run:
+  - Andrew Nembhard still sits around `2.93` assists on the unconditional surface.
+- Team-total concerns were partially overstated by the old conditional columns; player assist/share suppression was not.
+
+### Next Modeling Direction
+- Keep `envteamonly` as the base branch.
+- Do not re-enable inference-time market uplift.
+- Next branch should isolate share allocation without re-coupling environment:
+  - start from `envteamonly`
+  - keep environment recipe fixed
+  - add only share-structure supervision first:
+    - `w_emergent_share_aux`
+    - `w_ast_share_aux`
+    - `w_reb_share_aux`
+  - leave `w_poss_nll`, `w_spread_aux`, `w_total_aux`, and props auxiliaries off for the first pass
+- Rationale:
+  - the first share+poss retry improved assists slightly but hurt totals
+  - the props-aux retry hurt both totals and broad player calibration
+  - the remaining gap looks more like player allocation structure than environment magnitude
+
+### Share-Only Retry Result
+- Warm-started `envteamonly` with only:
+  - `w_emergent_share_aux = 0.05`
+  - `w_ast_share_aux = 0.05`
+  - `w_reb_share_aux = 0.02`
+- Kept environment losses and props auxiliaries off.
+- Outcome on same-slate local replay:
+  - Andrew Nembhard assists moved only slightly (`~3.03 -> ~3.08`)
+  - raw-world total error stayed roughly flat (`~3.95 -> ~4.02`)
+  - spread compression stayed essentially unchanged
+  - broader AST/PTS quality got slightly worse
+
+### Revised Diagnosis
+- The remaining issue is not a global assist or points mean offset.
+- The model is flattening the top end of the player distribution:
+  - overall AST vs line mean diff is slightly positive on the full slate
+  - but high-assist-line players are still materially undercalled
+  - high-point-line players are also materially undercalled
+- Same-slate diagnostic slices:
+  - current branch, AST line `>= 7.0`: mean diff about `-3.04`
+  - share-only branch, AST line `>= 7.0`: mean diff about `-3.14`
+  - current branch, PTS line `>= 25.0`: mean diff about `-7.72`
+  - share-only branch, PTS line `>= 25.0`: mean diff about `-8.38`
+
+### Implication
+- Share auxiliaries alone are not enough.
+- The next useful modeling step should target top-end player allocation explicitly rather than just average share structure.
+
+### Usage-Share Retry Result
+- Added a second follow-up on top of the same `envteamonly` base:
+  - `w_usage_share_nll = 0.05`
+  - `w_emergent_share_aux = 0.05`
+  - `w_ast_share_aux = 0.05`
+  - `w_reb_share_aux = 0.02`
+- Outcome:
+  - training converged cleanly
+  - best `val_total = 7.8993`
+  - this was worse than the share-only retry (`7.7883`) and worse than the retained base (`7.5643`)
+- Conclusion:
+  - generic usage-share supervision does not resolve the live top-end suppression
+  - the remaining failure is more specific than “missing average share structure”
+
+
+## 2026-03-28 Top-End Props Aux Follow-Up
+
+### Branch
+- `gtv2_flow_v2_envteamonly_topendprops_20260328T001500Z`
+- Warm-start from retained `envteamonly`
+- Keep environment recipe unchanged
+- Add thresholded top-end props auxiliaries only:
+  - `w_props_ast_aux = 0.05`, `props_ast_aux_min_line = 6.0`
+  - `w_props_pts_aux = 0.03`, `props_pts_aux_min_line = 20.0`
+  - `w_props_reb_aux = 0.0`
+- No generic share losses, no usage-share loss, no extra possession loss, no uplift
+
+### Training
+- Best checkpoint: epoch `12`
+- `best_val_total = 7.5273`
+- This beat retained `envteamonly` on the training proxy (`7.5643`)
+
+### Same-Slate Live-Envelope Eval
+Evaluated on live GTv2 features:
+- `/home/daniel/projections-data/live/features_gtv2_v1/2026-03-27/run=20260327T190000Z/features.parquet`
+- Local backend
+- `128` worlds
+- `apply_props_uplift = false`
+- `apply_propless_tail_calibration = false`
+- `apply_mid_minutes_tail_calibration = false`
+- `apply_world_realism_controls = true`
+
+Artifact:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_topendprops_20260328T001500Z/live_slate_eval_20260327T190000Z.json`
+
+#### Retained base `envteamonly` -> `topendprops`
+- Andrew Nembhard AST: `3.03 -> 3.49`
+- Overall AST mean diff vs props: `-0.736 -> -0.449`
+- High AST slice (`an_ast_line >= 7.0`) mean diff: `-3.04 -> -2.48`
+- High AST slice MAE: `3.11 -> 2.60`
+- High PTS slice (`an_pts_line >= 25.0`) mean diff: `-7.72 -> -7.31`
+- Mean absolute total error vs market: `3.95 -> 4.29`
+- Overall PTS mean diff vs props: `-0.811 -> -0.882`
+- High REB slice worsened materially
+
+### Interpretation
+- Strict top-end supervision is the first approach that moves the real live failure mode in the correct direction.
+- Generic share losses and usage-share losses did not do this.
+- The current branch is not a full keeper yet because it gives back some total calibration and does not solve the top-end gap fully.
+- The next clean move is a narrower AST-heavy follow-up rather than broadening supervision again.
+
+
+### AST-Only Follow-Up
+- Branch: `gtv2_flow_v2_envteamonly_topendast_20260327T211200Z`
+- Change vs `topendprops`:
+  - `w_props_ast_aux = 0.08`
+  - `w_props_pts_aux = 0.0`
+- Training stayed competitive on the proxy:
+  - best epoch `9`
+  - `best_val_total = 7.5311`
+- Same-slate live-envelope eval was a clear failure:
+  - Nembhard AST: `4.05`
+  - overall AST mean diff vs props: `-0.105`
+  - high AST slice mean diff: `-2.33`
+  - but overall PTS mean diff vs props: `-1.78`
+  - high PTS slice mean diff: `-10.04`
+  - mean absolute total error vs market: `15.05`
+- Interpretation:
+  - pure AST supervision can move assists materially
+  - but it collapses scoring/totals without a scoring anchor
+  - this confirms the small PTS auxiliary in `topendprops` was load-bearing
+
+### Mixed Follow-Up
+- Branch: `gtv2_flow_v2_envteamonly_topendmix_20260327T212200Z`
+- Change vs `topendprops`:
+  - `w_props_ast_aux = 0.06`
+  - `w_props_pts_aux = 0.01`
+- Training proxy only:
+  - best epoch `9`
+  - best `val_total = 7.5386`
+- This is slightly worse than `topendprops` (`7.5273`), so it is not currently a better candidate on the training metric.
+- Pending replay is unnecessary unless a later checkpoint beats `topendprops`.
+
+
+### Local Weight Sweep Around `topendprops`
+Additional nearby variant:
+- Branch: `gtv2_flow_v2_envteamonly_a060_p020_20260327T212900Z`
+- Weights:
+  - `w_props_ast_aux = 0.06`
+  - `w_props_pts_aux = 0.02`
+- Training proxy:
+  - best epoch `9`
+  - `best_val_total = 7.5492`
+- This is worse than retained `topendprops` (`7.5273`), so it was not taken to replay.
+
+### Current Read
+In the local neighborhood around the first successful top-end branch:
+- stronger AST with no PTS anchor: too unstable
+- stronger AST with smaller PTS anchor: worse training proxy
+- current best balance remains:
+  - `w_props_ast_aux = 0.05`
+  - `w_props_pts_aux = 0.03`
+  - `props_ast_aux_min_line = 6.0`
+  - `props_pts_aux_min_line = 20.0`
+
+### Rebounds
+Top-end rebounds remain suppressed, but REB worsened in the first targeted branch. It is better to keep REB out of the AST/PTS tuning loop for now. Once the AST/PTS top-end allocation branch is stable, REB should be addressed separately with its own targeted supervision rather than folded into the same sweep.
+
+
+## 2026-03-28 Current State Summary
+
+### What We Confirmed
+- Live input schema is aligned with the promoted bundle contract.
+- The live builder is emitting the expected player/game/team features.
+- Priors are generally present; the main live failures are not explained by missing priors.
+- A live surface semantics bug existed: GTv2-facing `*_mean` columns were exposing conditional-on-active means. That is now fixed; unconditional means are the default surfaced values and conditional values are preserved under `*_mean_cond` aliases.
+- A runtime availability contract bug existed: `is_out=1` players could still receive minutes/world mass. That is now fixed in inference/world generation with a pre-mask plus final hard-zero safety check.
+
+### What Failed In Live / Live-Aligned Evaluation
+- The retained `envteamonly` branch is still materially under-allocating top-end player stats, especially assists and high-end scoring.
+- Example failure on the 2026-03-27 live slate:
+  - Andrew Nembhard remained far below his AST market line even after the surface semantics fix.
+- High-end slices remain suppressed:
+  - AST line `>= 7.0`: materially undercalled
+  - PTS line `>= 25.0`: materially undercalled
+  - Top-end REB also appears suppressed
+- This is not primarily a feature-contract bug.
+- This is not primarily a missing-priors bug.
+- The current issue is modeling / objective behavior: the branch is flattening top-end allocation.
+
+### What We Tried
+1. Generic share supervision
+- `share-only` and `share + usage-share` retries were not keepers.
+- They did not fix the real top-end failure mode and worsened broader quality.
+
+2. Strict targeted top-end supervision
+- First successful branch:
+  - `gtv2_flow_v2_envteamonly_topendprops_20260328T001500Z`
+- Settings:
+  - `w_props_ast_aux = 0.05`
+  - `w_props_pts_aux = 0.03`
+  - `props_ast_aux_min_line = 6.0`
+  - `props_pts_aux_min_line = 20.0`
+- This is the first approach that moved the real live failure mode in the right direction.
+
+3. AST-only follow-up
+- `gtv2_flow_v2_envteamonly_topendast_20260327T211200Z`
+- It moved assists harder, but broke scoring and game totals.
+- Conclusion: a scoring anchor is required; pure AST supervision is too destabilizing.
+
+4. Nearby mixed follow-ups
+- Stronger AST + smaller PTS anchor did not beat `topendprops` on the training proxy.
+- Current best local balance remains the original `topendprops` setting.
+
+### Current Best Read
+- `topendprops` is the best branch on this specific problem so far.
+- It improves high-end AST/PTS allocation relative to retained `envteamonly`.
+- It is still not good enough.
+- We are still materially off on the top end, especially for playmakers and likely high-end rebounders.
+- REB should be handled as a separate targeted problem, not folded into AST/PTS tuning until the current branch is more stable.
+
+### Practical Conclusion
+- Current evidence says the live issue is not a builder/input contract failure.
+- The main remaining problem is top-end allocation flattening in the model.
+- Generic structural share losses were not enough.
+- Targeted top-end supervision is the right direction, but the current branch has not closed the gap yet.
+
+
+### Decode-Time Top-Usage Reweighting Proof Of Concept
+Research-only change added to the worlds sampler:
+- opt-in decode multipliers for top implied-usage players after emergent allocation weights are computed
+- parameters:
+  - `allocation_top_usage_top1_scale`
+  - `allocation_top_usage_top2_scale`
+- defaults are `1.0`, so production behavior is unchanged unless explicitly enabled
+
+Live-slate POC on retained `envteamonly` branch:
+- Artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_20260327T193500Z/decode_top_usage_reweight_live_slate_eval_20260327T190000Z.json`
+- Compared:
+  - base `1.00 / 1.00`
+  - mild `1.08 / 1.04`
+  - moderate `1.12 / 1.06`
+
+Findings:
+- Top-end scoring improved modestly:
+  - PTS line `>= 25.0` mean diff improved from `-7.72` to `-7.16` (`1.08/1.04`) and `-6.89` (`1.12/1.06`)
+  - overall PTS mean diff vs props improved slightly from `-0.811` to `-0.765` / `-0.741`
+- Team totals worsened slightly:
+  - mean absolute total error vs market moved from `3.95` to `4.09` / `4.13`
+- AST did not move at all:
+  - Andrew Nembhard AST stayed `3.03`
+  - overall AST mean diff vs props stayed `-0.736`
+  - AST line `>= 7.0` mean diff stayed `-3.04`
+
+Interpretation:
+- Decode-time top-usage reweighting is a real lever for top-end scoring concentration.
+- It does not address the assist suppression problem because AST is not reconstructed through the current FGA/FTA/TOV budget-allocation path.
+- This is an important localization result:
+  - high-end PTS flattening is at least partly an opportunity-share magnitude problem
+  - high-end AST suppression is elsewhere, likely in direct flow stat generation / AST structure rather than the decode allocator
+- Therefore, Opus's decode-side idea is directionally right for scoring, but it does not explain the current AST miss by itself.
+
+Current decision:
+- keep the decode reweighting path as a research tool
+- do not promote it to live
+- treat PTS and AST as partially separate mechanisms from here
+
+
+### First AST-Factorized Branch
+Implemented a first explicit AST factorization path in the model/trainer:
+- `TeamAstBudgetHead`
+- `AssistShareHead`
+- three optional losses:
+  - `w_team_ast_budget_aux`
+  - `w_assist_share_aux`
+  - `w_assist_share_recon_aux`
+
+Rationale:
+- decode-time top-usage reweighting helped PTS but did nothing for AST
+- generic share supervision was not enough
+- AST appears to need an explicit:
+  - team assist budget
+  - passer allocation within that budget
+
+First stable continuation run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_astfactor_stable_20260328T014500Z`
+
+Recipe:
+- warm-start from retained `envteamonly`
+- keep game/team context contract unchanged
+- freeze rotation/environment blocks:
+  - encoder / projections / tokens
+  - active/minutes
+  - possession/event backbone
+  - efficiency
+  - usage-share
+- train only:
+  - flow head
+  - new AST heads
+- stabilize phase 2:
+  - lower LR
+  - longer flow warmup
+  - AST losses only
+  - backbone/effect head losses set to zero
+
+Training result:
+- `envteamonly best_val_total = 7.5643`
+- `astfactor_stable best_val_total = 7.2214`
+
+Live-slate raw-world eval:
+- Artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_envteamonly_astfactor_stable_20260328T014500Z/live_slate_eval_20260327T190000Z.json`
+- Compared against `envteamonly` on the same raw-world evaluation path:
+  - AST overall mean diff vs props:
+    - `-0.757 -> -0.589`
+  - AST overall MAE:
+    - `1.072 -> 1.019`
+  - AST line `>= 7.0` mean diff:
+    - `-3.165 -> -2.800`
+  - AST line `>= 7.0` MAE:
+    - `3.165 -> 2.958`
+  - total absolute error vs market:
+    - `4.182 -> 3.733`
+
+Other slice effects:
+- PTS overall mean diff vs props improved modestly:
+  - `-0.823 -> -0.662`
+- PTS line `>= 25.0` improved modestly:
+  - `-7.665 -> -7.441`
+- High-end REB got worse:
+  - REB line `>= 10.0` mean diff:
+    - `-4.317 -> -5.242`
+
+Named example:
+- Andrew Nembhard (`player_id=1629614`, IND):
+  - live market AST line: `7.67`
+  - raw-world AST:
+    - `envteamonly`: `3.05`
+    - `astfactor_stable`: `3.06`
+
+Interpretation:
+- The first AST factorization branch is a real improvement on AST slices in aggregate.
+- It does not move the named high-end playmaker example enough.
+- This means:
+  - the factorization is directionally useful
+  - but the first pass is still too weak or too constrained to solve the real top-end AST miss
+- It is a better base for AST work than `topendprops`, because it improves AST without reintroducing the earlier total-collapse failure mode.
+
+Current decision:
+- keep `astfactor_stable` as the active AST research branch
+- do not touch REB inside this branch yet
+- next AST iteration should stay on this factorization path, not return to generic share or props aux losses
+
+## AST Factorization Follow-up: Playmaker-Conditioned AssistShareHead
+
+Date: 2026-03-28
+
+Branch:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_conditioned_cuda_20260328T025500Z`
+- Eval artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_conditioned_cuda_20260328T025500Z/live_slate_eval_20260327T190000Z.json`
+
+Change:
+- Kept the `astfactor_stable` recipe intact.
+- Changed only the `AssistShareHead` parameterization.
+- Added direct playmaker-conditioning features into the assist-share head:
+  - `an_ast_line`
+  - `an_implied_minutes`
+  - `prior_play_prob`
+  - `started_proxy_rate_prior_20`
+- These features are unnormalized inside the model and passed only to the AST share head.
+- Shared encoder / minutes / backbone contract stayed fixed.
+
+Training:
+- `astfactor_stable best_val_total = 7.2214`
+- `astfactor_conditioned best_val_total = 7.1465`
+
+Live-slate raw-world eval vs `astfactor_stable`:
+- Nembhard (`player_id=1629614`) AST:
+  - `3.14 -> 3.28`
+- AST overall mean diff vs props:
+  - `-0.589 -> -0.570`
+- AST overall MAE:
+  - `1.019 -> 1.021`
+- AST line `>= 7.0` mean diff:
+  - `-2.800 -> -2.794`
+- AST line `>= 7.0` MAE:
+  - `2.958 -> 3.042`
+- total absolute error vs market:
+  - `3.733 -> 4.096`
+- PTS overall mean diff vs props:
+  - `-0.662 -> -0.843`
+
+Interpretation:
+- Explicit playmaker-conditioning is directionally real.
+- It improves the named high-end playmaker example more than the prior AST branches.
+- But the aggregate high-AST slice barely moves and MAE on that slice gets slightly worse.
+- It also gives back total / scoring quality.
+
+Current decision:
+- Do not promote `astfactor_conditioned`.
+- Keep `astfactor_stable` as the retained AST branch.
+- The current AST issue is still not solved by moderate head-local parameterization changes alone.
+- If AST work continues, the next branch should be a stronger structural integration of the AST factorization into the flow channel, not more small auxiliary or head-local tweaks.
+
+## AST Factorization Follow-up: Replace Flow AST With Reconstructed AST
+
+Date: 2026-03-28
+
+Branch:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_replaceast_cuda_20260328T031500Z`
+- Eval artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_replaceast_cuda_20260328T031500Z/live_slate_eval_20260327T190000Z.json`
+
+Change:
+- Kept the `astfactor_conditioned` recipe intact.
+- Added an inference/training-contract flag `assist_share_replace_flow_ast`.
+- When enabled, GTv2 replaces the projected flow AST channel with explicit AST reconstruction:
+  - `team_ast_budget * assist_share`
+- This is a stronger structural integration than the prior AST auxiliary path because the reconstructed AST now directly enters the boxscore contract path used for world generation.
+
+Training:
+- `astfactor_conditioned best_val_total = 7.1465`
+- `astfactor_replaceast best_val_total = 7.1465`
+
+The identical training proxy is expected here because the active loss stack does not materially change the optimized objective; the important difference is the decoded raw-world behavior.
+
+Live-slate raw-world eval vs `astfactor_stable`:
+- Nembhard (`player_id=1629614`) AST:
+  - `3.14 -> 5.59`
+- AST overall mean diff vs props:
+  - `-0.589 -> -0.503`
+- AST overall MAE:
+  - `1.019 -> 1.144`
+- AST line `>= 7.0` mean diff:
+  - `-2.800 -> +1.914`
+- AST line `>= 7.0` MAE:
+  - `2.958 -> 2.508`
+- total absolute error vs market:
+  - `3.733 -> 4.229`
+- PTS overall mean diff vs props:
+  - `-0.662 -> -0.855`
+- PTS line `>= 25.0` mean diff:
+  - `-7.441 -> -8.596`
+
+Interpretation:
+- This is the first AST branch that moves the named high-end playmaker miss materially.
+- It also reduces aggregate underprediction on AST in the broad sense.
+- But it overcorrects the high-AST slice:
+  - the `AST >= 7` slice flips from underprediction to overprediction
+- It also gives back points quality and some total calibration.
+
+Current decision:
+- Do not promote `astfactor_replaceast`.
+- Keep it as proof that stronger structural integration is the right axis.
+- The next AST branch, if work continues, should not be another small auxiliary or head-local tweak.
+- It should be a deeper architectural change that integrates AST factorization into the generative path in a controlled way rather than a hard channel replacement.
+
+## AST Factorization Follow-up: Remove AST From Flow Supervision
+
+Date: 2026-03-28
+
+Branch:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_v2_20260328T034500Z`
+- Eval artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_v2_20260328T034500Z/live_slate_eval_20260327T190000Z.json`
+
+Change:
+- Started from `astfactor_stable`, not `astfactor_conditioned`.
+- Added `assist_share_factorized_ast` mode.
+- In this mode:
+  - AST is masked out of `flow_targets` / `flow_observed_mask` before flow training.
+  - direct flow AST losses are removed.
+  - raw-world generation still injects AST from:
+    - `team_ast_budget * assist_share`
+- This is the first branch that changes the *training contract* so the flow head is no longer responsible for AST.
+
+Training:
+- `astfactor_stable best_val_total = 7.2214`
+- `astfactor_factorized_v2 best_val_total = 7.2012`
+
+Live-slate raw-world eval vs `astfactor_stable`:
+- Nembhard (`player_id=1629614`) AST:
+  - `3.14 -> 3.63`
+- AST overall mean diff vs props:
+  - `-0.589 -> -0.456`
+- AST overall MAE:
+  - `1.019 -> 1.079`
+- AST line `>= 7.0` mean diff:
+  - `-2.800 -> -1.782`
+- AST line `>= 7.0` MAE:
+  - `2.958 -> 2.186`
+- total absolute error vs market:
+  - `3.733 -> 3.976`
+- PTS overall mean diff vs props:
+  - `-0.662 -> -0.974`
+- PTS line `>= 25.0` mean diff:
+  - `-7.441 -> -8.631`
+
+Interpretation:
+- This is the best AST branch so far on the actual high-AST slice without the blunt overshoot seen in `replaceast`.
+- It confirms the correct direction:
+  - AST should not be trained as a standard flow channel.
+- But it still does not solve the problem:
+  - Nembhard remains far below line.
+  - scoring quality regresses.
+
+Current decision:
+- Do not promote `astfactor_factorized_v2`.
+- Keep it as the strongest evidence so far that AST needs a deeper architectural split from the flow head.
+- The next AST step, if continued, should be:
+  - remove AST from the flow architecture itself, not just from its supervision
+  - inject factorized AST before stat-budget reconciliation as a first-class generative path
+
+## AST Factorization Follow-up: RQS Coupling Ablation
+
+Date: 2026-03-28
+
+Branch:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_rqs_20260328T040500Z`
+- Eval artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_rqs_20260328T040500Z/live_slate_eval_20260327T190000Z.json`
+
+Change:
+- Held the `astfactor_factorized_v2` recipe constant.
+- Changed only:
+  - `flow_coupling_type: affine -> rqs`
+
+Training:
+- affine factorized AST:
+  - `best_val_total = 7.2012`
+- RQS factorized AST:
+  - `best_val_total = 7.1243`
+
+Live-slate raw-world eval vs affine factorized AST:
+- Nembhard (`player_id=1629614`) AST:
+  - `3.63 -> 3.78`
+- AST overall mean diff vs props:
+  - `-0.456 -> -0.414`
+- AST line `>= 7.0` mean diff:
+  - `-1.782 -> -0.916`
+- AST line `>= 7.0` MAE:
+  - `2.186 -> 1.674`
+- PTS line `>= 25.0` mean diff:
+  - `-8.631 -> -8.090`
+- REB line `>= 10.0` mean diff:
+  - `-5.467 -> -5.003`
+
+Tradeoffs:
+- AST overall MAE worsened:
+  - `1.079 -> 1.162`
+- PTS overall MAE worsened slightly:
+  - `3.025 -> 3.055`
+- total absolute error vs market worsened:
+  - `3.976 -> 4.281`
+
+Interpretation:
+- RQS does appear to help the high-end AST slice and other tail slices mechanically.
+- The effect is real but still not large enough to solve the actual problem.
+- It improves the structural AST branch; it does not change the overall conclusion.
+
+Current decision:
+- Keep `rqs` as the better coupling choice if AST structural work continues.
+- Do not treat RQS as sufficient on its own.
+- The remaining gap is still architectural:
+  - AST generation needs a tighter first-class coupling to the rest of the generative stat budget.
+
+## AST Runtime Calibration Sweep On Top Of RQS Factorized AST
+
+Date: 2026-03-28
+
+Base branch:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_rqs_20260328T040500Z`
+
+Sweep artifact:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_rqs_20260328T040500Z/ast_runtime_calibration_sweep_live_slate_eval_20260327T190000Z.json`
+
+Research knobs:
+- `ast_blend_alpha`
+- `assist_share_temperature`
+- `team_ast_budget_blend_alpha`
+
+Best setting from this sweep:
+- `ast_blend_alpha = 0.75`
+- `assist_share_temperature = 0.85`
+- `team_ast_budget_blend_alpha = 1.0`
+
+Vs sweep base (`1.0 / 1.0 / 1.0`):
+- Nembhard AST:
+  - `3.78 -> 3.81`
+- AST overall mean diff vs props:
+  - `-0.416 -> -0.392`
+- AST line `>= 7.0` mean diff:
+  - `-0.916 -> -0.511`
+- AST line `>= 7.0` MAE:
+  - `1.674 -> 1.570`
+- total absolute error vs market:
+  - `4.473 -> 2.760`
+
+Tradeoffs:
+- PTS high-end improved only modestly.
+- Team AST budget blending (`budget_alpha < 1`) did not help in this sweep.
+- Softer AST blending without temperature improved totals but weakened AST too much.
+
+Interpretation:
+- The useful levers are:
+  - partial blend between flow AST and factorized AST
+  - sharper assist-share softmax
+- The useful setting still does not close the named playmaker gap enough to avoid deeper architecture work.
+
+Current decision:
+- If continuing on the current branch, prefer:
+  - `rqs`
+  - `ast_blend_alpha = 0.75`
+  - `assist_share_temperature = 0.85`
+  - no team AST budget blend
+- Treat these as evidence for a learned AST-flow blend gate in the next architecture pass, not as a final fix.
+
+## Small RQS Hyperparameter Sweep
+
+Date: 2026-03-28
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_rqs_b12_tb60_20260328T042500Z`
+
+Change vs current RQS factorized branch:
+- `flow_rqs_num_bins: 8 -> 12`
+- `flow_rqs_tail_bound: 40 -> 60`
+
+Training result:
+- baseline RQS factorized AST:
+  - `best_val_total = 7.1243`
+- `bins=12, tail=60`:
+  - `best_val_total = 7.1644`
+
+Interpretation:
+- Extra spline capacity did not beat the simpler RQS branch.
+- The calibration gains above are coming more from AST-specific mixing/temperature than from bigger spline settings.
+
+Current decision:
+- Keep the simpler RQS configuration.
+- Do not spend more time on spline hyperparameters before the next architectural step.
+
+## Learned AST Blend Gate
+
+Date: 2026-03-28
+
+Code changes:
+- Added `AstBlendGateHead` to:
+  - [assist_heads.py](/home/daniel/projects/projections-v2/projections/rotation/assist_heads.py)
+- Wired learned gate outputs through:
+  - [game_transformer_v2.py](/home/daniel/projects/projections-v2/projections/rotation/game_transformer_v2.py)
+  - [sample_worlds_v2.py](/home/daniel/projects/projections-v2/projections/rotation/sample_worlds_v2.py)
+  - [train_game_transformer_v2.py](/home/daniel/projects/projections-v2/scripts/rotation/train_game_transformer_v2.py)
+- Added regression coverage in:
+  - [test_sample_worlds_v2.py](/home/daniel/projects/projections-v2/tests/rotation/test_sample_worlds_v2.py)
+  - [test_game_transformer_v2.py](/home/daniel/projects/projections-v2/tests/rotation/test_game_transformer_v2.py)
+  - [test_train_game_transformer_v2_phase2_stability.py](/home/daniel/projects/projections-v2/tests/rotation/test_train_game_transformer_v2_phase2_stability.py)
+
+Validation:
+- `78 passed`
+- `ruff` clean
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_learnedgate_rqs_20260328T050900Z`
+
+Training result vs baseline RQS factorized AST:
+- baseline:
+  - `best_val_total = 7.1243`
+- learned-gate:
+  - `best_val_total = 7.2552`
+
+Live-slate raw-world eval:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_learnedgate_rqs_20260328T050900Z/live_slate_eval_20260327T190000Z.json`
+
+Key result vs `astfactor_factorized_rqs`:
+- Nembhard AST:
+  - `3.78 -> 4.21`
+- AST overall mean diff vs props:
+  - `-0.414 -> +0.109`
+- AST line `>= 7.0` mean diff:
+  - `-0.916 -> -2.294`
+- total absolute error vs market:
+  - `4.281 -> 13.365`
+- overall PTS mean diff vs props:
+  - materially worse (`-1.77`)
+
+Critical diagnostic:
+- The learned gate did not actually learn a player-specific policy.
+- On the live slate, gate outputs were constant:
+  - mean / p25 / p50 / p75 / max all `~= 0.75`
+- Nembhard gate was also `~= 0.75`
+
+Interpretation:
+- This branch did **not** meaningfully test a trained learned-gate mechanism.
+- Under the current recipe, the gate had no effective supervision path and stayed at its initialization.
+- So this result is mostly equivalent to hard-coding a `0.75` AST blend at inference, not learning when to trust flow AST vs factorized AST.
+
+Current decision:
+- Reject the current learned-gate branch.
+- If we revisit learned gating, first add a real training signal for the gate itself:
+  - either route it through a phase-3 / world-level objective,
+  - or add explicit gated AST calibration losses on the emergent-flow path.
+
+## Supervised AST Blend Gate
+
+Date: 2026-03-28
+
+Follow-up implementation:
+- Added explicit gate supervision in:
+  - [train_game_transformer_v2.py](/home/daniel/projects/projections-v2/scripts/rotation/train_game_transformer_v2.py)
+- New pieces:
+  - `w_ast_blend_gate_aux`
+  - `ast_blend_gate_target_eps`
+  - `_ast_blend_gate_targets(...)`
+
+Important implementation notes:
+- The first supervised-gate attempt exposed two real issues:
+  - the gate loss path was not activated because `w_ast_blend_gate_aux` was not included in the emergent-flow guard condition
+  - the initial target builder could still create unstable divides on unsolved rows
+- Both were fixed before the retained supervised run.
+
+Retained run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_learnedgate_supervised_rqs_fix2_20260328T055200Z`
+
+Training result:
+- `best_epoch = 11`
+- `best_val_total = 7.1944`
+- worse than baseline RQS factorized AST:
+  - `7.1243`
+
+Critical training diagnostic:
+- The gate loss was active and nonzero after the fixes.
+- Example epochs from `history.json`:
+  - epoch `3`: `train_ast_blend_gate_aux = 0.6613`, `val_ast_blend_gate_aux = 0.6327`
+  - epoch `11`: `train_ast_blend_gate_aux = 0.2036`, `val_ast_blend_gate_aux = 0.1786`
+
+Gate distribution on the live slate:
+- The gate now learned a real policy rather than staying at `0.75`.
+- Aggregate gate distribution:
+  - mean: `0.9489`
+  - p25: `0.9339`
+  - p50: `0.9572`
+  - p75: `0.9746`
+  - min/max: `0.8325 / 0.9981`
+- Nembhard gate:
+  - `0.9247`
+
+Live-slate raw-world eval:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_learnedgate_supervised_rqs_fix2_20260328T055200Z/live_slate_eval_20260327T190000Z.json`
+
+Result vs `astfactor_factorized_rqs`:
+- Nembhard AST:
+  - `3.78 -> 4.84`
+- AST overall mean diff vs props:
+  - `-0.414 -> +0.512`
+- AST line `>= 7.0` mean diff:
+  - `-0.916 -> -0.892`
+- AST line `>= 7.0` MAE:
+  - `1.674 -> 1.417`
+- total absolute error vs market:
+  - `4.281 -> 16.697`
+- PTS overall mean diff vs props:
+  - `-0.924 -> -1.450`
+
+Interpretation:
+- Explicit supervision does make the gate learn.
+- The learned policy is too aggressive:
+  - it pushes most players strongly toward factorized AST
+  - it improves the named playmaker miss and slightly improves the high-AST slice
+  - it badly degrades totals and broader scoring quality
+
+Current decision:
+- Reject the supervised learned-gate branch as a keeper.
+- The learned gate is now confirmed to be trainable, but the current target formulation drives it toward near-full factorized AST.
+- If gating is revisited, it needs a different objective:
+  - less direct interpolation-target supervision,
+  - more coupled downstream supervision so totals/scoring constrain the gate.
+
+## AST Follow-up: Compare Phase-3 Gate Supervision vs AST Reconciliation
+
+Date: 2026-03-28
+
+Two deeper follow-ups were evaluated against the retained RQS AST baseline:
+- baseline:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_rqs_20260328T040500Z`
+- candidate 1, phase-3/world-level learned gate:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_learnedgate_phase3_rqs_20260328T070800Z`
+- candidate 2, AST reconciliation into the team budget:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_rqs_20260328T071800Z`
+
+Implementation notes:
+- Phase-3 gate branch:
+  - kept the learned AST-flow blend gate
+  - enabled phase-3 decision/world losses
+  - removed direct gate-target supervision
+- AST reconciliation branch:
+  - added `assist_share_reconcile_ast_budget`
+  - reconciles player AST to the exact team AST budget using a blended share:
+    - emergent flow AST share
+    - assist-share head weights
+  - uses:
+    - `assist_share_reconcile_alpha = 0.75`
+    - `assist_share_reconcile_temperature = 0.85`
+
+Training result:
+- baseline RQS factorized AST:
+  - `best_val_total = 7.1243`
+- phase-3 gate:
+  - `best_val_total = 7.4595`
+- AST reconciliation:
+  - `best_val_total = 6.8576`
+
+Live-slate raw-world eval:
+- baseline:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_rqs_20260328T040500Z/live_slate_eval_20260327T190000Z.json`
+- phase-3 gate:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_learnedgate_phase3_rqs_20260328T070800Z/live_slate_eval_20260327T190000Z.json`
+- AST reconciliation:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_rqs_20260328T071800Z/live_slate_eval_20260327T190000Z.json`
+
+Key comparison:
+- baseline:
+  - Nembhard AST: `3.78`
+  - AST overall mean diff vs props: `-0.414`
+  - AST line `>= 7.0` mean diff: `-0.916`
+  - AST line `>= 7.0` MAE: `1.674`
+  - PTS line `>= 25` mean diff: `-8.090`
+  - total absolute error vs market: `4.281`
+- phase-3 gate:
+  - Nembhard AST: `2.56`
+  - AST overall mean diff vs props: `-1.659`
+  - AST line `>= 7.0` mean diff: `-4.026`
+  - AST line `>= 7.0` MAE: `4.026`
+  - PTS line `>= 25` mean diff: `-7.549`
+  - total absolute error vs market: `16.033`
+- AST reconciliation:
+  - Nembhard AST: `5.72`
+  - AST overall mean diff vs props: `-0.014`
+  - AST line `>= 7.0` mean diff: `+1.896`
+  - AST line `>= 7.0` MAE: `2.578`
+  - PTS line `>= 25` mean diff: `-6.966`
+  - total absolute error vs market: `15.433`
+
+Interpretation:
+- Phase-3/world-level gate supervision is not the right path in the current setup.
+  - It is worse than baseline on both the training proxy and the live-slate AST slices.
+  - It also blows up team-total calibration.
+- AST reconciliation is the first branch that moves the named playmaker miss hard while also nearly eliminating aggregate AST underprediction.
+  - But it currently overshoots the high-AST slice and collapses total calibration.
+
+Current conclusion:
+- The reconciliation mechanism is the more promising deep direction.
+- The phase-3 gate branch is rejected.
+- The next AST architecture work should build from reconciliation, but it must introduce a way for totals/scoring to constrain the AST reallocation.
+
+## AST Reconciliation Follow-up: Constraining Training Coupling
+
+Date: 2026-03-28
+
+Three follow-ups were tested to determine whether the reconciliation branch was failing because AST supervision was distorting the scoring path, or because the reconciliation mechanism itself was still unconstrained.
+
+### 1. Reconciliation + Direct Losses
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_rqs_direct_20260328T082500Z`
+
+What changed:
+- kept AST reconciliation active
+- restored `envteamonly`-style direct losses:
+  - `w_direct_boxscore_aux = 0.05`
+  - `w_direct_opportunity_aux = 0.15`
+- turned off phase-3 losses:
+  - `w_crps_fpts = 0.0`
+  - `w_team_energy = 0.0`
+
+Training result:
+- `best_val_total = 6.9587`
+- better than AST baseline `7.1243`
+- worse than unconstrained reconciliation `6.8576`
+
+Live-slate raw-world eval:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_rqs_direct_20260328T082500Z/live_slate_eval_20260327T190000Z.json`
+
+Result vs AST baseline:
+- Nembhard AST:
+  - `3.78 -> 6.24`
+- AST overall mean diff vs props:
+  - `-0.414 -> -0.091`
+- AST line `>= 7.0` mean diff:
+  - `-0.916 -> +2.578`
+- total absolute error vs market:
+  - `4.281 -> 16.181`
+
+Interpretation:
+- Restoring direct boxscore/opportunity losses does not rescue reconciliation.
+- The branch still over-pushes AST and still breaks totals.
+
+### 2. Reconciliation + Actual Phase-3 / World-Level Supervision
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_phase3_rqs_20260328T084500Z`
+
+What changed:
+- kept AST reconciliation active
+- enabled phase-3 decision training
+- used light world-level losses:
+  - `w_crps_fpts = 0.05`
+  - `w_team_energy = 0.02`
+  - `phase3_num_samples = 8`
+
+Training result:
+- `best_val_total = 7.6018`
+
+Interpretation:
+- This is clearly worse than:
+  - AST baseline `7.1243`
+  - unconstrained reconciliation `6.8576`
+- Light phase-3/world-level supervision is not enough to stabilize the reconciliation branch.
+
+### 3. Reconciliation With Flow Head Frozen
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_rqs_astonly_20260328T090000Z`
+
+What changed:
+- kept AST reconciliation active
+- froze the scoring path more aggressively:
+  - added `final_norm.` and `flow_head.` to `freeze_prefixes`
+- only AST heads remained trainable:
+  - `team_ast_budget_head`
+  - `assist_share_head`
+
+Training result:
+- `best_val_total = 6.7649`
+- best training proxy seen so far for the AST line of work
+
+Live-slate raw-world eval:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_rqs_astonly_20260328T090000Z/live_slate_eval_20260327T190000Z.json`
+
+Result vs AST baseline:
+- Nembhard AST:
+  - `3.78 -> 7.03`
+- AST overall mean diff vs props:
+  - `-0.414 -> -0.119`
+- AST overall MAE:
+  - `1.162 -> 1.024`
+- AST line `>= 7.0` mean diff:
+  - `-0.916 -> +3.094`
+- total absolute error vs market:
+  - `4.281 -> 15.239`
+
+Interpretation:
+- Freezing the flow head does improve the training proxy materially.
+- It does not fix replay behavior.
+- The AST slice still overshoots badly and totals remain far off.
+
+Current conclusion:
+- The remaining failure is not just "AST supervision is distorting the flow head".
+- Even when the flow head is frozen, the reconciliation mechanism still overshoots AST and replay totals stay broken.
+- That means the next step needs a deeper structural coupling between AST reconciliation and the rest of the generated stat budget, not just a different loss mix or a narrower freeze set.
+
+## AST Reconciliation Correction: Checkpoint-Compatibility Confound
+
+Date: 2026-03-28
+
+A material confound was identified in the earlier AST reconciliation comparisons.
+
+What was wrong:
+- Several AST branches warm-started from:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astfactor_factorized_rqs_20260328T040500Z`
+- but changed both:
+  - `backbone_env_feature_cols`
+  - `assist_share_condition_feature_cols`
+- That caused shape mismatches on frozen heads during warm-start, leaving these heads randomly initialized while still participating in world generation:
+  - `possession_head`
+  - `event_backbone`
+  - `three_pa_share_head`
+  - parts of `assist_share_head`
+
+This invalidates the earlier interpretation that reconciliation itself was causing the extreme team-total failures seen in those incompatible runs.
+
+### Clean compatible reconciliation branch
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_rqs_20260328T093500Z`
+
+Setup:
+- warm-start from the RQS AST baseline checkpoint
+- kept the checkpoint contract compatible:
+  - `backbone_env_feature_cols = ""`
+  - `assist_share_condition_feature_cols = ""`
+- enabled only:
+  - `assist_share_reconcile_ast_budget = true`
+  - `assist_share_reconcile_alpha = 0.75`
+  - `assist_share_reconcile_temperature = 0.85`
+
+Warm-start diagnostic:
+- no shape-mismatched keys
+- no missing frozen backbone/environment heads
+
+Training result:
+- `best_val_total = 6.9505`
+- better than baseline RQS AST:
+  - `7.1243`
+
+Live-slate raw-world eval:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_rqs_20260328T093500Z/live_slate_eval_20260327T190000Z.json`
+
+Result vs baseline RQS AST:
+- Nembhard AST:
+  - `3.78 -> 4.50`
+- AST overall mean diff vs props:
+  - `-0.414 -> -0.033`
+- AST line `>= 7.0` mean diff:
+  - `-0.916 -> +0.355`
+- AST line `>= 7.0` MAE:
+  - `1.674 -> 1.724`
+- total absolute error vs market:
+  - `4.684 -> 4.751`
+
+Interpretation:
+- The clean compatible reconciliation branch materially improves aggregate AST calibration.
+- It improves the named playmaker miss without blowing up team-total calibration.
+- It slightly overshoots the high-AST slice, but the magnitude is modest rather than catastrophic.
+
+### Runtime sweep on the compatible branch
+
+Artifact:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_rqs_20260328T093500Z/runtime_sweep_live_slate_eval_20260327T190000Z.json`
+
+Sweep summary:
+- best balanced setting remained close to the training default:
+  - `alpha = 0.75`
+  - `temperature = 0.85`
+- raising `alpha` or lowering `temperature` pushed AST further, but moved the high-AST slice into clearer overprediction.
+- totals and PTS stayed essentially unchanged across the sweep, confirming the remaining effect is local to AST allocation.
+
+Examples from the sweep:
+- `a0.75_t0.85`
+  - Nembhard AST: `4.49`
+  - AST overall mean diff: `-0.034`
+  - AST `>= 7` mean diff: `+0.357`
+  - total abs err: `4.915`
+- `a0.90_t0.85`
+  - Nembhard AST: `4.53`
+  - AST overall mean diff: `-0.020`
+  - AST `>= 7` mean diff: `+0.521`
+  - total abs err: `4.915`
+- `a0.85_t0.75`
+  - Nembhard AST: `4.71`
+  - AST overall mean diff: `+0.038`
+  - AST `>= 7` mean diff: `+1.278`
+  - total abs err: `4.915`
+
+### Compatible conditioned reconciliation branch
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_conditioned_rqs_20260328T103500Z`
+
+What changed:
+- same compatible reconciliation setup
+- reintroduced `assist_share_condition_feature_cols`:
+  - `an_ast_line,an_implied_minutes,prior_play_prob,started_proxy_rate_prior_20`
+- only the assist-share head changed shape; backbone/environment heads remained compatible
+
+Training result:
+- `best_val_total = 7.1402`
+- worse than the unconditioned compatible branch `6.9505`
+
+Decision:
+- Not replayed.
+- The conditioned compatible branch is not better than the clean unconditioned compatible reconciliation branch on the training proxy.
+
+Current conclusion:
+- The earlier "reconciliation breaks totals" conclusion was overstated due to a checkpoint-compatibility confound.
+- The clean compatible reconciliation branch is now the best AST direction.
+- The next work should continue from this branch, not from the earlier incompatible AST branches.
+
+### Conditioned compatible branch: replay was better than the training proxy suggested
+
+Follow-up replay on the conditioned compatible branch changed the read materially.
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_conditioned_rqs_20260328T103500Z`
+
+Replay artifact generated during this pass:
+- `/tmp/conditioned_eval.json` (ad hoc local replay using the same live slate features and raw-world metrics)
+
+Replay result at the trained runtime setting:
+- Nembhard AST:
+  - `4.52 -> 6.91` vs the unconditioned compatible branch
+- AST overall mean diff vs props:
+  - `-0.029 -> -0.113`
+- AST overall MAE:
+  - `1.307 -> 1.101`
+- AST line `>= 7.0` mean diff:
+  - `+0.345 -> +3.085`
+- AST line `>= 7.0` MAE:
+  - `1.711 -> 3.302`
+- PTS overall mean diff:
+  - `-1.063 -> -0.851`
+- total absolute error vs market:
+  - `3.851 -> 4.171`
+
+Interpretation:
+- The conditioned assist-share branch is not dead.
+- The training proxy understated its value on named high-playmaker misses.
+- But its trained runtime setting over-pushes the high-AST slice.
+
+### Runtime calibration sweep on the conditioned branch
+
+An explicit runtime sweep showed that the conditioned branch is a calibration problem, not a structural dead end.
+
+Sweep artifact:
+- `/tmp/conditioned_runtime_sweep.jsonl`
+
+Key finding:
+- Lowering AST reconciliation `alpha` materially reduces high-AST overshoot while keeping Nembhard much higher than the unconditioned compatible branch.
+- `temperature` mattered less than `alpha` in this region.
+- Totals were effectively flat across the sweep on this branch.
+
+Useful points from the sweep (`temperature = 1.0`):
+- `alpha = 0.35`
+  - Nembhard AST: `6.15`
+  - AST overall mean diff: `-0.276`
+  - AST overall MAE: `0.898`
+  - AST `>= 7` mean diff: `+1.408`
+  - AST `>= 7` MAE: `1.841`
+  - total abs err: `4.171`
+- `alpha = 0.50`
+  - Nembhard AST: `6.22`
+  - AST overall mean diff: `-0.261`
+  - AST overall MAE: `0.915`
+  - AST `>= 7` mean diff: `+1.567`
+  - AST `>= 7` MAE: `1.979`
+  - total abs err: `4.171`
+- `alpha = 0.75`
+  - Nembhard AST: `6.41`
+  - AST overall mean diff: `-0.220`
+  - AST overall MAE: `0.962`
+  - AST `>= 7` mean diff: `+2.003`
+  - AST `>= 7` MAE: `2.361`
+  - total abs err: `4.171`
+
+Read:
+- Conditioned assist-share plus lower `alpha` is currently the strongest playmaker-specific direction.
+- It is strictly better than the original conditioned runtime setting.
+- It is still a tradeoff against the cleaner aggregate calibration of the unconditioned compatible branch.
+
+Current recommendation:
+- Keep the clean compatible reconciliation branch as the safest retained AST base.
+- Treat the conditioned compatible branch with lowered runtime `alpha` as the most promising next AST calibration path.
+- If this path is retained, the next step should be to formalize the lower-`alpha` behavior in-model rather than relying on ad hoc runtime overrides.
+
+### Trained conditioned follow-up with lower built-in reconciliation strength
+
+A direct continuation was trained from the conditioned compatible branch with the lower reconciliation setting baked into the model contract:
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_conditioned_rqs_a035_t100_20260328T120500Z`
+
+Recipe:
+- init from:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_conditioned_rqs_20260328T103500Z/checkpoint_stable.pt`
+- changed only:
+  - `assist_share_reconcile_alpha = 0.35`
+  - `assist_share_reconcile_temperature = 1.0`
+
+Training result:
+- `best_val_total = 7.0379`
+- better than the original conditioned branch:
+  - `7.1402`
+- still worse than the clean unconditioned compatible branch:
+  - `6.9505`
+
+Replay result:
+- Nembhard AST:
+  - `6.91 -> 7.57` vs the original conditioned branch
+- AST overall mean diff:
+  - `-0.113 -> -0.126`
+- AST overall MAE:
+  - `1.101 -> 0.810`
+- AST `>= 7` mean diff:
+  - `+3.085 -> +2.484`
+- AST `>= 7` MAE:
+  - `3.302 -> 2.511`
+- total abs err:
+  - `4.171 -> 3.672`
+
+Tradeoffs:
+- PTS overall mean diff worsened:
+  - `-0.851 -> -1.212`
+- REB overall bias flipped positive:
+  - `-0.807 -> +0.451`
+
+Interpretation:
+- Lower built-in reconciliation strength does improve the conditioned branch materially.
+- It does reduce the high-AST overshoot relative to the trained conditioned branch.
+- But it still pushes named playmakers too hard and introduces broader cross-stat drift.
+
+Updated recommendation:
+- The safest retained AST branch remains the clean unconditioned compatible reconciliation branch.
+- The conditioned branch is a useful high-playmaker mechanism, but it is not yet calibrated well enough to replace the unconditioned branch.
+- If work continues on AST, the next step should be narrower cross-stat stabilization on the conditioned branch rather than more raw AST pressure.
+
+### Follow-up experiments: simple gate and cross-stat stabilization
+
+Two immediate follow-ups were run after the conditioned `a035_t100` branch.
+
+#### 1. Simple gated AST routing between unconditioned and conditioned branches
+
+Research-only evaluation blended AST from:
+- base:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_rqs_20260328T093500Z`
+- conditioned:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_conditioned_rqs_a035_t100_20260328T120500Z`
+
+Artifact:
+- `/tmp/ast_gate_blend_eval.json`
+
+Gate variants tested:
+- `an_ast_line >= 6`
+- `an_ast_line >= 7`
+- `an_ast_line >= 6 and an_implied_minutes >= 24`
+- with/without `prior_play_prob >= 0.8`
+
+Result:
+- not useful in this simple form
+- all practical gates just replaced the same high-AST slice and preserved the overshoot
+
+Examples:
+- base unconditioned:
+  - Nembhard AST: `4.52`
+  - AST overall mean diff: `-0.029`
+  - AST `>= 7` mean diff: `+0.345`
+- full conditioned:
+  - Nembhard AST: `7.57`
+  - AST overall mean diff: `-0.126`
+  - AST `>= 7` mean diff: `+2.484`
+- `gate_ast7`:
+  - Nembhard AST: `7.57`
+  - AST overall mean diff: `+0.083`
+  - AST `>= 7` mean diff: `+2.484`
+
+Interpretation:
+- a naive threshold gate is not enough
+- the conditioned branch’s corrections are too concentrated in the exact same high-AST slice the gate selects
+- if gating is revisited later, it needs to be more selective than a simple AST-line threshold
+
+#### 2. Cross-stat stabilization via direct `PTS/TOV` auxiliary losses
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_conditioned_stabilized_20260328T123500Z`
+
+Changes from conditioned `a035_t100`:
+- `w_direct_pts_aux = 0.02`
+- `w_direct_tov_aux = 0.01`
+
+Training result:
+- `best_val_total = 7.2859`
+- worse than conditioned `a035_t100`:
+  - `7.0379`
+- worse than original conditioned:
+  - `7.1402`
+
+Interpretation:
+- this first stabilization attempt is a dead end
+- small direct `PTS/TOV` losses interfered with the conditioned AST branch rather than stabilizing it
+
+Updated next-step recommendation:
+- do not keep the simple threshold gate
+- do not keep the direct `PTS/TOV` stabilization branch
+- if iteration continues, the next stabilization attempt should be more targeted:
+  - either a learned/narrower gate
+  - or a coupling mechanism tied specifically to creator-role channels rather than generic direct stat auxiliaries
+
+### Follow-up experiment: flow-anchor stabilization against the safe unconditioned branch
+
+One additional stabilization branch was run after the failed direct `PTS/TOV` auxiliary attempt.
+
+Run:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_conditioned_flowanchor_20260328T130500Z`
+
+Setup:
+- student branch:
+  - conditioned compatible reconciliation with baked-in lower strength
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_conditioned_rqs_a035_t100_20260328T120500Z`
+- frozen teacher branch:
+  - clean unconditioned compatible reconciliation
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_rqs_20260328T093500Z`
+- new loss:
+  - `w_flow_anchor_nonast_aux = 0.01`
+  - anchor only non-AST emergent flow channels to the teacher
+  - AST remains free to move
+
+Training result:
+- `best_val_total = 7.0613`
+- slightly worse than the conditioned `a035_t100` student:
+  - `7.0379`
+- still better than the original conditioned branch:
+  - `7.1402`
+
+Live-slate replay vs the retained comparison branches:
+
+Unconditioned compatible:
+- Nembhard AST: `4.52`
+- AST overall mean diff: `-0.029`
+- AST overall MAE: `1.307`
+- AST `>= 7` mean diff: `+0.345`
+- AST `>= 7` MAE: `1.711`
+- PTS overall mean diff: `-1.063`
+- REB overall mean diff: `-0.019`
+- total abs err: `3.851`
+
+Conditioned `a035_t100`:
+- Nembhard AST: `7.57`
+- AST overall mean diff: `-0.126`
+- AST overall MAE: `0.810`
+- AST `>= 7` mean diff: `+2.484`
+- AST `>= 7` MAE: `2.511`
+- PTS overall mean diff: `-1.212`
+- REB overall mean diff: `+0.451`
+- total abs err: `3.672`
+
+Flow-anchor:
+- Nembhard AST: `7.52`
+- AST overall mean diff: `-0.040`
+- AST overall MAE: `0.859`
+- AST `>= 7` mean diff: `+2.795`
+- AST `>= 7` MAE: `2.837`
+- PTS overall mean diff: `-1.122`
+- REB overall mean diff: `+0.176`
+- total abs err: `3.705`
+
+Interpretation:
+- the non-AST teacher anchor did reduce some of the conditioned branch’s cross-stat drift
+  - PTS bias improved vs conditioned
+  - REB bias improved materially vs conditioned
+- but it did not solve the core high-AST overshoot
+- it also did not beat the conditioned branch on totals
+
+Current read:
+- the flow-anchor idea is directionally useful for stabilizing nearby channels
+- at this weight and formulation, it is not enough to retain as the new AST base
+- the retained AST ordering stays:
+  1. unconditioned compatible reconciliation as the safe base
+  2. conditioned `a035_t100` as the stronger playmaker mechanism
+  3. flow-anchor as an informative but not yet retained stabilization variant
+
+Recommended next step:
+- if AST work continues, keep the conditioned mechanism but make stabilization more creator-specific
+- generic non-AST anchoring helped, but not enough to fix the high-AST slice
+
+### Follow-up experiment: creator-specific reconciliation alpha
+
+Two runtime-only creator-alpha variants were tested after the flow-anchor branch:
+
+1. absolute creator alpha
+2. team-relative creator alpha
+
+Implementation path:
+- [sample_worlds_v2.py](/home/daniel/projects/projections-v2/projections/rotation/sample_worlds_v2.py)
+
+Result:
+- both variants were effectively no-ops in replay
+- conditioned branch outputs were unchanged to numerical noise
+
+Conditioned base:
+- Nembhard AST: `7.57`
+- AST overall MAE: `0.810`
+- AST `>= 7` mean diff: `+2.484`
+- total abs err: `3.672`
+
+Absolute creator alpha variants:
+- no meaningful change
+
+Team-relative creator alpha variants:
+- no meaningful change
+
+Interpretation:
+- the remaining problem is probably not within-team passer selection
+- the conditioned branch already has enough creator concentration
+- the remaining overshoot is more likely driven by:
+  - team AST budget magnitude
+  - or how AST reallocation interacts with nearby creator channels
+
+Updated next-step recommendation:
+- stop spending cycles on share-selectivity gating
+- move the next AST experiments to:
+  1. team AST budget calibration / cap on the conditioned branch
+  2. AST/TOV or creator-channel coupling
+
+### 60-day validation backtest: AST broad slice check before more architecture work
+
+Before continuing AST architecture work, a full 60-day validation backtest was run on the latest retained AST branches.
+
+Artifact root:
+- `/home/daniel/projections-data/training/runs/ast_60d_eval_20260328T144241Z`
+
+Compared branches:
+- safe unconditioned AST branch:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_rqs_20260328T093500Z`
+- stronger conditioned AST branch:
+  - `/home/daniel/projections-data/training/runs/gtv2_flow_v2_astreconcile_compatible_conditioned_rqs_a035_t100_20260328T120500Z`
+
+Backtest scope:
+- 60 validation dates:
+  - `2025-12-09` through `2026-02-11`
+- `4,989` AST prop-bearing player-games
+- `206` high-AST player-games with `an_ast_line >= 7`
+- `25` distinct high-AST players
+
+Market baseline on `AST >= 7`:
+- line mean: `8.16`
+- actual mean: `7.53`
+- line minus actual: `+0.63`
+- line MAE vs actual: `2.96`
+
+This is important because it means the market itself was already high on the broad high-AST slice.
+
+Unconditioned compatible branch:
+- overall:
+  - pred mean: `3.35`
+  - actual mean: `2.86`
+  - pred minus actual: `+0.49`
+  - pred MAE vs actual: `1.89`
+  - market MAE vs actual: `1.56`
+- `AST >= 7`:
+  - pred mean: `8.88`
+  - line mean: `8.16`
+  - actual mean: `7.53`
+  - pred minus line: `+0.72`
+  - pred minus actual: `+1.35`
+  - pred MAE vs actual: `3.46`
+  - market MAE vs actual: `2.96`
+  - over-line rate: `55.8%`
+  - over-actual rate: `61.7%`
+
+Conditioned branch:
+- overall:
+  - pred mean: `3.28`
+  - actual mean: `2.86`
+  - pred minus actual: `+0.42`
+  - pred MAE vs actual: `1.58`
+  - market MAE vs actual: `1.56`
+- `AST >= 7`:
+  - pred mean: `10.59`
+  - line mean: `8.16`
+  - actual mean: `7.53`
+  - pred minus line: `+2.43`
+  - pred minus actual: `+3.06`
+  - pred MAE vs actual: `3.80`
+  - over-line rate: `89.8%`
+  - over-actual rate: `81.6%`
+
+Implication:
+- the single-slate Nembhard miss was real
+- but it was not representative of the broad 60-day high-AST population
+- there is **not** a broad high-AST underprediction problem that justifies more global AST lift
+- the conditioned branch is materially overcorrecting on the exact slice it was meant to fix
+
+Updated AST conclusion:
+- stop broad AST escalation
+- retain the unconditioned compatible reconciliation branch as the AST base
+- treat the residual misses as a small-archetype problem rather than a broad-slice problem
+- if AST work resumes later, it should start from player/archetype analysis or feature/context work, not more general AST-head iteration
+
+Examples of the residual underpredicted high-AST names on the unconditioned branch:
+- Ja Morant
+- Davion Mitchell
+- Isaiah Collier
+- Jamal Shead
+- Andrew Nembhard
+- James Harden
+
+That pattern is much more consistent with a selective creator-archetype or short-window context issue than a universal AST factorization failure.
+
+### Methodological takeaway for REB work
+
+The AST line established an important process rule for the next stat-family iteration:
+
+- do **not** start REB work by building heads or factorization branches
+- start with the same 60-day broad-slice validation first
+
+Recommended REB workflow:
+1. run the existing multi-slate harness on the retained unconditioned branch
+2. measure:
+   - overall REB vs actual and vs line
+   - high-REB slice, likely `an_reb_line >= 10`
+   - whether misses are broad or concentrated in a small archetype set
+3. only if the high-REB slice is systematically wrong in aggregate should we move to REB-specific factorization
+
+Working hypothesis:
+- REB may be more tractable than AST because it has a cleaner generative structure:
+  - team rebound opportunity budget
+  - player rebound share within that budget
+- but AST showed clearly that a single-slate named-player miss is not enough reason to start architecture work
+
+So the next retained direction is:
+- move on from AST for now
+- begin REB with a 60-day broad-slice backtest first
+
+### REB status update (2026-03-28, after first REB factorization loop)
+
+The 60-day REB baseline did justify dedicated REB work.
+
+Observed broad pattern:
+- high-REB players were materially undercalled
+- team rebounds were too high at the same time
+- predicted team DREB had almost no dependence on opponent missed FGs
+
+That combination is most consistent with missing factorization:
+- team rebound opportunity budget
+- player rebound share inside that budget
+
+What the first REB iteration established:
+
+1. `DREB` should be treated separately from `OREB`.
+2. Explicit DREB opportunity coupling is directionally correct.
+3. Direct `dreb_rate` replacement is too strong unless blended back toward flow.
+4. Learned rebound budget blend gates did not beat the simpler fixed-blend branch on the
+   actual high-REB slice, even when they improved DREB structure metrics.
+
+Updated next-step recommendation:
+- do **not** continue spending cycles on learned budget-gate tuning
+- do **not** rely on a learned DREB budget head as the main path
+- make team `DREB` deterministic from the sampled environment:
+  - `team_dreb_budget ~= opp_missed_fg - opp_oreb`
+  - keep `OREB` on the existing flow path for now
+  - use the learned rebound-share head only for `DREB` player allocation
+
+Reason:
+- the flow DREB prior is structurally wrong, not just slightly miscalibrated
+- residual corrections still spend capacity undoing that wrong base instead of learning the
+  player split inside a mechanically-correct opportunity budget
+
+### REB status update (2026-03-28, deterministic DREB replay)
+
+The first deterministic `DREB` branch was informative but not promotable.
+
+What improved:
+- `pred team dreb vs opp missed FG corr` moved to `0.717`, finally above the realized
+  `0.610` coupling target
+- total REB vs missed-FG structure also moved into a reasonable range
+
+What broke:
+- team REB mean jumped to `52.53` vs actual `44.07` (`+8.46` bias)
+- predicted mean `DREB` capture rate landed at `0.754` vs actual `0.688`
+- high-REB slice remained undercalled (`8.46` predicted vs `10.41` actual, `MAE 3.78`)
+
+Interpretation:
+- using `team_dreb_budget = opp_missed_fg - opp_oreb` directly is too hard a constraint
+- it effectively assumes nearly every missed FG becomes a player rebound
+- the next branch should keep deterministic environment coupling, but add an explicit
+  player-rebound capture slack term or capture prior before allocating DREB to players
+
+### REB status update (2026-03-28, discounted deterministic DREB)
+
+The dead-ball / non-player rebound correction worked exactly as intended.
+
+Empirical calibration:
+- train-set weighted player `DREB / (opp_missed_fg - opp_oreb)` = `0.9054`
+- train-set unweighted mean = `0.9078`
+
+Using that fixed scalar inside the deterministic DREB budget path:
+- brought predicted mean `DREB` capture to `0.681` vs actual `0.688`
+- preserved strong structural coupling:
+  - `pred team dreb vs opp missed FG corr = 0.693`
+- improved broad team-level REB metrics substantially
+  - base discounted train replay: team REB bias `+4.76`, team REB MAE `6.93`
+  - eval-only `share_alpha=1.0`: team REB bias `+4.31`, team REB MAE `6.68`
+
+Updated conclusion:
+- the team DREB budget problem is now mostly solved by
+  `0.9054 * (opp_missed_fg - opp_oreb)`
+- the remaining miss is player-share concentration at the high-REB tail, not environment
+  coupling
+
+### REB status update (2026-03-28, conditioned DREB share branch)
+
+The first conditioned rebound-share branch validated the next-step diagnosis.
+
+Architecture change:
+- rebound-share head now receives explicit conditioning on
+  `an_reb_line`, `an_implied_minutes`, `prior_play_prob`, and
+  `started_proxy_rate_prior_20`
+- deterministic discounted DREB budget remained fixed
+
+Replay result:
+- overall REB MAE improved to `2.056`
+- high-REB (`line >= 10`) MAE improved to `3.393`
+- high-REB bias improved to `-1.462`
+- high-line over-rate improved to `4.7%`
+- team REB stayed stable:
+  - bias `+4.77`
+  - MAE `6.96`
+- DREB structure stayed strong:
+  - `pred team dreb vs opp missed FG corr = 0.704`
+
+Mechanism confirmation:
+- high-line players' mean predicted DREB share moved from `0.183` to `0.216`
+  against actual `0.221`
+- mean high-line DREB-share gap shrank from `-0.039` to `-0.005`
+
+Interpretation:
+- the share-compression diagnosis was correct
+- explicit rebound-share conditioning is a better next lever than further DREB budget work
+
+### REB status update (2026-03-28, OREB share reconcile on flow team budget)
+
+The conditioned `DREB` branch isolated the next failure cleanly: the remaining high-end miss
+was now mostly `OREB`.
+
+Diagnostic before the new branch:
+- on the `line >= 10` slice:
+  - predicted `DREB = 6.94` vs actual `7.46`
+  - predicted `OREB = 1.93` vs actual `2.95`
+- high-line share gaps were:
+  - `DREB share gap = -0.015`
+  - `OREB share gap = -0.089`
+- the cause was architectural:
+  - the branch still used `rebound_factor_reconcile_mode=dreb_only`
+  - so `DREB` was factorized, but `OREB` was still coming from the old flow allocation path
+
+Architecture change:
+- added `rebound_oreb_reconcile_use_flow_budget`
+- when enabled, `OREB` reconciliation keeps the existing team `OREB` total and only
+  redistributes that budget via the rebound-share head
+- this isolates player `OREB` allocation without asking a separate `OREB` budget head to
+  relearn team totals
+
+Validation:
+- eval-only activation was worse, which confirmed the current checkpoint had not learned the
+  `OREB` share path under inference-time use
+- retraining the same conditioned-share branch with:
+  - discounted deterministic `DREB`
+  - `rebound_factor_reconcile_mode=both`
+  - `rebound_oreb_reconcile_use_flow_budget=true`
+  produced the best REB replay so far
+
+Replay result:
+- overall REB MAE improved to `2.005`
+- overall REB corr improved to `0.665`
+- high-REB (`line >= 10`) mean improved to `10.15` vs actual `10.41`
+- high-REB bias improved to `-0.266`
+- high-REB MAE improved to `3.103`
+- high-line over-rate improved to `33.7%`
+- team REB improved too:
+  - bias `+4.00`
+  - MAE `6.53`
+- `DREB` structure remained strong:
+  - `pred team dreb vs opp missed FG corr = 0.697`
+
+Mechanism confirmation:
+- the gain came almost entirely from fixing `OREB` allocation
+  - predicted high-line `OREB` moved from `1.93` to `3.14` vs actual `2.95`
+  - high-line `OREB` share gap moved from `-0.089` to `+0.008`
+- `DREB` stayed broadly intact
+  - predicted high-line `DREB = 6.91` vs actual `7.46`
+  - high-line `DREB` share gap stayed near flat at `-0.014`
+
+Updated conclusion:
+- the leading REB branch is now:
+  - discounted deterministic `DREB` budget
+  - conditioned rebound-share head
+  - `DREB` reconcile to deterministic budget
+  - `OREB` reconcile to the existing team `OREB` total
+- further REB iteration should now be scoped as:
+  - optional `OREB` budget refinement
+  - or final calibration / retention decision against the broader GTv2 bundle
+
+### Team-split status update (2026-03-28, market-implied opportunity reconcile)
+
+We tested the next softer team-differentiation branch as an eval-only config
+perturbation on the current live checkpoint:
+
+- artifact:
+  `/home/daniel/projections-data/training/runs/gtv2_market_team_opp_60day_eval_20260328T2232Z/summary.csv`
+- comparison:
+  `/home/daniel/projections-data/training/runs/gtv2_market_team_opp_60day_eval_20260328T2232Z/compare_vs_baseline.csv`
+
+Branch definition:
+- keep the current model weights
+- set
+  `team_opportunity_budget_parameterization=market_implied_share`
+- reconcile side-specific `FGA` and `FTA` totals toward market-implied
+  home/away share
+- do not directly anchor team points
+- sweep `alpha={0.25, 0.40, 0.50, 0.60}`
+
+Best broad setting was `alpha=0.50`:
+- `spread_mae_vs_vegas = 2.54` vs `5.46` baseline
+- `spread_corr_vs_vegas = 0.925` vs `0.338`
+- `total_mae_vs_vegas = 4.51` vs `4.53`
+- `pts_mae_team = 9.75` vs `9.86`
+- `pts_mae_player = 3.388` vs `3.389`
+- `dk_fpts_mae = 5.600` vs `5.601`
+
+Interpretation:
+- this validates the core diagnosis that a side-specific operative opportunity
+  split can recover favorite/underdog differentiation without the heavy broad
+  regression caused by direct team-points anchoring
+- but the current post-hoc reconcile point is still wrong in the generator
+
+Failure mode:
+- possession symmetry breaks after reconcile
+- `poss_sym_abs_p95` jumps from `0.323` baseline to `10.54` at `alpha=0.50`
+- world diagnostics show large home/away possession deltas, which are not
+  acceptable for a basketball generator
+
+Updated conclusion:
+- market-implied opportunity split is a better modeling direction than direct
+  team-points budget anchor
+- but it should not be implemented as a post-hoc side `FGA/FTA` rescale after
+  the possession process is already sampled
+- the next branch should introduce an explicit side-specific possession /
+  opportunity budget latent earlier in the generator so spread can move while
+  home-away possession symmetry stays intact
+
+### Team-split status update (2026-03-28, early-chain opportunity context)
+
+We tested the first earlier-chain implementation by encoding market-implied
+home/away opportunity share into `backbone_team_states` before
+`TeamEventBackbone`.
+
+New config path:
+- `team_opportunity_budget_to_backbone`
+- `team_opportunity_budget_backbone_alpha`
+
+Short warm-start probes:
+- encoder-only:
+  `/home/daniel/projections-data/training/runs/gtv2_team_opp_backbone_enconly_20260328T2248Z`
+- encoder plus `event_backbone` and `three_pa_share_head`:
+  `/home/daniel/projections-data/training/runs/gtv2_team_opp_backbone_eventprobe_20260328T2250Z`
+
+Result:
+- baseline live lineage: `best_val_total = 11.33`
+- encoder-only probe: `best_val_total = 12.79`
+- event-backbone probe: `best_val_total = 12.80`
+
+Interpretation:
+- moving the signal earlier is still the correct structural idea
+- but an additive context encoder on top of the current backbone is not enough
+- the next viable design is a real side-specific possession / opportunity latent
+  that changes how team event budgets are generated, rather than nudging the
+  existing shared-process backbone with side context
+
+### Team-split status update (2026-03-28, side-specific possession split scaffold)
+
+We started the next true earlier-chain branch:
+
+- possession head optionally emits side-specific `(home_poss, away_poss)`
+- `TeamEventBackbone` now accepts either a shared possession scalar or a
+  side-specific possession tensor
+- trainer supports direct per-team possession supervision from
+  `compute_possession_truth_per_team(...)`
+
+Smoke runs:
+- frozen-possession smoke:
+  `/home/daniel/projections-data/training/runs/gtv2_team_possession_split_smoke_20260328T2310Z`
+  - `best_val_total = 17.66`
+- trainable possession/backbone smoke:
+  `/home/daniel/projections-data/training/runs/gtv2_team_possession_split_smoke2_20260328T2313Z`
+  - `best_val_total = 12.70`
+
+Interpretation:
+- the new branch is now mechanically viable and trains end-to-end
+- the branch is not ready to judge from smoke results yet
+- the next meaningful read should be a short warm-start probe with the
+  possession head and event backbone trainable over multiple epochs
+
+6-epoch warm-start probe:
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_team_possession_split_probe_20260328T2317Z`
+- trainable modules:
+  - `possession_head`
+  - `event_backbone`
+  - `three_pa_share_head`
+- rest of the current live lineage frozen
+
+Result:
+- best epoch: `1`
+- best `val_total = 12.70`
+- validation then worsened monotonically through epoch 6
+
+Updated conclusion:
+- the side-specific possession split branch is structurally aligned with the
+  desired modeling direction
+- but the current first formulation is not yet stable enough to justify a
+  60-game alignment evaluation
+- next work should focus on stabilizing this branch before any promotion-style
+  replay
+
+Stabilization follow-ups:
+- possession-head-only:
+  `/home/daniel/projections-data/training/runs/gtv2_team_possession_split_possonly_20260328T2322Z`
+  - `team_possession_max_delta = 4.0`
+  - `w_team_possession_aux = 1.0`
+  - `lr = 1e-4`
+  - best `val_total = 14.05`
+- possession + event backbone:
+  `/home/daniel/projections-data/training/runs/gtv2_team_possession_split_eventstable_20260328T2324Z`
+  - same settings
+  - best `val_total = 14.08`
+
+Interpretation:
+- simple stabilization sweeps do not recover the branch
+- this suggests the issue is parameterization, not just learning rate or loss
+  weight
+
+### Team-split status update (2026-03-28, efficiency market-context probe)
+
+We also tested a lighter branch that keeps possessions shared and tries to push
+team asymmetry through the efficiency path instead:
+
+- add market-implied home/away context to the efficiency head via
+  `efficiency_market_context`
+- supervise side-specific team PPP with `w_team_efficiency_ppp_aux`
+
+First warm-start probe:
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_efficiency_market_probe_20260328T234741Z`
+- trainable modules:
+  - `efficiency_head`
+  - `efficiency_team_market_encoder`
+- result:
+  - `best_val_total = 11.3328`, essentially flat to the live lineage
+  - `val_team_efficiency_ppp_aux = 0.0` across the run
+
+We then fixed a trainer bug where the new PPP aux was computed and then
+overwritten back to zero before total-loss aggregation, and reran the same
+probe:
+
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_efficiency_market_probe_fix_20260328T235043Z`
+- result:
+  - `best_val_total = 11.7010`
+  - `val_team_efficiency_ppp_aux = 0.0` across the run even after the reset bug
+    was removed
+
+Interpretation:
+- this branch is not operative in the way we need
+- supervising team PPP on top of true observed attempts is effectively
+  redundant with the existing per-player efficiency fit
+- so the efficiency-market encoder perturbs a trained efficiency head, but does
+  not introduce meaningful team-split signal into the generator
+
+Updated conclusion:
+- if side-specific efficiency is revisited, it should be modeled as an
+  **emergent team PPP / points latent** earlier in the chain, not as an aux on
+  a downstream player make-rate head
+- the current efficiency-head-only market-context path should be treated as a
+  closed branch
+
+### Team-split status update (2026-03-29, learned team PPP latent)
+
+We tested the next more-direct branch: a dedicated `team_ppp` head supervised on
+observed team PPP, with its latent injected into the backbone and efficiency
+paths before event generation.
+
+New config path:
+- `enable_team_ppp_head`
+- `team_ppp_to_backbone`
+- `team_ppp_to_efficiency`
+- `w_team_ppp_aux`
+
+Probe 1, PPP head + encoders only:
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_team_ppp_probe_fix_20260329T002013Z`
+- trainable modules:
+  - `team_ppp_head`
+  - `backbone_team_ppp_encoder`
+  - `efficiency_team_ppp_encoder`
+- result:
+  - `best_val_total = 11.7208`
+  - `val_team_ppp_aux` is active and non-zero (`~0.39` to `0.44`)
+
+Probe 2, with downstream event/scoring path partially unfrozen:
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_team_ppp_eventprobe_20260329T002128Z`
+- additional trainable modules:
+  - `event_backbone`
+  - `efficiency_head`
+  - `three_pa_share_head`
+- result:
+  - `best_val_total = 11.7350`
+  - `val_team_ppp_aux` remains non-zero (`~0.39` to `0.44`)
+
+Interpretation:
+- unlike the earlier efficiency-market probe, this branch does learn the new PPP
+  target
+- but broad validation still regresses versus the live lineage (`11.33`)
+- this suggests that additive PPP latent injection is still too indirect; the
+  learned split does not yet become an operative enough budget inside generation
+
+Updated conclusion:
+- a supervised team PPP latent is directionally cleaner than the earlier
+  efficiency-market context branch, but it is still not the next retained model
+- the next iteration should convert team split into a more operative
+  budget/rate mechanism inside generation, not another latent-only perturbation
+
+We then made the learned PPP split more operative by passing the derived
+per-team PPP context directly into the team event backbone and 3PA-share path:
+
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_team_ppp_directctx_eventprobe_fix_20260329T003002Z`
+- change:
+  - direct `(own_ppp, opp_ppp, gap, abs_gap)` context into
+    `TeamEventBackbone` and `ThreePAShareHead`
+- result:
+  - `best_val_total = 11.5594`
+  - `best_epoch = 2`
+  - `val_team_ppp_aux` stayed active (`~0.39` to `0.43`)
+- read:
+  - this is the strongest team-PPP branch so far
+  - it improved materially on additive latent injection, but still did not beat
+    the live lineage (`11.3327`)
+
+We also tested pushing the same direct PPP context into the efficiency head:
+
+- run:
+  `/home/daniel/projects/projections-v2/data/training/runs/game_transformer_v2_20260329T003745Z`
+- result:
+  - `best_val_total = 13.4565`
+  - `best_epoch = 1`
+  - broad validation deteriorated steadily after the first epoch
+- read:
+  - direct team-PPP conditioning inside the efficiency head is a clear
+    regression in the current form
+  - the useful leverage is in the event-generation path, not in trying to force
+    the same split through player make-rate estimation
+
+Refined conclusion:
+- keep team split operative in the generator, not as a late latent
+- retain the finding that direct backbone context helps
+- drop the direct-efficiency-context branch
+- the next branch should be a harder team budget/rate mechanism rather than
+  broader PPP latent conditioning
+
+We also tested a softer generator-side bridge from learned PPP into scoring:
+derive a team points budget as `pred_team_ppp * pred_possessions`, then use the
+existing points reconcile path with partial alpha.
+
+- run:
+  `/home/daniel/projects/projections-v2/data/training/runs/game_transformer_v2_20260329T004527Z`
+- config:
+  - `team_points_budget_parameterization = team_ppp_implied`
+  - `team_points_reconcile_budget = true`
+  - `team_points_reconcile_alpha = 0.35`
+- result:
+  - `best_val_total = 13.4820`
+  - `best_epoch = 1`
+  - broad validation worsened monotonically after the first epoch
+
+Interpretation:
+- even when the scoring budget comes from a learned PPP head rather than direct
+  market totals, post-flow points reconcile is still too late and too
+  destabilizing
+- this reinforces the earlier market-points result: direct scoring-budget
+  anchoring is not the path forward
+
+Updated boundary:
+- do not continue iterating on points-budget reconcile branches here
+- the remaining credible work is earlier team event generation, not player-level
+  scoring reconciliation
+
+We also ran a quick decomposition on the training labels to localize what
+actually drives game margin. Correlations of per-game team differentials with
+point margin were:
+
+- `eFG differential`: `0.8137`
+- `DREB differential`: `0.6095`
+- `TOV differential`: `-0.3377`
+- `FGA differential`: `0.1448`
+- `FTA differential`: `0.0943`
+- `OREB differential`: `0.0438`
+
+A simple standardized OLS decomposition pointed to:
+
+- `eFG`: `1.0102`
+- `FGA`: `0.5765`
+- `FTA`: `0.3996`
+
+That means the margin problem is primarily a shot-quality problem, with shot
+volume / free throws secondary.
+
+We still tested a world-advantage latent inside the backbone:
+
+- run:
+  `/home/daniel/projects/projections-v2/data/training/runs/game_transformer_v2_20260329T010755Z`
+- change:
+  - add a sampled `team_advantage` head
+  - project it antisymmetrically into `TeamEventBackbone` rate logits and
+    `ThreePAShareHead` logits
+  - supervise the latent mean on true team point margin
+- result:
+  - `best_val_total = 14.4014`
+  - `best_epoch = 1`
+  - the latent aux was live, but broad validation regressed badly
+
+Interpretation:
+- a backbone-only world-advantage latent is not enough
+- the event side can absorb some team split, but the dominant missing variable
+  is still scoring quality
+- the next credible branch is an operative scoring-rate / make-rate bias
+  mechanism, not more event-side latent or points-budget reconcile work
+
+We then extended the shared feature pipeline with the first shooting-match
+priors:
+
+- player shooting priors:
+  - `fg2_pct_prior_*`, `fg3_pct_prior_*`, `ft_pct_prior_*`,
+    `efg_pct_prior_*`
+  - `fg2a_per_min_prior_*`, `fg3a_per_min_prior_*`,
+    `fta_per_min_prior_*`, `three_pa_share_prior_*`
+- opponent defensive allowance priors:
+  - `opp_fg2_pct_allowed_prior_*`, `opp_fg3_pct_allowed_prior_*`,
+    `opp_fta_rate_allowed_prior_*`, `opp_efg_pct_allowed_prior_*`,
+    `opp_three_pa_share_allowed_prior_*`
+
+Implementation landed in:
+
+- `scripts/rotation/build_rotation_priors_v1.py`
+- `projections/rotation/rotation_set_minutes_features_v1.py`
+- `projections/rotation/live_features_v1.py`
+
+Rebuilt datasets:
+
+- `/home/daniel/projections-data/training/datasets/rotation_train_v1_shootmatch_20260329T014610Z`
+- `/home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_shootmatch_20260329T014610Z`
+
+First GTv2 probe on the rebuilt dataset:
+
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_shootmatch_probe2_20260329T020051Z`
+- result:
+  - `best_val_total = 11.9214`
+  - retained live lineage reference stays about `11.3327`
+
+Important interpretation:
+
+- this was not a clean feature-value read
+- feeding the new priors through the generic feature stack widened
+  `player_proj` and the flow conditioner inputs
+- warm-start therefore skipped `85` shape-mismatched keys, so a substantial
+  part of the flow-conditioning path was reinitialized
+
+Updated boundary on retraining:
+
+- do **not** jump directly to a blind full retrain just because the widened
+  feature stack broke warm-start compatibility
+- a full retrain would remove the shape-mismatch issue, but it would also
+  confound:
+  - the value of the new shooting/matchup priors
+  - the broader question of whether a scratch run on the current architecture
+    can recover retained warm-start quality
+- current GTv2 evidence still suggests staged warm-start lineages are safer
+  than scratch retrains on broad validation
+
+Recommended next branch:
+
+- keep the rebuilt `shootmatch` datasets
+- add a dedicated efficiency-side residual / sidecar path for the new shooting
+  and opponent-allowance priors
+- keep that path off the generic `player_proj` / flow-conditioner stack so the
+  retained warm-start remains clean
+- only consider a full retrain after that sidecar path proves incremental value
+
+We then implemented the first dedicated efficiency-side sidecar path for those
+features.
+
+Implementation summary:
+
+- the game-level dataset path now emits a separate
+  `efficiency_sidecar_features` tensor
+- GTv2 now has an `efficiency_player_sidecar_encoder` that only perturbs the
+  efficiency branch
+- trainer now supports:
+  - `--efficiency-sidecar-feature-cols`
+  - `--feature-columns-json` to lock the generic player feature contract to a
+    retained bundle instead of re-inferring from the rebuilt dataset
+
+This is the intended “clean test” architecture:
+- new shooting/matchup priors do not touch `player_proj`
+- the main feature stack stays on the retained contract
+- only the efficiency path sees the new sidecar inputs
+
+First clean-contract probe:
+
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_shootmatch_sidecar_probe3_20260329T022417Z`
+- dataset:
+  `/home/daniel/projections-data/training/datasets/joint_rotation_rates_v1_shootmatch_20260329T014610Z`
+- retained feature contract source:
+  `/home/daniel/projections-data/artifacts/game_transformer_v2/bundles/reb_mtfanneal_live_20260328/config.json`
+- result:
+  - `best_val_total = 14.3401`
+  - materially worse than the retained live lineage (`~11.3327`)
+
+Interpretation:
+
+- this is cleaner than the earlier generic-stack probe because `player_proj`
+  no longer mismatches
+- but it is still not a perfect same-branch replay:
+  - warm-start still skipped `84` flow-conditioner tensors
+- so the sidecar probe is informative, but not yet a final verdict on the
+  feature family
+
+Updated boundary:
+
+- the first sidecar branch is not a keeper
+- do **not** treat it as evidence that a blind full retrain is now the better
+  move
+- if this line continues, the next requirement is an exact-config replay of the
+  retained live branch with only the sidecar encoder added, so the remaining
+  flow-conditioner mismatch is removed before feature-family conclusions are
+  made
+
+We then ran that exact-config replay by matching the retained live branch on:
+
+- `flow_target_schema = v2`
+- `flow_coupling_type = rqs`
+- exact retained generic `feature_columns` via `--feature-columns-json`
+
+Clean replay result:
+
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_shootmatch_sidecar_probe4_20260329T022835Z`
+- warm-start:
+  - only missing keys were the 6 new sidecar encoder tensors
+  - no `player_proj` mismatch
+  - no flow-conditioner mismatch
+- validation:
+  - `best_val_total = 11.8556`
+
+Interpretation:
+
+- this is the first fair read on the shooting-match sidecar idea
+- it is materially better than the earlier broken probes
+- but it still underperforms the retained live lineage (`~11.3327`)
+
+We also tested the scratch/full-retrain version of the same branch:
+
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_shootmatch_sidecar_scratch_20260329T022947Z`
+- result:
+  - phase-2 instability rollback in epoch 1
+  - no usable validation checkpoint
+
+Updated boundary on scratch retraining:
+
+- a full retrain is not prohibitively expensive, but it is also not “free” in
+  modeling terms
+- on this branch, warm-start is materially more stable than scratch
+- so scratch should be treated as a separate experiment, not as a harmless
+  replacement for a clean warm-start sidecar read
+
+We then tested the next refinement of the same clean sidecar branch: add
+engineered offense-vs-defense interaction deltas while keeping the retained
+generic feature contract fixed.
+
+Implementation summary:
+
+- trainer now supports `--efficiency-sidecar-add-interactions`
+- it derives matchup-delta sidecar inputs such as:
+  - `fg2_pct_matchup_delta_*`
+  - `fg3_pct_matchup_delta_*`
+  - `efg_pct_matchup_delta_*`
+  - `fta_rate_matchup_delta_*`
+  - `three_pa_share_matchup_delta_*`
+  - `team_off_vs_opp_def_delta`
+- these deltas are routed only through the efficiency sidecar encoder
+
+Clean interaction-sidecar replay:
+
+- run:
+  `/home/daniel/projections-data/training/runs/gtv2_shootmatch_sidecar_interactions_20260329T024134Z`
+- warm-start:
+  - only the 6 sidecar encoder tensors were missing
+  - no `player_proj` mismatch
+  - no flow-conditioner mismatch
+- validation:
+  - `best_val_total = 11.8546`
+
+Interpretation:
+
+- this is effectively unchanged from the prior clean sidecar replay
+  (`11.8556 -> 11.8546`)
+- engineered matchup deltas do not materially change the branch outcome
+- so the current boundary is sharper:
+  - `shootmatch` priors plus simple engineered deltas through a small
+    efficiency sidecar are not enough to beat the retained live lineage
+  - if this research line continues, it should move toward a more operative
+    team shot-quality / efficiency residual mechanism, not more small sidecar
+    input tweaks
