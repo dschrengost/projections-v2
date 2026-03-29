@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,30 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
+from projections.rotation.assist_heads import (
+    AstBlendGateHead,
+    AstBlendGateHeadOutputs,
+    AssistShareHead,
+    AssistShareHeadOutputs,
+    TeamAstBudgetHead,
+    TeamAstBudgetHeadOutputs,
+)
+from projections.rotation.rebound_heads import (
+    ReboundBudgetBlendGateHead,
+    ReboundBudgetBlendGateHeadOutputs,
+    ReboundShareHead,
+    ReboundShareHeadOutputs,
+    TeamReboundBudgetHead,
+    TeamReboundBudgetHeadOutputs,
+)
+from projections.rotation.team_budget_heads import (
+    TeamAdvantageHead,
+    TeamAdvantageHeadOutputs,
+    TeamPPPHead,
+    TeamPPPHeadOutputs,
+    TeamPointsBudgetHead,
+    TeamPointsBudgetHeadOutputs,
+)
 from projections.rotation.joint_active_set import JointActiveSetHead, JointActiveSetOutputs
 from projections.rotation.efficiency_head import EfficiencyHead, EfficiencyHeadOutputs
 from projections.rotation.joint_game_flow import JointGameFlow, JointGameFlowOutputs
@@ -323,6 +347,9 @@ class GameTransformerV2Config:
     feature_std: list[float]
     game_feature_columns: list[str]
     team_feature_columns: list[str]
+    efficiency_sidecar_feature_columns: list[str] = field(default_factory=list)
+    efficiency_sidecar_feature_mean: list[float] = field(default_factory=list)
+    efficiency_sidecar_feature_std: list[float] = field(default_factory=list)
     d_model: int = 192
     hidden_dim: int = 256
     num_layers: int = 4
@@ -334,6 +361,16 @@ class GameTransformerV2Config:
     active_threshold_minutes: float = 4.0
     total_minutes_per_team: float = 240.0
     max_minutes_per_player: float = 48.0
+    enable_minutes_hurdle_head: bool = False
+    minutes_hurdle_hidden: int = 64
+    minutes_hurdle_sigma_floor: float = 0.5
+    enable_minutes_role_head: bool = False
+    minutes_role_use_context_for_preferences: bool = True
+    minutes_role_hidden: int = 64
+    minutes_role_embedding_dim: int = 32
+    minutes_role_num_classes: int = 5
+    enable_starter_promotion_head: bool = False
+    starter_promotion_hidden_dim: int = 64
     flow_coupling_type: str = "affine"
     flow_num_blocks: int = 4
     flow_scale_clip: float = 3.0  # H1 fix: increased from 2.0 to reduce star under-projection
@@ -355,16 +392,83 @@ class GameTransformerV2Config:
     efficiency_fg2_prior_strength: float = 8.0
     efficiency_fg3_prior_mean: float = 0.36
     efficiency_fg3_prior_strength: float = 8.0
+    efficiency_market_context: bool = False
+    efficiency_market_hidden: int = 32
+    efficiency_market_alpha: float = 1.0
+    efficiency_sidecar_hidden: int = 32
+    efficiency_sidecar_alpha: float = 1.0
+    enable_team_ppp_head: bool = False
+    team_ppp_head_hidden: int = 128
+    team_ppp_to_backbone: bool = False
+    team_ppp_latent_hidden: int = 32
+    team_ppp_backbone_alpha: float = 1.0
+    team_ppp_to_efficiency: bool = False
+    team_ppp_efficiency_alpha: float = 1.0
+    team_ppp_direct_backbone_context: bool = False
+    team_ppp_direct_efficiency_context: bool = False
+    enable_team_advantage_head: bool = False
+    team_advantage_head_hidden: int = 64
+    team_advantage_direct_backbone_context: bool = False
     # Possession backbone (section 15 refactor)
     enable_possession_backbone: bool = False
     enable_three_pa_share: bool = False
     possession_head_hidden: int = 128
     possession_mu_mode: str = "absolute"
     possession_mu_baseline: float = 100.0
+    enable_team_possession_split_head: bool = False
+    team_possession_max_delta: float = 8.0
     backbone_hidden: int = 128
     three_pa_share_hidden: int = 64
     enable_usage_share_head: bool = False
     usage_share_head_hidden: int = 128
+    enable_team_points_budget_head: bool = False
+    team_points_budget_head_hidden: int = 128
+    team_points_budget_parameterization: str = "absolute"
+    team_points_budget_to_backbone: bool = False
+    team_points_budget_latent_hidden: int = 32
+    team_points_reconcile_budget: bool = False
+    team_points_reconcile_alpha: float = 1.0
+    team_opportunity_budget_parameterization: str = "absolute"
+    team_opportunity_budget_to_backbone: bool = False
+    team_opportunity_budget_latent_hidden: int = 32
+    team_opportunity_budget_backbone_alpha: float = 1.0
+    team_opportunity_reconcile_budget: bool = False
+    team_opportunity_reconcile_alpha: float = 1.0
+    team_opportunity_reconcile_preserve_possessions: bool = False
+    enable_team_ast_budget_head: bool = False
+    team_ast_budget_head_hidden: int = 128
+    enable_assist_share_head: bool = False
+    assist_share_head_hidden: int = 128
+    enable_team_rebound_budget_head: bool = False
+    team_rebound_budget_head_hidden: int = 128
+    rebound_budget_parameterization: str = "absolute"
+    rebound_oreb_rate_cap: float = 1.0
+    rebound_dreb_rate_cap: float = 0.85
+    rebound_dreb_deterministic_discount: float = 1.0
+    rebound_oreb_budget_blend_alpha: float = 1.0
+    rebound_dreb_budget_blend_alpha: float = 1.0
+    rebound_oreb_reconcile_use_flow_budget: bool = False
+    enable_rebound_budget_blend_gate: bool = False
+    rebound_budget_blend_gate_hidden: int = 64
+    rebound_budget_blend_gate_init_alpha: float = 0.25
+    enable_rebound_share_head: bool = False
+    rebound_share_head_hidden: int = 128
+    rebound_share_condition_feature_columns: list[str] = field(default_factory=list)
+    rebound_share_condition_hidden: int = 32
+    assist_share_condition_feature_columns: list[str] = field(default_factory=list)
+    assist_share_condition_hidden: int = 32
+    enable_ast_blend_gate: bool = False
+    ast_blend_gate_hidden: int = 128
+    ast_blend_gate_init_alpha: float = 0.75
+    assist_share_replace_flow_ast: bool = False
+    assist_share_factorized_ast: bool = False
+    assist_share_reconcile_ast_budget: bool = False
+    assist_share_reconcile_alpha: float = 0.75
+    assist_share_reconcile_temperature: float = 0.85
+    rebound_factor_reconcile_oreb_dreb: bool = False
+    rebound_factor_reconcile_mode: str = "both"
+    rebound_factor_reconcile_alpha: float = 0.50
+    rebound_factor_reconcile_temperature: float = 0.90
     overflow_protected_prior_play_prob_floor: float = PROTECTED_PRIOR_PLAY_PROB_FLOOR
     overflow_protected_prior_minutes_floor: float = PROTECTED_PRIOR_MINUTES_FLOOR
     overflow_risk_weight_consecutive_active_dnp: float = OVERFLOW_RISK_WEIGHT_CONSECUTIVE_ACTIVE_DNP
@@ -372,6 +476,15 @@ class GameTransformerV2Config:
     overflow_risk_weight_inactive_streak_len: float = OVERFLOW_RISK_WEIGHT_INACTIVE_STREAK_LEN
     overflow_keep_weight_prior_play_prob: float = OVERFLOW_KEEP_WEIGHT_PRIOR_PLAY_PROB
     overflow_keep_weight_prior_minutes: float = OVERFLOW_KEEP_WEIGHT_PRIOR_MINUTES
+    backbone_env_feature_columns: list[str] = field(default_factory=list)
+    backbone_env_enrich_features: bool = False
+    backbone_side_market_context: bool = False
+    backbone_side_market_hidden: int = 32
+    backbone_env_adapter_dim: int = 0
+    backbone_env_adapter_hidden: int = 32
+    enable_env_side_channel: bool = False
+    env_side_channel_dim: int = 32
+    env_side_channel_hidden: int = 64
     version: str = "game_transformer_v2"
 
     def to_dict(self) -> dict[str, Any]:
@@ -402,8 +515,68 @@ class GameTransformerV2Config:
             filtered["flow_target_schema"] = FLOW_TARGET_SCHEMA_DEFAULT
         else:
             filtered["flow_target_schema"] = normalize_flow_target_schema(str(filtered["flow_target_schema"]))
+        if "enable_minutes_hurdle_head" not in filtered:
+            filtered["enable_minutes_hurdle_head"] = False
+        if "minutes_hurdle_hidden" not in filtered:
+            filtered["minutes_hurdle_hidden"] = 64
+        if "minutes_hurdle_sigma_floor" not in filtered:
+            filtered["minutes_hurdle_sigma_floor"] = 0.5
+        if "enable_minutes_role_head" not in filtered:
+            filtered["enable_minutes_role_head"] = False
+        if "minutes_role_use_context_for_preferences" not in filtered:
+            filtered["minutes_role_use_context_for_preferences"] = True
+        if "minutes_role_hidden" not in filtered:
+            filtered["minutes_role_hidden"] = 64
+        if "minutes_role_embedding_dim" not in filtered:
+            filtered["minutes_role_embedding_dim"] = 32
+        if "minutes_role_num_classes" not in filtered:
+            filtered["minutes_role_num_classes"] = 5
+        if "enable_starter_promotion_head" not in filtered:
+            filtered["enable_starter_promotion_head"] = False
+        if "starter_promotion_hidden_dim" not in filtered:
+            filtered["starter_promotion_hidden_dim"] = 64
         if "enable_efficiency_head" not in filtered:
             filtered["enable_efficiency_head"] = False
+        if "efficiency_sidecar_feature_columns" not in filtered:
+            filtered["efficiency_sidecar_feature_columns"] = []
+        if "efficiency_sidecar_feature_mean" not in filtered:
+            filtered["efficiency_sidecar_feature_mean"] = []
+        if "efficiency_sidecar_feature_std" not in filtered:
+            filtered["efficiency_sidecar_feature_std"] = []
+        if "efficiency_market_context" not in filtered:
+            filtered["efficiency_market_context"] = False
+        if "efficiency_market_hidden" not in filtered:
+            filtered["efficiency_market_hidden"] = 32
+        if "efficiency_market_alpha" not in filtered:
+            filtered["efficiency_market_alpha"] = 1.0
+        if "efficiency_sidecar_hidden" not in filtered:
+            filtered["efficiency_sidecar_hidden"] = 32
+        if "efficiency_sidecar_alpha" not in filtered:
+            filtered["efficiency_sidecar_alpha"] = 1.0
+        if "enable_team_ppp_head" not in filtered:
+            filtered["enable_team_ppp_head"] = False
+        if "team_ppp_head_hidden" not in filtered:
+            filtered["team_ppp_head_hidden"] = 128
+        if "team_ppp_to_backbone" not in filtered:
+            filtered["team_ppp_to_backbone"] = False
+        if "team_ppp_latent_hidden" not in filtered:
+            filtered["team_ppp_latent_hidden"] = 32
+        if "team_ppp_backbone_alpha" not in filtered:
+            filtered["team_ppp_backbone_alpha"] = 1.0
+        if "team_ppp_to_efficiency" not in filtered:
+            filtered["team_ppp_to_efficiency"] = False
+        if "team_ppp_efficiency_alpha" not in filtered:
+            filtered["team_ppp_efficiency_alpha"] = 1.0
+        if "team_ppp_direct_backbone_context" not in filtered:
+            filtered["team_ppp_direct_backbone_context"] = False
+        if "team_ppp_direct_efficiency_context" not in filtered:
+            filtered["team_ppp_direct_efficiency_context"] = False
+        if "enable_team_advantage_head" not in filtered:
+            filtered["enable_team_advantage_head"] = False
+        if "team_advantage_head_hidden" not in filtered:
+            filtered["team_advantage_head_hidden"] = 64
+        if "team_advantage_direct_backbone_context" not in filtered:
+            filtered["team_advantage_direct_backbone_context"] = False
         if "efficiency_head_hidden" not in filtered:
             filtered["efficiency_head_hidden"] = 128
         if "efficiency_ft_prior_mean" not in filtered:
@@ -421,6 +594,10 @@ class GameTransformerV2Config:
         # Backbone defaults for models trained before possession refactor
         if "enable_possession_backbone" not in filtered:
             filtered["enable_possession_backbone"] = False
+        if "enable_team_possession_split_head" not in filtered:
+            filtered["enable_team_possession_split_head"] = False
+        if "team_possession_max_delta" not in filtered:
+            filtered["team_possession_max_delta"] = 8.0
         if "enable_three_pa_share" not in filtered:
             filtered["enable_three_pa_share"] = False
         if "possession_mu_mode" not in filtered:
@@ -431,6 +608,120 @@ class GameTransformerV2Config:
             filtered["enable_usage_share_head"] = False
         if "usage_share_head_hidden" not in filtered:
             filtered["usage_share_head_hidden"] = 128
+        if "enable_team_points_budget_head" not in filtered:
+            filtered["enable_team_points_budget_head"] = False
+        if "team_points_budget_head_hidden" not in filtered:
+            filtered["team_points_budget_head_hidden"] = 128
+        if "team_points_budget_parameterization" not in filtered:
+            filtered["team_points_budget_parameterization"] = "absolute"
+        if "team_points_budget_to_backbone" not in filtered:
+            filtered["team_points_budget_to_backbone"] = False
+        if "team_points_budget_latent_hidden" not in filtered:
+            filtered["team_points_budget_latent_hidden"] = 32
+        if "team_points_reconcile_budget" not in filtered:
+            filtered["team_points_reconcile_budget"] = False
+        if "team_points_reconcile_alpha" not in filtered:
+            filtered["team_points_reconcile_alpha"] = 1.0
+        if "team_opportunity_budget_parameterization" not in filtered:
+            filtered["team_opportunity_budget_parameterization"] = "absolute"
+        if "team_opportunity_budget_to_backbone" not in filtered:
+            filtered["team_opportunity_budget_to_backbone"] = False
+        if "team_opportunity_budget_latent_hidden" not in filtered:
+            filtered["team_opportunity_budget_latent_hidden"] = 32
+        if "team_opportunity_budget_backbone_alpha" not in filtered:
+            filtered["team_opportunity_budget_backbone_alpha"] = 1.0
+        if "team_opportunity_reconcile_budget" not in filtered:
+            filtered["team_opportunity_reconcile_budget"] = False
+        if "team_opportunity_reconcile_alpha" not in filtered:
+            filtered["team_opportunity_reconcile_alpha"] = 1.0
+        if "team_opportunity_reconcile_preserve_possessions" not in filtered:
+            filtered["team_opportunity_reconcile_preserve_possessions"] = False
+        if "enable_team_ast_budget_head" not in filtered:
+            filtered["enable_team_ast_budget_head"] = False
+        if "team_ast_budget_head_hidden" not in filtered:
+            filtered["team_ast_budget_head_hidden"] = 128
+        if "enable_assist_share_head" not in filtered:
+            filtered["enable_assist_share_head"] = False
+        if "assist_share_head_hidden" not in filtered:
+            filtered["assist_share_head_hidden"] = 128
+        if "enable_team_rebound_budget_head" not in filtered:
+            filtered["enable_team_rebound_budget_head"] = False
+        if "team_rebound_budget_head_hidden" not in filtered:
+            filtered["team_rebound_budget_head_hidden"] = 128
+        if "rebound_budget_parameterization" not in filtered:
+            filtered["rebound_budget_parameterization"] = "absolute"
+        if "rebound_oreb_rate_cap" not in filtered:
+            filtered["rebound_oreb_rate_cap"] = 1.0
+        if "rebound_dreb_rate_cap" not in filtered:
+            filtered["rebound_dreb_rate_cap"] = 0.85
+        if "rebound_dreb_deterministic_discount" not in filtered:
+            filtered["rebound_dreb_deterministic_discount"] = 1.0
+        if "rebound_oreb_budget_blend_alpha" not in filtered:
+            filtered["rebound_oreb_budget_blend_alpha"] = 1.0
+        if "rebound_dreb_budget_blend_alpha" not in filtered:
+            filtered["rebound_dreb_budget_blend_alpha"] = 1.0
+        if "rebound_oreb_reconcile_use_flow_budget" not in filtered:
+            filtered["rebound_oreb_reconcile_use_flow_budget"] = False
+        if "enable_rebound_budget_blend_gate" not in filtered:
+            filtered["enable_rebound_budget_blend_gate"] = False
+        if "rebound_budget_blend_gate_hidden" not in filtered:
+            filtered["rebound_budget_blend_gate_hidden"] = 64
+        if "rebound_budget_blend_gate_init_alpha" not in filtered:
+            filtered["rebound_budget_blend_gate_init_alpha"] = 0.25
+        if "enable_rebound_share_head" not in filtered:
+            filtered["enable_rebound_share_head"] = False
+        if "rebound_share_head_hidden" not in filtered:
+            filtered["rebound_share_head_hidden"] = 128
+        if "rebound_share_condition_feature_columns" not in filtered:
+            filtered["rebound_share_condition_feature_columns"] = []
+        if "rebound_share_condition_hidden" not in filtered:
+            filtered["rebound_share_condition_hidden"] = 32
+        if "assist_share_condition_feature_columns" not in filtered:
+            filtered["assist_share_condition_feature_columns"] = []
+        if "assist_share_condition_hidden" not in filtered:
+            filtered["assist_share_condition_hidden"] = 32
+        if "enable_ast_blend_gate" not in filtered:
+            filtered["enable_ast_blend_gate"] = False
+        if "ast_blend_gate_hidden" not in filtered:
+            filtered["ast_blend_gate_hidden"] = 128
+        if "ast_blend_gate_init_alpha" not in filtered:
+            filtered["ast_blend_gate_init_alpha"] = 0.75
+        if "assist_share_replace_flow_ast" not in filtered:
+            filtered["assist_share_replace_flow_ast"] = False
+        if "assist_share_factorized_ast" not in filtered:
+            filtered["assist_share_factorized_ast"] = False
+        if "assist_share_reconcile_ast_budget" not in filtered:
+            filtered["assist_share_reconcile_ast_budget"] = False
+        if "assist_share_reconcile_alpha" not in filtered:
+            filtered["assist_share_reconcile_alpha"] = 0.75
+        if "assist_share_reconcile_temperature" not in filtered:
+            filtered["assist_share_reconcile_temperature"] = 0.85
+        if "rebound_factor_reconcile_oreb_dreb" not in filtered:
+            filtered["rebound_factor_reconcile_oreb_dreb"] = False
+        if "rebound_factor_reconcile_mode" not in filtered:
+            filtered["rebound_factor_reconcile_mode"] = "both"
+        if "rebound_factor_reconcile_alpha" not in filtered:
+            filtered["rebound_factor_reconcile_alpha"] = 0.50
+        if "rebound_factor_reconcile_temperature" not in filtered:
+            filtered["rebound_factor_reconcile_temperature"] = 0.90
+        if "backbone_env_feature_columns" not in filtered:
+            filtered["backbone_env_feature_columns"] = []
+        if "backbone_env_enrich_features" not in filtered:
+            filtered["backbone_env_enrich_features"] = False
+        if "backbone_side_market_context" not in filtered:
+            filtered["backbone_side_market_context"] = False
+        if "backbone_side_market_hidden" not in filtered:
+            filtered["backbone_side_market_hidden"] = 32
+        if "backbone_env_adapter_dim" not in filtered:
+            filtered["backbone_env_adapter_dim"] = 0
+        if "backbone_env_adapter_hidden" not in filtered:
+            filtered["backbone_env_adapter_hidden"] = 32
+        if "enable_env_side_channel" not in filtered:
+            filtered["enable_env_side_channel"] = False
+        if "env_side_channel_dim" not in filtered:
+            filtered["env_side_channel_dim"] = 32
+        if "env_side_channel_hidden" not in filtered:
+            filtered["env_side_channel_hidden"] = 64
         return cls(**filtered)
 
     def save(self, path: Path) -> None:
@@ -445,6 +736,7 @@ class GameTransformerV2Config:
 @dataclass(frozen=True)
 class GameLevelExample:
     player_features: np.ndarray  # (2,15,F)
+    efficiency_sidecar_features: np.ndarray  # (2,15,C)
     player_valid_mask: np.ndarray  # (2,15)
     player_ids: np.ndarray  # (2,15)
     team_ids: np.ndarray  # (2,)
@@ -488,6 +780,16 @@ class GameTransformerV2Outputs:
     possession: PossessionHeadOutputs | None = None
     backbone: TeamEventBackboneOutputs | None = None
     usage_share: UsageShareHeadOutputs | None = None
+    team_ppp: TeamPPPHeadOutputs | None = None
+    team_advantage: TeamAdvantageHeadOutputs | None = None
+    team_points_budget: TeamPointsBudgetHeadOutputs | None = None
+    team_ast_budget: TeamAstBudgetHeadOutputs | None = None
+    assist_share: AssistShareHeadOutputs | None = None
+    team_rebound_budget: TeamReboundBudgetHeadOutputs | None = None
+    rebound_budget_blend_gate: ReboundBudgetBlendGateHeadOutputs | None = None
+    rebound_share: ReboundShareHeadOutputs | None = None
+    ast_blend_gate: AstBlendGateHeadOutputs | None = None
+    env_context: torch.Tensor | None = None
 
 
 def _numeric_frame(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -649,6 +951,9 @@ def build_game_level_examples(
     feature_std: np.ndarray,
     game_feature_columns: list[str],
     team_feature_columns: list[str],
+    efficiency_sidecar_feature_columns: list[str] | None = None,
+    efficiency_sidecar_feature_mean: np.ndarray | None = None,
+    efficiency_sidecar_feature_std: np.ndarray | None = None,
     flow_label_columns: list[str] | None = None,
     minutes_label_col: str = "minutes_label",
     max_players_per_team: int = MAX_PLAYERS_PER_TEAM,
@@ -689,6 +994,28 @@ def build_game_level_examples(
     std = np.where(std <= 1e-6, 1.0, std)
     x = np.nan_to_num(x, nan=mean[None, :], posinf=mean[None, :], neginf=mean[None, :])
     x = (x - mean[None, :]) / std[None, :]
+
+    efficiency_sidecar_cols = list(efficiency_sidecar_feature_columns or [])
+    if efficiency_sidecar_cols:
+        if efficiency_sidecar_feature_mean is None or efficiency_sidecar_feature_std is None:
+            raise ValueError(
+                "efficiency_sidecar_feature_mean/std are required when efficiency_sidecar_feature_columns are provided"
+            )
+        sidecar_mean = np.asarray(efficiency_sidecar_feature_mean, dtype=np.float32)
+        sidecar_std = np.asarray(efficiency_sidecar_feature_std, dtype=np.float32)
+        if sidecar_mean.shape[0] != len(efficiency_sidecar_cols) or sidecar_std.shape[0] != len(efficiency_sidecar_cols):
+            raise ValueError("efficiency_sidecar_feature_mean/std must align with efficiency_sidecar_feature_columns")
+        sidecar_std = np.where(sidecar_std <= 1e-6, 1.0, sidecar_std)
+        sidecar = _numeric_frame(df, efficiency_sidecar_cols).to_numpy(dtype=np.float32, copy=False)
+        sidecar = np.nan_to_num(
+            sidecar,
+            nan=sidecar_mean[None, :],
+            posinf=sidecar_mean[None, :],
+            neginf=sidecar_mean[None, :],
+        )
+        sidecar = (sidecar - sidecar_mean[None, :]) / sidecar_std[None, :]
+    else:
+        sidecar = np.zeros((len(df), 0), dtype=np.float32)
 
     if minutes_label_col not in df.columns:
         fallback = "minutes" if "minutes" in df.columns else None
@@ -763,6 +1090,7 @@ def build_game_level_examples(
     )
 
     x_by_idx = x
+    sidecar_by_idx = sidecar
     y_by_idx = y_minutes
     force_active_by_idx = force_active_worlds
     starter_force_active_by_idx = starter_signal
@@ -784,6 +1112,7 @@ def build_game_level_examples(
         home_id, away_id = _resolve_home_away_team_ids(game_df)
 
         player_features = np.zeros((2, max_players_per_team, len(feature_columns)), dtype=np.float32)
+        efficiency_sidecar_features = np.zeros((2, max_players_per_team, len(efficiency_sidecar_cols)), dtype=np.float32)
         player_valid = np.zeros((2, max_players_per_team), dtype=bool)
         player_ids = np.zeros((2, max_players_per_team), dtype=np.int64)
         team_ids = np.zeros((2,), dtype=np.int64)
@@ -816,6 +1145,7 @@ def build_game_level_examples(
             n = local_idx.shape[0]
 
             player_features[side_idx, :n] = x_by_idx[local_idx]
+            efficiency_sidecar_features[side_idx, :n] = sidecar_by_idx[local_idx]
             player_valid[side_idx, :n] = True
             player_ids[side_idx, :n] = (
                 pd.to_numeric(team_rows["player_id"], errors="coerce").fillna(0).astype("int64").to_numpy(dtype=np.int64)
@@ -849,12 +1179,13 @@ def build_game_level_examples(
 
         if team_feature_columns:
             tvals = np.zeros((2, len(team_feature_columns)), dtype=np.float32)
+            game_team_feats_df = team_feats_df.iloc[idx_arr]
             for side_idx, team_id in enumerate(team_ids.tolist()):
                 if team_id <= 0:
                     continue
                 mask = pd.to_numeric(game_df["team_id"], errors="coerce") == int(team_id)
                 if bool(mask.any()):
-                    vals = team_feats_df.loc[mask].mean(axis=0, skipna=True).to_numpy(dtype=np.float32)
+                    vals = game_team_feats_df.loc[mask].mean(axis=0, skipna=True).to_numpy(dtype=np.float32)
                     tvals[side_idx] = np.nan_to_num(vals, nan=0.0, posinf=0.0, neginf=0.0)
         else:
             tvals = np.zeros((2, 0), dtype=np.float32)
@@ -862,6 +1193,7 @@ def build_game_level_examples(
         examples.append(
             GameLevelExample(
                 player_features=player_features,
+                efficiency_sidecar_features=efficiency_sidecar_features,
                 player_valid_mask=player_valid,
                 player_ids=player_ids,
                 team_ids=team_ids,
@@ -890,11 +1222,13 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
 
     bsz = len(batch)
     n_feat = batch[0].player_features.shape[2]
+    n_sidecar_feat = batch[0].efficiency_sidecar_features.shape[2]
     n_flow = batch[0].flow_targets.shape[2]
     n_game_feat = batch[0].game_features.shape[0]
     n_team_feat = batch[0].team_features.shape[1]
 
     player_features = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM, n_feat), dtype=torch.float32)
+    efficiency_sidecar_features = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM, n_sidecar_feat), dtype=torch.float32)
     player_valid_mask = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.bool)
     player_ids = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.long)
     team_ids = torch.zeros((bsz, 2), dtype=torch.long)
@@ -913,6 +1247,10 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
 
     for i, ex in enumerate(batch):
         player_features[i] = torch.from_numpy(ex.player_features.astype(np.float32, copy=False))
+        if n_sidecar_feat > 0:
+            efficiency_sidecar_features[i] = torch.from_numpy(
+                ex.efficiency_sidecar_features.astype(np.float32, copy=False)
+            )
         player_valid_mask[i] = torch.from_numpy(ex.player_valid_mask.astype(bool, copy=False))
         player_ids[i] = torch.from_numpy(ex.player_ids.astype(np.int64, copy=False))
         team_ids[i] = torch.from_numpy(ex.team_ids.astype(np.int64, copy=False))
@@ -933,6 +1271,7 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
 
     return {
         "player_features": player_features,
+        "efficiency_sidecar_features": efficiency_sidecar_features,
         "player_valid_mask": player_valid_mask,
         "player_ids": player_ids,
         "team_ids": team_ids,
@@ -959,6 +1298,16 @@ class GameTransformerV2(nn.Module):
         *,
         num_game_features: int,
         num_team_features: int,
+        num_efficiency_sidecar_features: int = 0,
+        game_feature_names: list[str] | tuple[str, ...] = (),
+        backbone_env_feature_indices: list[int] | tuple[int, ...] = (),
+        backbone_env_feature_names: list[str] | tuple[str, ...] = (),
+        backbone_env_enrich_features: bool = False,
+        backbone_side_market_context: bool = False,
+        backbone_side_market_hidden: int = 32,
+        enable_env_side_channel: bool = False,
+        env_side_channel_dim: int = 32,
+        env_side_channel_hidden: int = 64,
         d_model: int = 192,
         hidden_dim: int = 256,
         num_layers: int = 4,
@@ -969,6 +1318,16 @@ class GameTransformerV2(nn.Module):
         max_active_count: int = 13,
         total_minutes_per_team: float = 240.0,
         max_minutes_per_player: float = 48.0,
+        enable_minutes_hurdle_head: bool = False,
+        minutes_hurdle_hidden: int = 64,
+        minutes_hurdle_sigma_floor: float = 0.5,
+        enable_minutes_role_head: bool = False,
+        minutes_role_use_context_for_preferences: bool = True,
+        minutes_role_hidden: int = 64,
+        minutes_role_embedding_dim: int = 32,
+        minutes_role_num_classes: int = 5,
+        enable_starter_promotion_head: bool = False,
+        starter_promotion_hidden_dim: int = 64,
         flow_coupling_type: str = "affine",
         flow_num_blocks: int = 4,
         flow_scale_clip: float = 3.0,
@@ -990,15 +1349,71 @@ class GameTransformerV2(nn.Module):
         efficiency_fg2_prior_strength: float = 8.0,
         efficiency_fg3_prior_mean: float = 0.36,
         efficiency_fg3_prior_strength: float = 8.0,
+        efficiency_market_context: bool = False,
+        efficiency_market_hidden: int = 32,
+        efficiency_market_alpha: float = 1.0,
+        efficiency_sidecar_hidden: int = 32,
+        efficiency_sidecar_alpha: float = 1.0,
+        enable_team_ppp_head: bool = False,
+        team_ppp_head_hidden: int = 128,
+        team_ppp_to_backbone: bool = False,
+        team_ppp_latent_hidden: int = 32,
+        team_ppp_backbone_alpha: float = 1.0,
+        team_ppp_to_efficiency: bool = False,
+        team_ppp_efficiency_alpha: float = 1.0,
+        team_ppp_direct_backbone_context: bool = False,
+        team_ppp_direct_efficiency_context: bool = False,
+        enable_team_advantage_head: bool = False,
+        team_advantage_head_hidden: int = 64,
+        team_advantage_direct_backbone_context: bool = False,
         enable_possession_backbone: bool = False,
         enable_three_pa_share: bool = False,
         possession_head_hidden: int = 128,
         possession_mu_mode: str = "absolute",
         possession_mu_baseline: float = 100.0,
+        enable_team_possession_split_head: bool = False,
+        team_possession_max_delta: float = 8.0,
         backbone_hidden: int = 128,
         three_pa_share_hidden: int = 64,
         enable_usage_share_head: bool = False,
         usage_share_head_hidden: int = 128,
+        enable_team_points_budget_head: bool = False,
+        team_points_budget_head_hidden: int = 128,
+        team_points_budget_parameterization: str = "absolute",
+        team_points_budget_to_backbone: bool = False,
+        team_points_budget_latent_hidden: int = 32,
+        team_opportunity_budget_parameterization: str = "absolute",
+        team_opportunity_budget_to_backbone: bool = False,
+        team_opportunity_budget_latent_hidden: int = 32,
+        team_opportunity_budget_backbone_alpha: float = 1.0,
+        enable_team_ast_budget_head: bool = False,
+        team_ast_budget_head_hidden: int = 128,
+        enable_assist_share_head: bool = False,
+        assist_share_head_hidden: int = 128,
+        enable_team_rebound_budget_head: bool = False,
+        team_rebound_budget_head_hidden: int = 128,
+        rebound_budget_parameterization: str = "absolute",
+        rebound_oreb_rate_cap: float = 1.0,
+        rebound_dreb_rate_cap: float = 0.85,
+        rebound_dreb_deterministic_discount: float = 1.0,
+        enable_rebound_budget_blend_gate: bool = False,
+        rebound_budget_blend_gate_hidden: int = 64,
+        rebound_budget_blend_gate_init_alpha: float = 0.25,
+        enable_rebound_share_head: bool = False,
+        rebound_share_head_hidden: int = 128,
+        rebound_share_condition_feature_indices: tuple[int, ...] = (),
+        rebound_share_condition_feature_mean: tuple[float, ...] = (),
+        rebound_share_condition_feature_std: tuple[float, ...] = (),
+        rebound_share_condition_hidden: int = 32,
+        assist_share_condition_feature_indices: tuple[int, ...] = (),
+        assist_share_condition_feature_mean: tuple[float, ...] = (),
+        assist_share_condition_feature_std: tuple[float, ...] = (),
+        assist_share_condition_hidden: int = 32,
+        enable_ast_blend_gate: bool = False,
+        ast_blend_gate_hidden: int = 128,
+        ast_blend_gate_init_alpha: float = 0.75,
+        backbone_env_adapter_dim: int = 0,
+        backbone_env_adapter_hidden: int = 32,
     ) -> None:
         super().__init__()
         if num_player_features <= 0:
@@ -1009,6 +1424,19 @@ class GameTransformerV2(nn.Module):
         self.num_player_features = int(num_player_features)
         self.num_game_features = int(num_game_features)
         self.num_team_features = int(num_team_features)
+        self.num_efficiency_sidecar_features = int(num_efficiency_sidecar_features)
+        self.game_feature_names = tuple(str(name) for name in game_feature_names)
+        self.backbone_env_feature_indices = tuple(int(idx) for idx in backbone_env_feature_indices)
+        self.backbone_env_feature_names = tuple(str(name) for name in backbone_env_feature_names)
+        self.backbone_env_enrich_features = bool(backbone_env_enrich_features)
+        self.backbone_side_market_context = bool(backbone_side_market_context)
+        self.backbone_side_market_hidden = max(1, int(backbone_side_market_hidden))
+        self.num_backbone_env_features = int(len(self.backbone_env_feature_indices))
+        self.backbone_env_adapter_dim = max(0, int(backbone_env_adapter_dim))
+        self.backbone_env_adapter_hidden = max(1, int(backbone_env_adapter_hidden))
+        self.enable_env_side_channel = bool(enable_env_side_channel)
+        self.env_side_channel_dim = max(1, int(env_side_channel_dim))
+        self.env_side_channel_hidden = max(1, int(env_side_channel_hidden))
         self.d_model = int(d_model)
         self.flow_target_schema = normalize_flow_target_schema(flow_target_schema)
         self.flow_target_columns = flow_target_columns(
@@ -1056,6 +1484,16 @@ class GameTransformerV2(nn.Module):
             dropout=float(dropout),
             total_minutes_per_team=float(total_minutes_per_team),
             max_minutes_per_player=float(max_minutes_per_player),
+            enable_role_head=bool(enable_minutes_role_head),
+            use_role_context_for_preferences=bool(minutes_role_use_context_for_preferences),
+            role_hidden_dim=int(minutes_role_hidden),
+            role_embedding_dim=int(minutes_role_embedding_dim),
+            num_role_classes=int(minutes_role_num_classes),
+            enable_starter_promotion_head=bool(enable_starter_promotion_head),
+            starter_promotion_hidden_dim=int(starter_promotion_hidden_dim),
+            enable_hurdle_head=bool(enable_minutes_hurdle_head),
+            hurdle_hidden_dim=int(minutes_hurdle_hidden),
+            hurdle_sigma_floor=float(minutes_hurdle_sigma_floor),
         )
         self.flow_head = JointGameFlow(
             d_model=int(d_model),
@@ -1073,14 +1511,67 @@ class GameTransformerV2(nn.Module):
             mean_ctx_weight=float(flow_mean_ctx_weight),
             context_mode=str(flow_context_mode),
             use_minutes_context=bool(flow_use_minutes_conditioning),
+            env_context_dim=self.env_side_channel_dim if self.enable_env_side_channel else 0,
         )
         self.enable_efficiency_head = bool(enable_efficiency_head)
+        self.efficiency_market_context = bool(efficiency_market_context)
+        self.efficiency_market_alpha = float(efficiency_market_alpha)
+        self.efficiency_sidecar_alpha = float(efficiency_sidecar_alpha)
+        self.enable_team_ppp_head = bool(enable_team_ppp_head)
+        self.team_ppp_to_backbone = bool(team_ppp_to_backbone)
+        self.team_ppp_backbone_alpha = float(team_ppp_backbone_alpha)
+        self.team_ppp_to_efficiency = bool(team_ppp_to_efficiency)
+        self.team_ppp_efficiency_alpha = float(team_ppp_efficiency_alpha)
+        self.team_ppp_direct_backbone_context = bool(team_ppp_direct_backbone_context)
+        self.team_ppp_direct_efficiency_context = bool(team_ppp_direct_efficiency_context)
+        self.enable_team_advantage_head = bool(enable_team_advantage_head)
+        self.team_advantage_direct_backbone_context = bool(team_advantage_direct_backbone_context)
+        self.team_ppp_head: TeamPPPHead | None = None
+        self.team_advantage_head: TeamAdvantageHead | None = None
+        self.backbone_team_ppp_encoder: nn.Module | None = None
+        self.efficiency_team_ppp_encoder: nn.Module | None = None
+        self.efficiency_player_sidecar_encoder: nn.Module | None = None
         self.efficiency_head: EfficiencyHead | None = None
+        self.efficiency_team_market_encoder: nn.Module | None = None
+        if self.enable_team_ppp_head:
+            self.team_ppp_head = TeamPPPHead(
+                d_model=int(d_model),
+                hidden_dim=int(team_ppp_head_hidden),
+                dropout=float(dropout),
+            )
+        if self.enable_team_advantage_head:
+            self.team_advantage_head = TeamAdvantageHead(
+                d_model=int(d_model),
+                hidden_dim=int(team_advantage_head_hidden),
+                dropout=float(dropout),
+            )
+        if self.team_ppp_to_backbone:
+            self.backbone_team_ppp_encoder = nn.Sequential(
+                nn.LayerNorm(4),
+                nn.Linear(4, max(1, int(team_ppp_latent_hidden))),
+                nn.GELU(),
+                nn.Linear(max(1, int(team_ppp_latent_hidden)), int(d_model)),
+            )
+        if self.team_ppp_to_efficiency:
+            self.efficiency_team_ppp_encoder = nn.Sequential(
+                nn.LayerNorm(4),
+                nn.Linear(4, max(1, int(team_ppp_latent_hidden))),
+                nn.GELU(),
+                nn.Linear(max(1, int(team_ppp_latent_hidden)), int(d_model)),
+            )
         if self.enable_efficiency_head:
+            if self.num_efficiency_sidecar_features > 0:
+                self.efficiency_player_sidecar_encoder = nn.Sequential(
+                    nn.LayerNorm(self.num_efficiency_sidecar_features),
+                    nn.Linear(self.num_efficiency_sidecar_features, max(1, int(efficiency_sidecar_hidden))),
+                    nn.GELU(),
+                    nn.Linear(max(1, int(efficiency_sidecar_hidden)), int(d_model)),
+                )
             self.efficiency_head = EfficiencyHead(
                 d_model=int(d_model),
                 hidden_dim=int(efficiency_head_hidden),
                 dropout=float(dropout),
+                num_team_context_features=4 if self.team_ppp_direct_efficiency_context else 0,
                 ft_prior_mean=float(efficiency_ft_prior_mean),
                 ft_prior_strength=float(efficiency_ft_prior_strength),
                 fg2_prior_mean=float(efficiency_fg2_prior_mean),
@@ -1088,6 +1579,14 @@ class GameTransformerV2(nn.Module):
                 fg3_prior_mean=float(efficiency_fg3_prior_mean),
                 fg3_prior_strength=float(efficiency_fg3_prior_strength),
             )
+            if self.efficiency_market_context:
+                team_market_context_dim = 6 if "estimated_possessions" in self.game_feature_names else 4
+                self.efficiency_team_market_encoder = nn.Sequential(
+                    nn.LayerNorm(team_market_context_dim),
+                    nn.Linear(team_market_context_dim, max(1, int(efficiency_market_hidden))),
+                    nn.GELU(),
+                    nn.Linear(max(1, int(efficiency_market_hidden)), int(d_model)),
+                )
 
         # Possession-coupled event backbone (section 15 refactor)
         self.enable_possession_backbone = bool(enable_possession_backbone)
@@ -1095,6 +1594,39 @@ class GameTransformerV2(nn.Module):
         self.possession_head: PossessionHead | None = None
         self.event_backbone: TeamEventBackbone | None = None
         self.three_pa_share_head: ThreePAShareHead | None = None
+        self.backbone_side_market_encoder: nn.Module | None = None
+        backbone_raw_context_dim = (
+            int(num_game_features)
+            + (2 * self.num_backbone_env_features)
+            + self._derived_env_feature_count()
+        )
+        self.backbone_env_adapter: nn.Module | None = None
+        backbone_context_dim = int(backbone_raw_context_dim)
+        if self.backbone_env_adapter_dim > 0 and backbone_raw_context_dim > 0:
+            self.backbone_env_adapter = nn.Sequential(
+                nn.LayerNorm(backbone_raw_context_dim),
+                nn.Linear(backbone_raw_context_dim, self.backbone_env_adapter_hidden),
+                nn.GELU(),
+                nn.Linear(self.backbone_env_adapter_hidden, self.backbone_env_adapter_dim),
+            )
+            backbone_context_dim = self.backbone_env_adapter_dim
+        self.env_side_channel_encoder: nn.Module | None = None
+        if self.enable_env_side_channel and backbone_raw_context_dim > 0:
+            self.env_side_channel_encoder = nn.Sequential(
+                nn.LayerNorm(backbone_raw_context_dim),
+                nn.Linear(backbone_raw_context_dim, self.env_side_channel_hidden),
+                nn.GELU(),
+                nn.Linear(self.env_side_channel_hidden, self.env_side_channel_dim),
+            )
+            backbone_context_dim = self.env_side_channel_dim
+        team_market_context_dim = self._derived_team_market_feature_count()
+        if self.backbone_side_market_context and team_market_context_dim > 0:
+            self.backbone_side_market_encoder = nn.Sequential(
+                nn.LayerNorm(team_market_context_dim),
+                nn.Linear(team_market_context_dim, self.backbone_side_market_hidden),
+                nn.GELU(),
+                nn.Linear(self.backbone_side_market_hidden, int(d_model)),
+            )
         if self.enable_possession_backbone:
             self.possession_head = PossessionHead(
                 d_model=int(d_model),
@@ -1102,20 +1634,26 @@ class GameTransformerV2(nn.Module):
                 dropout=float(dropout),
                 mu_mode=str(possession_mu_mode),
                 mu_baseline=float(possession_mu_baseline),
-                num_game_features=int(num_game_features),
+                enable_team_possession_split=bool(enable_team_possession_split_head),
+                team_possession_max_delta=float(team_possession_max_delta),
+                num_game_features=int(backbone_context_dim),
             )
             self.event_backbone = TeamEventBackbone(
                 d_model=int(d_model),
                 hidden_dim=int(backbone_hidden),
                 dropout=float(dropout),
-                num_game_features=int(num_game_features),
+                num_game_features=int(backbone_context_dim),
+                num_team_context_features=4 if self.team_ppp_direct_backbone_context else 0,
+                num_advantage_features=3 if self.team_advantage_direct_backbone_context else 0,
             )
             if self.enable_three_pa_share:
                 self.three_pa_share_head = ThreePAShareHead(
                     d_model=int(d_model),
                     hidden_dim=int(three_pa_share_hidden),
                     dropout=float(dropout),
-                    num_game_features=int(num_game_features),
+                    num_game_features=int(backbone_context_dim),
+                    num_team_context_features=4 if self.team_ppp_direct_backbone_context else 0,
+                    num_advantage_features=3 if self.team_advantage_direct_backbone_context else 0,
                 )
 
         self.enable_usage_share_head = bool(enable_usage_share_head)
@@ -1125,6 +1663,154 @@ class GameTransformerV2(nn.Module):
                 d_model=int(d_model),
                 hidden_dim=int(usage_share_head_hidden),
                 dropout=float(dropout),
+            )
+        self.enable_team_points_budget_head = bool(enable_team_points_budget_head)
+        self.team_points_budget_parameterization = str(team_points_budget_parameterization).strip().lower()
+        self.team_points_budget_to_backbone = bool(team_points_budget_to_backbone)
+        self.team_points_budget_latent_hidden = max(1, int(team_points_budget_latent_hidden))
+        self.team_points_budget_head: TeamPointsBudgetHead | None = None
+        self.backbone_team_points_budget_encoder: nn.Module | None = None
+        if self.enable_team_points_budget_head:
+            self.team_points_budget_head = TeamPointsBudgetHead(
+                d_model=int(d_model),
+                hidden_dim=int(team_points_budget_head_hidden),
+                dropout=float(dropout),
+            )
+        if self.team_points_budget_to_backbone:
+            self.backbone_team_points_budget_encoder = nn.Sequential(
+                nn.LayerNorm(4),
+                nn.Linear(4, self.team_points_budget_latent_hidden),
+                nn.GELU(),
+                nn.Linear(self.team_points_budget_latent_hidden, int(d_model)),
+            )
+        self.team_opportunity_budget_parameterization = str(team_opportunity_budget_parameterization).strip().lower()
+        self.team_opportunity_budget_to_backbone = bool(team_opportunity_budget_to_backbone)
+        self.team_opportunity_budget_latent_hidden = max(1, int(team_opportunity_budget_latent_hidden))
+        self.team_opportunity_budget_backbone_alpha = float(team_opportunity_budget_backbone_alpha)
+        self.backbone_team_opportunity_budget_encoder: nn.Module | None = None
+        if self.team_opportunity_budget_to_backbone:
+            self.backbone_team_opportunity_budget_encoder = nn.Sequential(
+                nn.LayerNorm(4),
+                nn.Linear(4, self.team_opportunity_budget_latent_hidden),
+                nn.GELU(),
+                nn.Linear(self.team_opportunity_budget_latent_hidden, int(d_model)),
+            )
+        self.enable_team_ast_budget_head = bool(enable_team_ast_budget_head)
+        self.team_ast_budget_head: TeamAstBudgetHead | None = None
+        if self.enable_team_ast_budget_head:
+            self.team_ast_budget_head = TeamAstBudgetHead(
+                d_model=int(d_model),
+                hidden_dim=int(team_ast_budget_head_hidden),
+                dropout=float(dropout),
+            )
+        self.enable_assist_share_head = bool(enable_assist_share_head)
+        self.assist_share_head: AssistShareHead | None = None
+        self.assist_share_condition_feature_indices = tuple(int(idx) for idx in assist_share_condition_feature_indices)
+        self.num_assist_share_condition_features = int(len(self.assist_share_condition_feature_indices))
+        if len(assist_share_condition_feature_mean) != self.num_assist_share_condition_features:
+            raise ValueError("assist_share_condition_feature_mean must align with assist_share_condition_feature_indices")
+        if len(assist_share_condition_feature_std) != self.num_assist_share_condition_features:
+            raise ValueError("assist_share_condition_feature_std must align with assist_share_condition_feature_indices")
+        if self.num_assist_share_condition_features > 0:
+            self.register_buffer(
+                "_assist_share_condition_feature_indices",
+                torch.tensor(self.assist_share_condition_feature_indices, dtype=torch.long),
+                persistent=False,
+            )
+            self.register_buffer(
+                "_assist_share_condition_feature_mean",
+                torch.tensor(assist_share_condition_feature_mean, dtype=torch.float32),
+                persistent=False,
+            )
+            self.register_buffer(
+                "_assist_share_condition_feature_std",
+                torch.tensor(assist_share_condition_feature_std, dtype=torch.float32),
+                persistent=False,
+            )
+        else:
+            self.register_buffer("_assist_share_condition_feature_indices", torch.empty(0, dtype=torch.long), persistent=False)
+            self.register_buffer("_assist_share_condition_feature_mean", torch.empty(0, dtype=torch.float32), persistent=False)
+            self.register_buffer("_assist_share_condition_feature_std", torch.empty(0, dtype=torch.float32), persistent=False)
+        if self.enable_assist_share_head:
+            self.assist_share_head = AssistShareHead(
+                d_model=int(d_model),
+                hidden_dim=int(assist_share_head_hidden),
+                condition_dim=self.num_assist_share_condition_features,
+                condition_hidden_dim=int(assist_share_condition_hidden),
+                dropout=float(dropout),
+            )
+        self.enable_team_rebound_budget_head = bool(enable_team_rebound_budget_head)
+        self.rebound_budget_parameterization = str(rebound_budget_parameterization).strip().lower()
+        self.rebound_oreb_rate_cap = float(max(0.0, min(1.0, rebound_oreb_rate_cap)))
+        self.rebound_dreb_rate_cap = float(max(0.0, min(1.0, rebound_dreb_rate_cap)))
+        self.rebound_dreb_deterministic_discount = float(
+            max(0.0, min(1.0, rebound_dreb_deterministic_discount))
+        )
+        self.team_rebound_budget_head: TeamReboundBudgetHead | None = None
+        if self.enable_team_rebound_budget_head:
+            self.team_rebound_budget_head = TeamReboundBudgetHead(
+                d_model=int(d_model),
+                hidden_dim=int(team_rebound_budget_head_hidden),
+                dropout=float(dropout),
+                budget_parameterization=self.rebound_budget_parameterization,
+                oreb_rate_cap=self.rebound_oreb_rate_cap,
+                dreb_rate_cap=self.rebound_dreb_rate_cap,
+            )
+        self.enable_rebound_budget_blend_gate = bool(enable_rebound_budget_blend_gate)
+        self.rebound_budget_blend_gate_head: ReboundBudgetBlendGateHead | None = None
+        if self.enable_rebound_budget_blend_gate:
+            self.rebound_budget_blend_gate_head = ReboundBudgetBlendGateHead(
+                d_model=int(d_model),
+                hidden_dim=int(rebound_budget_blend_gate_hidden),
+                dropout=float(dropout),
+                init_alpha=float(rebound_budget_blend_gate_init_alpha),
+            )
+        self.enable_rebound_share_head = bool(enable_rebound_share_head)
+        self.rebound_share_condition_feature_indices = tuple(int(idx) for idx in rebound_share_condition_feature_indices)
+        self.num_rebound_share_condition_features = int(len(self.rebound_share_condition_feature_indices))
+        if len(rebound_share_condition_feature_mean) != self.num_rebound_share_condition_features:
+            raise ValueError("rebound_share_condition_feature_mean must align with rebound_share_condition_feature_indices")
+        if len(rebound_share_condition_feature_std) != self.num_rebound_share_condition_features:
+            raise ValueError("rebound_share_condition_feature_std must align with rebound_share_condition_feature_indices")
+        if self.num_rebound_share_condition_features > 0:
+            self.register_buffer(
+                "_rebound_share_condition_feature_indices",
+                torch.tensor(self.rebound_share_condition_feature_indices, dtype=torch.long),
+                persistent=False,
+            )
+            self.register_buffer(
+                "_rebound_share_condition_feature_mean",
+                torch.tensor(rebound_share_condition_feature_mean, dtype=torch.float32),
+                persistent=False,
+            )
+            self.register_buffer(
+                "_rebound_share_condition_feature_std",
+                torch.tensor(rebound_share_condition_feature_std, dtype=torch.float32),
+                persistent=False,
+            )
+        else:
+            self.register_buffer("_rebound_share_condition_feature_indices", torch.empty(0, dtype=torch.long), persistent=False)
+            self.register_buffer("_rebound_share_condition_feature_mean", torch.empty(0, dtype=torch.float32), persistent=False)
+            self.register_buffer("_rebound_share_condition_feature_std", torch.empty(0, dtype=torch.float32), persistent=False)
+        self.rebound_share_head: ReboundShareHead | None = None
+        if self.enable_rebound_share_head:
+            self.rebound_share_head = ReboundShareHead(
+                d_model=int(d_model),
+                hidden_dim=int(rebound_share_head_hidden),
+                condition_dim=self.num_rebound_share_condition_features,
+                condition_hidden_dim=int(rebound_share_condition_hidden),
+                dropout=float(dropout),
+            )
+        self.enable_ast_blend_gate = bool(enable_ast_blend_gate)
+        self.ast_blend_gate_head: AstBlendGateHead | None = None
+        if self.enable_ast_blend_gate:
+            self.ast_blend_gate_head = AstBlendGateHead(
+                d_model=int(d_model),
+                hidden_dim=int(ast_blend_gate_hidden),
+                condition_dim=self.num_assist_share_condition_features,
+                condition_hidden_dim=int(assist_share_condition_hidden),
+                dropout=float(dropout),
+                init_alpha=float(ast_blend_gate_init_alpha),
             )
 
         token_type_ids = [0, 1, *([2] * MAX_PLAYERS_PER_TEAM), 1, *([2] * MAX_PLAYERS_PER_TEAM)]
@@ -1185,6 +1871,341 @@ class GameTransformerV2(nn.Module):
         seq = seq + type_emb + side_emb
         return self.dropout(seq)
 
+    def _derived_env_feature_count(self) -> int:
+        names = set(self.backbone_env_feature_names)
+        count = 0
+        if "team_pace_szn" in names:
+            count += 2
+        if "team_off_rtg_szn" in names and "opp_def_rtg_szn" in names:
+            count += 2
+        if self.backbone_env_enrich_features:
+            game_names = set(self.game_feature_names)
+            if "team_pace_szn" in names:
+                count += 1
+            if "team_off_rtg_szn" in names and "team_def_rtg_szn" in names:
+                count += 2
+            if "vegas_total" in game_names and "vegas_spread" in game_names:
+                count += 3
+            if "vegas_total" in game_names and "estimated_possessions" in game_names:
+                count += 1
+        return count
+
+    def _derived_team_market_feature_count(self) -> int:
+        if not bool(self.backbone_side_market_context):
+            return 0
+        game_names = set(self.game_feature_names)
+        if "vegas_total" not in game_names or "vegas_spread" not in game_names:
+            return 0
+        count = 4
+        if "estimated_possessions" in game_names:
+            count += 2
+        return count
+
+    def _build_backbone_environment_context(
+        self,
+        player_features: torch.Tensor,
+        player_valid_mask: torch.Tensor,
+        game_features: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        if self.num_game_features <= 0 and self.num_backbone_env_features <= 0:
+            return None
+
+        pieces: list[torch.Tensor] = []
+        derived: list[torch.Tensor] = []
+        if self.num_game_features > 0:
+            if game_features is None:
+                raise ValueError("game_features is required when num_game_features > 0")
+            pieces.append(game_features)
+            if self.backbone_env_enrich_features:
+                game_name_to_idx = {name: i for i, name in enumerate(self.game_feature_names)}
+                total_idx = game_name_to_idx.get("vegas_total")
+                spread_idx = game_name_to_idx.get("vegas_spread")
+                poss_idx = game_name_to_idx.get("estimated_possessions")
+                if total_idx is not None and spread_idx is not None:
+                    total = game_features[:, total_idx : total_idx + 1]
+                    spread = game_features[:, spread_idx : spread_idx + 1]
+                    derived.append(spread.abs())
+                    derived.append(0.5 * (total - spread))  # home implied total
+                    derived.append(0.5 * (total + spread))  # away implied total
+                if total_idx is not None and poss_idx is not None:
+                    total = game_features[:, total_idx : total_idx + 1]
+                    poss = game_features[:, poss_idx : poss_idx + 1].clamp_min(1.0)
+                    derived.append(total / poss)
+
+        if self.num_backbone_env_features > 0:
+            idx = torch.as_tensor(
+                self.backbone_env_feature_indices,
+                device=player_features.device,
+                dtype=torch.long,
+            )
+            env_feats = player_features.index_select(dim=-1, index=idx)
+            valid = player_valid_mask.to(dtype=player_features.dtype).unsqueeze(-1)
+            denom = valid.sum(dim=2).clamp_min(1.0)
+            team_env = (env_feats * valid).sum(dim=2) / denom
+            pieces.append(team_env.reshape(player_features.shape[0], -1))
+
+            names = {name: i for i, name in enumerate(self.backbone_env_feature_names)}
+            if "team_pace_szn" in names:
+                pace = team_env[:, :, names["team_pace_szn"]]
+                derived.append(pace.mean(dim=1, keepdim=True))
+                derived.append((pace[:, 0] - pace[:, 1]).unsqueeze(1))
+                if self.backbone_env_enrich_features:
+                    derived.append((pace[:, 0] - pace[:, 1]).abs().unsqueeze(1))
+            if "team_off_rtg_szn" in names and "opp_def_rtg_szn" in names:
+                off = team_env[:, :, names["team_off_rtg_szn"]]
+                opp_def = team_env[:, :, names["opp_def_rtg_szn"]]
+                derived.append((off[:, 0] - opp_def[:, 0]).unsqueeze(1))
+                derived.append((off[:, 1] - opp_def[:, 1]).unsqueeze(1))
+            if self.backbone_env_enrich_features and "team_off_rtg_szn" in names and "team_def_rtg_szn" in names:
+                off = team_env[:, :, names["team_off_rtg_szn"]]
+                team_def = team_env[:, :, names["team_def_rtg_szn"]]
+                derived.append((off[:, 1] - team_def[:, 0]).unsqueeze(1))
+                derived.append((off[:, 0] - team_def[:, 1]).unsqueeze(1))
+
+        if derived:
+            pieces.append(torch.cat(derived, dim=1))
+
+        if not pieces:
+            return None
+        raw_context = torch.cat(pieces, dim=1)
+        if self.backbone_env_adapter is not None:
+            return self.backbone_env_adapter(raw_context)
+        return raw_context
+
+    def _build_backbone_team_market_context(
+        self,
+        game_features: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        if not bool(self.backbone_side_market_context):
+            return None
+        if self.num_game_features <= 0 or game_features is None:
+            return None
+        game_name_to_idx = {name: i for i, name in enumerate(self.game_feature_names)}
+        total_idx = game_name_to_idx.get("vegas_total")
+        spread_idx = game_name_to_idx.get("vegas_spread")
+        if total_idx is None or spread_idx is None:
+            return None
+
+        total = game_features[:, total_idx : total_idx + 1]
+        spread = game_features[:, spread_idx : spread_idx + 1]
+        home_total = 0.5 * (total - spread)
+        away_total = 0.5 * (total + spread)
+        abs_spread = spread.abs()
+        home_margin = home_total - away_total
+        away_margin = away_total - home_total
+
+        home_feats = [home_total, away_total, home_margin, abs_spread]
+        away_feats = [away_total, home_total, away_margin, abs_spread]
+
+        poss_idx = game_name_to_idx.get("estimated_possessions")
+        if poss_idx is not None:
+            poss = game_features[:, poss_idx : poss_idx + 1].clamp_min(1.0)
+            home_ppp = home_total / poss
+            away_ppp = away_total / poss
+            home_feats.extend([home_ppp, away_ppp])
+            away_feats.extend([away_ppp, home_ppp])
+
+        return torch.stack(
+            [
+                torch.cat(home_feats, dim=1),
+                torch.cat(away_feats, dim=1),
+            ],
+            dim=1,
+        )
+
+    def _build_backbone_team_points_budget_context(
+        self,
+        team_points_budget: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        if not self.team_points_budget_to_backbone or team_points_budget is None:
+            return None
+        if team_points_budget.ndim != 2 or int(team_points_budget.shape[1]) != 2:
+            raise ValueError("team_points_budget must have shape (B,2)")
+
+        home_total = team_points_budget[:, 0:1]
+        away_total = team_points_budget[:, 1:2]
+        home_margin = home_total - away_total
+        away_margin = away_total - home_total
+        return torch.stack(
+            [
+                torch.cat([home_total, away_total, home_margin, home_margin.abs()], dim=1),
+                torch.cat([away_total, home_total, away_margin, away_margin.abs()], dim=1),
+            ],
+            dim=1,
+        )
+
+    def _resolve_team_points_budget(
+        self,
+        *,
+        game_features: torch.Tensor | None,
+        team_points_budget_out: TeamPointsBudgetHeadOutputs | None,
+        team_ppp_out: TeamPPPHeadOutputs | None = None,
+    ) -> torch.Tensor | None:
+        mode = str(getattr(self, "team_points_budget_parameterization", "absolute")).strip().lower()
+        if mode == "market_implied":
+            if self.num_game_features <= 0 or game_features is None:
+                return None
+            game_name_to_idx = {name: i for i, name in enumerate(self.game_feature_names)}
+            total_idx = game_name_to_idx.get("vegas_total")
+            spread_idx = game_name_to_idx.get("vegas_spread")
+            if total_idx is None or spread_idx is None:
+                return None
+            total = game_features[:, total_idx : total_idx + 1]
+            spread = game_features[:, spread_idx : spread_idx + 1]
+            home_total = 0.5 * (total - spread)
+            away_total = 0.5 * (total + spread)
+            return torch.cat([home_total, away_total], dim=1)
+        if mode == "team_ppp_implied":
+            if team_ppp_out is None:
+                return None
+            if self.num_game_features <= 0 or game_features is None:
+                return None
+            game_name_to_idx = {name: i for i, name in enumerate(self.game_feature_names)}
+            poss_idx = game_name_to_idx.get("estimated_possessions")
+            if poss_idx is None:
+                return None
+            poss = game_features[:, poss_idx : poss_idx + 1].expand(-1, 2)
+            return team_ppp_out.team_ppp * poss.clamp_min(1.0)
+        if team_points_budget_out is None:
+            return None
+        return team_points_budget_out.team_points
+
+    def _resolve_team_opportunity_share(
+        self,
+        *,
+        game_features: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        mode = str(getattr(self, "team_opportunity_budget_parameterization", "absolute")).strip().lower()
+        if mode != "market_implied_share":
+            return None
+        if self.num_game_features <= 0 or game_features is None:
+            return None
+        game_name_to_idx = {name: i for i, name in enumerate(self.game_feature_names)}
+        total_idx = game_name_to_idx.get("vegas_total")
+        spread_idx = game_name_to_idx.get("vegas_spread")
+        if total_idx is None or spread_idx is None:
+            return None
+        total = game_features[:, total_idx : total_idx + 1].clamp_min(1e-6)
+        spread = game_features[:, spread_idx : spread_idx + 1]
+        home_total = 0.5 * (total - spread)
+        away_total = 0.5 * (total + spread)
+        home_share = torch.clamp(home_total / total, min=0.0, max=1.0)
+        away_share = torch.clamp(away_total / total, min=0.0, max=1.0)
+        share_sum = (home_share + away_share).clamp_min(1e-6)
+        return torch.cat([home_share / share_sum, away_share / share_sum], dim=1)
+
+    def _build_backbone_team_opportunity_budget_context(
+        self,
+        team_opportunity_share: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        if not self.team_opportunity_budget_to_backbone or team_opportunity_share is None:
+            return None
+        if team_opportunity_share.ndim != 2 or int(team_opportunity_share.shape[1]) != 2:
+            raise ValueError("team_opportunity_share must have shape (B,2)")
+
+        home_share = team_opportunity_share[:, 0:1]
+        away_share = team_opportunity_share[:, 1:2]
+        home_gap = home_share - away_share
+        away_gap = away_share - home_share
+        abs_gap = home_gap.abs()
+        return torch.stack(
+            [
+                torch.cat([home_share, away_share, home_gap, abs_gap], dim=1),
+                torch.cat([away_share, home_share, away_gap, abs_gap], dim=1),
+            ],
+            dim=1,
+        )
+
+    def _build_team_ppp_context(
+        self,
+        team_ppp: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        if team_ppp is None:
+            return None
+        if team_ppp.ndim != 2 or int(team_ppp.shape[1]) != 2:
+            raise ValueError("team_ppp must have shape (B,2)")
+
+        home_ppp = team_ppp[:, 0:1]
+        away_ppp = team_ppp[:, 1:2]
+        home_gap = home_ppp - away_ppp
+        away_gap = away_ppp - home_ppp
+        abs_gap = home_gap.abs()
+        return torch.stack(
+            [
+                torch.cat([home_ppp, away_ppp, home_gap, abs_gap], dim=1),
+                torch.cat([away_ppp, home_ppp, away_gap, abs_gap], dim=1),
+            ],
+            dim=1,
+        )
+
+    def _build_team_advantage_context(
+        self,
+        team_advantage: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        if team_advantage is None:
+            return None
+        if team_advantage.ndim != 1:
+            raise ValueError("team_advantage must have shape (B,)")
+        home_adv = team_advantage.unsqueeze(1)
+        away_adv = -home_adv
+        abs_adv = home_adv.abs()
+        return torch.stack(
+            [
+                torch.cat([home_adv, away_adv, abs_adv], dim=1),
+                torch.cat([away_adv, home_adv, abs_adv], dim=1),
+            ],
+            dim=1,
+        )
+
+    def _build_env_side_channel_context(
+        self,
+        player_features: torch.Tensor,
+        player_valid_mask: torch.Tensor,
+        game_features: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        raw_context = self._build_backbone_environment_context(
+            player_features=player_features,
+            player_valid_mask=player_valid_mask,
+            game_features=game_features,
+        )
+        if raw_context is None:
+            return None
+        if self.env_side_channel_encoder is not None:
+            return self.env_side_channel_encoder(raw_context)
+        return raw_context
+
+    def _extract_assist_share_condition_features(self, player_features: torch.Tensor) -> torch.Tensor | None:
+        if self.num_assist_share_condition_features <= 0:
+            return None
+        if player_features.ndim != 4:
+            raise ValueError("player_features must have shape (B,2,15,F)")
+        cond = torch.index_select(
+            player_features,
+            dim=-1,
+            index=self._assist_share_condition_feature_indices.to(device=player_features.device),
+        )
+        mean = self._assist_share_condition_feature_mean.to(device=player_features.device, dtype=player_features.dtype)
+        std = self._assist_share_condition_feature_std.to(device=player_features.device, dtype=player_features.dtype)
+        std = torch.where(std.abs() > 1e-6, std, torch.ones_like(std))
+        raw = (cond * std.view(1, 1, 1, -1)) + mean.view(1, 1, 1, -1)
+        return torch.cat([raw[:, 0], raw[:, 1]], dim=1)
+
+    def _extract_rebound_share_condition_features(self, player_features: torch.Tensor) -> torch.Tensor | None:
+        if self.num_rebound_share_condition_features <= 0:
+            return None
+        if player_features.ndim != 4:
+            raise ValueError("player_features must have shape (B,2,15,F)")
+        cond = torch.index_select(
+            player_features,
+            dim=-1,
+            index=self._rebound_share_condition_feature_indices.to(device=player_features.device),
+        )
+        mean = self._rebound_share_condition_feature_mean.to(device=player_features.device, dtype=player_features.dtype)
+        std = self._rebound_share_condition_feature_std.to(device=player_features.device, dtype=player_features.dtype)
+        std = torch.where(std.abs() > 1e-6, std, torch.ones_like(std))
+        raw = (cond * std.view(1, 1, 1, -1)) + mean.view(1, 1, 1, -1)
+        return torch.cat([raw[:, 0], raw[:, 1]], dim=1)
+
     def forward(
         self,
         player_features: torch.Tensor,
@@ -1192,6 +2213,7 @@ class GameTransformerV2(nn.Module):
         *,
         game_features: torch.Tensor | None = None,
         team_features: torch.Tensor | None = None,
+        efficiency_sidecar_features: torch.Tensor | None = None,
         sample_active: bool = False,
         active_temperature: float = 1.0,
         target_counts: torch.Tensor | None = None,
@@ -1201,6 +2223,8 @@ class GameTransformerV2(nn.Module):
         minutes_use_target_active: bool = False,
         minutes_teacher_forcing_prob: float = 1.0,
         minutes_teacher_forcing_mode: str = "batch",
+        starter_hint_mask: torch.Tensor | None = None,
+        starter_promotion_candidate_mask: torch.Tensor | None = None,
         run_flow: bool = False,
         flow_targets: torch.Tensor | None = None,
         flow_observed_mask: torch.Tensor | None = None,
@@ -1216,6 +2240,22 @@ class GameTransformerV2(nn.Module):
             raise ValueError("player_valid_mask must have shape (B,2,15)")
         if player_valid_mask.shape[:3] != player_features.shape[:3]:
             raise ValueError("player_valid_mask must align with player_features")
+        if self.num_efficiency_sidecar_features > 0:
+            if efficiency_sidecar_features is None:
+                raise ValueError(
+                    "efficiency_sidecar_features is required when num_efficiency_sidecar_features > 0"
+                )
+            expected_shape = (
+                player_features.shape[0],
+                2,
+                MAX_PLAYERS_PER_TEAM,
+                self.num_efficiency_sidecar_features,
+            )
+            if tuple(efficiency_sidecar_features.shape) != expected_shape:
+                raise ValueError(
+                    "efficiency_sidecar_features must have shape "
+                    f"{expected_shape}, got {tuple(efficiency_sidecar_features.shape)}"
+                )
 
         bsz = player_features.shape[0]
         valid_home = player_valid_mask[:, 0].to(dtype=torch.bool)
@@ -1250,6 +2290,29 @@ class GameTransformerV2(nn.Module):
                 dim=1,
             )
 
+        starter_hint_flat: torch.Tensor | None = None
+        if starter_hint_mask is not None:
+            if starter_hint_mask.ndim != 3 or starter_hint_mask.shape != player_valid_mask.shape:
+                raise ValueError("starter_hint_mask must have shape (B,2,15)")
+            starter_hint_flat = torch.cat(
+                [starter_hint_mask[:, 0].to(dtype=torch.bool), starter_hint_mask[:, 1].to(dtype=torch.bool)],
+                dim=1,
+            )
+        starter_promotion_candidate_flat: torch.Tensor | None = None
+        if starter_promotion_candidate_mask is not None:
+            if (
+                starter_promotion_candidate_mask.ndim != 3
+                or starter_promotion_candidate_mask.shape != player_valid_mask.shape
+            ):
+                raise ValueError("starter_promotion_candidate_mask must have shape (B,2,15)")
+            starter_promotion_candidate_flat = torch.cat(
+                [
+                    starter_promotion_candidate_mask[:, 0].to(dtype=torch.bool),
+                    starter_promotion_candidate_mask[:, 1].to(dtype=torch.bool),
+                ],
+                dim=1,
+            )
+
         active_out = self.active_head(
             player_states,
             team_states,
@@ -1278,9 +2341,18 @@ class GameTransformerV2(nn.Module):
             player_team_index,
             valid_flat,
             minutes_active_mask,
+            starter_hint_mask=starter_hint_flat,
+            starter_promotion_candidate_mask=starter_promotion_candidate_flat,
         )
 
         flow_out: JointGameFlowOutputs | None = None
+        env_side_channel_context: torch.Tensor | None = None
+        if self.enable_env_side_channel:
+            env_side_channel_context = self._build_env_side_channel_context(
+                player_features=player_features,
+                player_valid_mask=player_valid_mask,
+                game_features=game_features,
+            )
         if bool(run_flow) or flow_targets is not None:
             if flow_targets is None:
                 raise ValueError("run_flow=True requires flow_targets")
@@ -1332,48 +2404,199 @@ class GameTransformerV2(nn.Module):
                 valid_mask=valid_flat,
                 observed_mask=flow_obs_flat,
                 minutes_context=flow_minutes_flat,
+                env_context=env_side_channel_context,
             )
+
+        team_ppp_out: TeamPPPHeadOutputs | None = None
+        if self.enable_team_ppp_head and self.team_ppp_head is not None:
+            team_ppp_out = self.team_ppp_head(
+                team_states=team_states,
+                game_state=game_state,
+            )
+        team_advantage_out: TeamAdvantageHeadOutputs | None = None
+        if self.enable_team_advantage_head and self.team_advantage_head is not None:
+            team_advantage_out = self.team_advantage_head(
+                team_states=team_states,
+                game_state=game_state,
+                sample=bool(sample_backbone),
+            )
+        team_ppp_context = self._build_team_ppp_context(
+            team_ppp_out.team_ppp if team_ppp_out is not None else None
+        )
+        team_advantage_context = self._build_team_advantage_context(
+            (
+                team_advantage_out.sampled_advantage
+                if team_advantage_out is not None and team_advantage_out.sampled_advantage is not None
+                else (team_advantage_out.mu if team_advantage_out is not None else None)
+            )
+        )
 
         efficiency_out: EfficiencyHeadOutputs | None = None
         if self.enable_efficiency_head and self.efficiency_head is not None:
+            efficiency_player_states = player_states
+            if self.efficiency_player_sidecar_encoder is not None and efficiency_sidecar_features is not None:
+                sidecar_flat = torch.cat([efficiency_sidecar_features[:, 0], efficiency_sidecar_features[:, 1]], dim=1)
+                sidecar_encoded = self.efficiency_player_sidecar_encoder(
+                    sidecar_flat.to(device=player_states.device, dtype=player_states.dtype)
+                )
+                sidecar_encoded = sidecar_encoded * valid_flat.to(dtype=sidecar_encoded.dtype).unsqueeze(-1)
+                efficiency_player_states = efficiency_player_states + float(self.efficiency_sidecar_alpha) * sidecar_encoded
+            efficiency_team_states = team_states
+            efficiency_team_market_context = self._build_backbone_team_market_context(game_features)
+            if self.efficiency_team_market_encoder is not None and efficiency_team_market_context is not None:
+                efficiency_team_states = efficiency_team_states + float(self.efficiency_market_alpha) * (
+                    self.efficiency_team_market_encoder(
+                        efficiency_team_market_context.to(
+                            device=efficiency_team_states.device,
+                            dtype=efficiency_team_states.dtype,
+                        )
+                    )
+                )
+            if self.efficiency_team_ppp_encoder is not None and team_ppp_context is not None:
+                efficiency_team_states = efficiency_team_states + float(self.team_ppp_efficiency_alpha) * (
+                    self.efficiency_team_ppp_encoder(
+                        team_ppp_context.to(
+                            device=efficiency_team_states.device,
+                            dtype=efficiency_team_states.dtype,
+                        )
+                    )
+                )
             efficiency_out = self.efficiency_head(
-                player_states=player_states,
-                team_states=team_states,
+                player_states=efficiency_player_states,
+                team_states=efficiency_team_states,
                 game_state=game_state,
                 player_team_index=player_team_index,
                 valid_mask=valid_flat,
+                team_context=(
+                    team_ppp_context.to(device=player_states.device, dtype=player_states.dtype)
+                    if self.team_ppp_direct_efficiency_context and team_ppp_context is not None
+                    else None
+                ),
             )
 
         # Possession-coupled event backbone (runs when backbone is enabled)
         poss_out: PossessionHeadOutputs | None = None
         backbone_out: TeamEventBackboneOutputs | None = None
+        team_points_budget_out: TeamPointsBudgetHeadOutputs | None = None
+        if self.enable_team_points_budget_head and self.team_points_budget_head is not None:
+            team_points_budget_out = self.team_points_budget_head(
+                team_states=team_states,
+                game_state=game_state,
+            )
         if self.enable_possession_backbone and self.possession_head is not None and self.event_backbone is not None:
+            backbone_env_context = (
+                env_side_channel_context
+                if env_side_channel_context is not None
+                else self._build_backbone_environment_context(
+                    player_features=player_features,
+                    player_valid_mask=player_valid_mask,
+                    game_features=game_features,
+                )
+            )
+            backbone_team_states = team_states
+            backbone_team_market_context = self._build_backbone_team_market_context(game_features)
+            if self.backbone_side_market_encoder is not None and backbone_team_market_context is not None:
+                backbone_team_states = backbone_team_states + self.backbone_side_market_encoder(
+                    backbone_team_market_context.to(
+                        device=backbone_team_states.device,
+                        dtype=backbone_team_states.dtype,
+                    )
+                )
+            if self.backbone_team_ppp_encoder is not None and team_ppp_context is not None:
+                backbone_team_states = backbone_team_states + float(self.team_ppp_backbone_alpha) * (
+                    self.backbone_team_ppp_encoder(
+                        team_ppp_context.to(
+                            device=backbone_team_states.device,
+                            dtype=backbone_team_states.dtype,
+                        )
+                    )
+                )
+            resolved_team_points_budget = self._resolve_team_points_budget(
+                game_features=game_features,
+                team_points_budget_out=team_points_budget_out,
+                team_ppp_out=team_ppp_out,
+            )
+            resolved_team_opportunity_share = self._resolve_team_opportunity_share(
+                game_features=game_features,
+            )
+            backbone_team_points_budget_context = self._build_backbone_team_points_budget_context(
+                resolved_team_points_budget
+            )
+            if (
+                self.backbone_team_points_budget_encoder is not None
+                and backbone_team_points_budget_context is not None
+            ):
+                backbone_team_states = backbone_team_states + self.backbone_team_points_budget_encoder(
+                    backbone_team_points_budget_context.to(
+                        device=backbone_team_states.device,
+                        dtype=backbone_team_states.dtype,
+                    )
+                )
+            backbone_team_opportunity_context = self._build_backbone_team_opportunity_budget_context(
+                resolved_team_opportunity_share
+            )
+            if (
+                self.backbone_team_opportunity_budget_encoder is not None
+                and backbone_team_opportunity_context is not None
+            ):
+                backbone_team_states = backbone_team_states + float(self.team_opportunity_budget_backbone_alpha) * (
+                    self.backbone_team_opportunity_budget_encoder(
+                        backbone_team_opportunity_context.to(
+                            device=backbone_team_states.device,
+                            dtype=backbone_team_states.dtype,
+                        )
+                    )
+                )
             # Optionally detach encoder outputs to prevent backbone gradients
             # from destabilizing the flow head during phase2 warmup.
             # Set detach_backbone=False once the flow head is stable.
             if detach_backbone:
                 game_state_bb = game_state.detach()
-                team_states_bb = team_states.detach()
+                team_states_bb = backbone_team_states.detach()
             else:
                 game_state_bb = game_state
-                team_states_bb = team_states
+                team_states_bb = backbone_team_states
             poss_out = self.possession_head(
-                game_state_bb, sample=bool(sample_backbone), game_features=game_features,
+                game_state_bb, sample=bool(sample_backbone), game_features=backbone_env_context,
             )
-            if poss_out.sampled_poss is not None:
+            if getattr(poss_out, "team_poss", None) is not None:
+                poss_for_backbone = poss_out.team_poss
+            elif poss_out.sampled_poss is not None:
                 poss_for_backbone = poss_out.sampled_poss
             else:
                 # During training (no sampling), use the predicted mean
                 poss_for_backbone = poss_out.mu
             backbone_out = self.event_backbone(
                 team_states_bb, game_state_bb, poss_for_backbone,
-                sample=bool(sample_backbone), game_features=game_features,
+                sample=bool(sample_backbone),
+                game_features=backbone_env_context,
+                team_context=(
+                    team_ppp_context.to(device=team_states_bb.device, dtype=team_states_bb.dtype)
+                    if self.team_ppp_direct_backbone_context and team_ppp_context is not None
+                    else None
+                ),
+                advantage_context=(
+                    team_advantage_context.to(device=team_states_bb.device, dtype=team_states_bb.dtype)
+                    if self.team_advantage_direct_backbone_context and team_advantage_context is not None
+                    else None
+                ),
             )
             # Optional shot-mix latent
             if self.three_pa_share_head is not None and backbone_out is not None:
                 three_pa_share = self.three_pa_share_head(
                     team_states_bb, game_state_bb, backbone_out.fga,
-                    sample=bool(sample_backbone), game_features=game_features,
+                    sample=bool(sample_backbone),
+                    game_features=backbone_env_context,
+                    team_context=(
+                        team_ppp_context.to(device=team_states_bb.device, dtype=team_states_bb.dtype)
+                        if self.team_ppp_direct_backbone_context and team_ppp_context is not None
+                        else None
+                    ),
+                    advantage_context=(
+                        team_advantage_context.to(device=team_states_bb.device, dtype=team_states_bb.dtype)
+                        if self.team_advantage_direct_backbone_context and team_advantage_context is not None
+                        else None
+                    ),
                 )
                 backbone_out = TeamEventBackboneOutputs(
                     fga=backbone_out.fga,
@@ -1392,6 +2615,54 @@ class GameTransformerV2(nn.Module):
                 game_state=game_state,
                 player_team_index=player_team_index,
             )
+        team_ast_budget_out: TeamAstBudgetHeadOutputs | None = None
+        if self.enable_team_ast_budget_head and self.team_ast_budget_head is not None:
+            team_ast_budget_out = self.team_ast_budget_head(
+                team_states=team_states,
+                game_state=game_state,
+            )
+        assist_share_out: AssistShareHeadOutputs | None = None
+        if self.enable_assist_share_head and self.assist_share_head is not None:
+            assist_share_condition = self._extract_assist_share_condition_features(player_features)
+            assist_share_out = self.assist_share_head(
+                player_states=player_states,
+                team_states=team_states,
+                game_state=game_state,
+                player_team_index=player_team_index,
+                condition_features=assist_share_condition,
+            )
+        team_rebound_budget_out: TeamReboundBudgetHeadOutputs | None = None
+        if self.enable_team_rebound_budget_head and self.team_rebound_budget_head is not None:
+            team_rebound_budget_out = self.team_rebound_budget_head(
+                team_states=team_states,
+                game_state=game_state,
+            )
+        rebound_budget_blend_gate_out: ReboundBudgetBlendGateHeadOutputs | None = None
+        if self.enable_rebound_budget_blend_gate and self.rebound_budget_blend_gate_head is not None:
+            rebound_budget_blend_gate_out = self.rebound_budget_blend_gate_head(
+                team_states=team_states,
+                game_state=game_state,
+            )
+        rebound_share_out: ReboundShareHeadOutputs | None = None
+        if self.enable_rebound_share_head and self.rebound_share_head is not None:
+            rebound_share_condition = self._extract_rebound_share_condition_features(player_features)
+            rebound_share_out = self.rebound_share_head(
+                player_states=player_states,
+                team_states=team_states,
+                game_state=game_state,
+                player_team_index=player_team_index,
+                condition_features=rebound_share_condition,
+            )
+        ast_blend_gate_out: AstBlendGateHeadOutputs | None = None
+        if self.enable_ast_blend_gate and self.ast_blend_gate_head is not None:
+            assist_share_condition = self._extract_assist_share_condition_features(player_features)
+            ast_blend_gate_out = self.ast_blend_gate_head(
+                player_states=player_states,
+                team_states=team_states,
+                game_state=game_state,
+                player_team_index=player_team_index,
+                condition_features=assist_share_condition,
+            )
 
         return GameTransformerV2Outputs(
             game_state=game_state,
@@ -1406,14 +2677,78 @@ class GameTransformerV2(nn.Module):
             possession=poss_out,
             backbone=backbone_out,
             usage_share=usage_share_out,
+            team_ppp=team_ppp_out,
+            team_advantage=team_advantage_out,
+            team_points_budget=team_points_budget_out,
+            team_ast_budget=team_ast_budget_out,
+            assist_share=assist_share_out,
+            team_rebound_budget=team_rebound_budget_out,
+            rebound_budget_blend_gate=rebound_budget_blend_gate_out,
+            rebound_share=rebound_share_out,
+            ast_blend_gate=ast_blend_gate_out,
+            env_context=env_side_channel_context,
         )
 
 
 def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransformerV2:
-    return GameTransformerV2(
+    requested_backbone_env_feature_columns = list(getattr(config, "backbone_env_feature_columns", []))
+    feature_index = {name: idx for idx, name in enumerate(config.feature_columns)}
+    backbone_env_feature_columns = [name for name in requested_backbone_env_feature_columns if name in feature_index]
+    backbone_env_feature_indices = [feature_index[name] for name in backbone_env_feature_columns]
+    requested_assist_share_condition_feature_columns = list(
+        getattr(config, "assist_share_condition_feature_columns", [])
+    )
+    missing_assist_share_condition_feature_columns = [
+        name for name in requested_assist_share_condition_feature_columns if name not in feature_index
+    ]
+    if missing_assist_share_condition_feature_columns:
+        raise ValueError(
+            "assist_share_condition_feature_columns missing from feature_columns: "
+            f"{missing_assist_share_condition_feature_columns}"
+        )
+    assist_share_condition_feature_indices = [
+        feature_index[name] for name in requested_assist_share_condition_feature_columns
+    ]
+    assist_share_condition_feature_mean = [
+        float(config.feature_mean[idx]) for idx in assist_share_condition_feature_indices
+    ]
+    assist_share_condition_feature_std = [
+        float(config.feature_std[idx]) for idx in assist_share_condition_feature_indices
+    ]
+    requested_rebound_share_condition_feature_columns = list(
+        getattr(config, "rebound_share_condition_feature_columns", [])
+    )
+    missing_rebound_share_condition_feature_columns = [
+        name for name in requested_rebound_share_condition_feature_columns if name not in feature_index
+    ]
+    if missing_rebound_share_condition_feature_columns:
+        raise ValueError(
+            "rebound_share_condition_feature_columns missing from feature_columns: "
+            f"{missing_rebound_share_condition_feature_columns}"
+        )
+    rebound_share_condition_feature_indices = [
+        feature_index[name] for name in requested_rebound_share_condition_feature_columns
+    ]
+    rebound_share_condition_feature_mean = [
+        float(config.feature_mean[idx]) for idx in rebound_share_condition_feature_indices
+    ]
+    rebound_share_condition_feature_std = [
+        float(config.feature_std[idx]) for idx in rebound_share_condition_feature_indices
+    ]
+    model = GameTransformerV2(
         num_player_features=len(config.feature_columns),
         num_game_features=len(config.game_feature_columns),
         num_team_features=len(config.team_feature_columns),
+        num_efficiency_sidecar_features=len(getattr(config, "efficiency_sidecar_feature_columns", [])),
+        game_feature_names=config.game_feature_columns,
+        backbone_env_feature_indices=backbone_env_feature_indices,
+        backbone_env_feature_names=backbone_env_feature_columns,
+        backbone_env_enrich_features=bool(getattr(config, "backbone_env_enrich_features", False)),
+        backbone_side_market_context=bool(getattr(config, "backbone_side_market_context", False)),
+        backbone_side_market_hidden=int(getattr(config, "backbone_side_market_hidden", 32)),
+        enable_env_side_channel=bool(getattr(config, "enable_env_side_channel", False)),
+        env_side_channel_dim=int(getattr(config, "env_side_channel_dim", 32)),
+        env_side_channel_hidden=int(getattr(config, "env_side_channel_hidden", 64)),
         d_model=int(config.d_model),
         hidden_dim=int(config.hidden_dim),
         num_layers=int(config.num_layers),
@@ -1424,6 +2759,18 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         max_active_count=int(config.max_active_count),
         total_minutes_per_team=float(config.total_minutes_per_team),
         max_minutes_per_player=float(config.max_minutes_per_player),
+        enable_minutes_hurdle_head=bool(getattr(config, "enable_minutes_hurdle_head", False)),
+        minutes_hurdle_hidden=int(getattr(config, "minutes_hurdle_hidden", 64)),
+        minutes_hurdle_sigma_floor=float(getattr(config, "minutes_hurdle_sigma_floor", 0.5)),
+        enable_minutes_role_head=bool(getattr(config, "enable_minutes_role_head", False)),
+        minutes_role_use_context_for_preferences=bool(
+            getattr(config, "minutes_role_use_context_for_preferences", True)
+        ),
+        minutes_role_hidden=int(getattr(config, "minutes_role_hidden", 64)),
+        minutes_role_embedding_dim=int(getattr(config, "minutes_role_embedding_dim", 32)),
+        minutes_role_num_classes=int(getattr(config, "minutes_role_num_classes", 5)),
+        enable_starter_promotion_head=bool(getattr(config, "enable_starter_promotion_head", False)),
+        starter_promotion_hidden_dim=int(getattr(config, "starter_promotion_hidden_dim", 64)),
         flow_coupling_type=str(config.flow_coupling_type),
         flow_num_blocks=int(config.flow_num_blocks),
         flow_scale_clip=float(config.flow_scale_clip),
@@ -1445,13 +2792,81 @@ def build_game_transformer_v2(config: GameTransformerV2Config) -> GameTransforme
         efficiency_fg2_prior_strength=float(getattr(config, "efficiency_fg2_prior_strength", 8.0)),
         efficiency_fg3_prior_mean=float(getattr(config, "efficiency_fg3_prior_mean", 0.36)),
         efficiency_fg3_prior_strength=float(getattr(config, "efficiency_fg3_prior_strength", 8.0)),
+        efficiency_market_context=bool(getattr(config, "efficiency_market_context", False)),
+        efficiency_market_hidden=int(getattr(config, "efficiency_market_hidden", 32)),
+        efficiency_market_alpha=float(getattr(config, "efficiency_market_alpha", 1.0)),
+        efficiency_sidecar_hidden=int(getattr(config, "efficiency_sidecar_hidden", 32)),
+        efficiency_sidecar_alpha=float(getattr(config, "efficiency_sidecar_alpha", 1.0)),
+        enable_team_ppp_head=bool(getattr(config, "enable_team_ppp_head", False)),
+        team_ppp_head_hidden=int(getattr(config, "team_ppp_head_hidden", 128)),
+        team_ppp_to_backbone=bool(getattr(config, "team_ppp_to_backbone", False)),
+        team_ppp_latent_hidden=int(getattr(config, "team_ppp_latent_hidden", 32)),
+        team_ppp_backbone_alpha=float(getattr(config, "team_ppp_backbone_alpha", 1.0)),
+        team_ppp_to_efficiency=bool(getattr(config, "team_ppp_to_efficiency", False)),
+        team_ppp_efficiency_alpha=float(getattr(config, "team_ppp_efficiency_alpha", 1.0)),
+        team_ppp_direct_backbone_context=bool(getattr(config, "team_ppp_direct_backbone_context", False)),
+        team_ppp_direct_efficiency_context=bool(getattr(config, "team_ppp_direct_efficiency_context", False)),
+        enable_team_advantage_head=bool(getattr(config, "enable_team_advantage_head", False)),
+        team_advantage_head_hidden=int(getattr(config, "team_advantage_head_hidden", 64)),
+        team_advantage_direct_backbone_context=bool(
+            getattr(config, "team_advantage_direct_backbone_context", False)
+        ),
         enable_possession_backbone=bool(getattr(config, "enable_possession_backbone", False)),
         enable_three_pa_share=bool(getattr(config, "enable_three_pa_share", False)),
         possession_head_hidden=int(getattr(config, "possession_head_hidden", 128)),
         possession_mu_mode=str(getattr(config, "possession_mu_mode", "absolute")),
         possession_mu_baseline=float(getattr(config, "possession_mu_baseline", 100.0)),
+        enable_team_possession_split_head=bool(getattr(config, "enable_team_possession_split_head", False)),
+        team_possession_max_delta=float(getattr(config, "team_possession_max_delta", 8.0)),
         backbone_hidden=int(getattr(config, "backbone_hidden", 128)),
         three_pa_share_hidden=int(getattr(config, "three_pa_share_hidden", 64)),
         enable_usage_share_head=bool(getattr(config, "enable_usage_share_head", False)),
         usage_share_head_hidden=int(getattr(config, "usage_share_head_hidden", 128)),
+        enable_team_points_budget_head=bool(getattr(config, "enable_team_points_budget_head", False)),
+        team_points_budget_head_hidden=int(getattr(config, "team_points_budget_head_hidden", 128)),
+        team_points_budget_parameterization=str(
+            getattr(config, "team_points_budget_parameterization", "absolute")
+        ),
+        team_points_budget_to_backbone=bool(getattr(config, "team_points_budget_to_backbone", False)),
+        team_points_budget_latent_hidden=int(getattr(config, "team_points_budget_latent_hidden", 32)),
+        team_opportunity_budget_parameterization=str(
+            getattr(config, "team_opportunity_budget_parameterization", "absolute")
+        ),
+        team_opportunity_budget_to_backbone=bool(getattr(config, "team_opportunity_budget_to_backbone", False)),
+        team_opportunity_budget_latent_hidden=int(getattr(config, "team_opportunity_budget_latent_hidden", 32)),
+        team_opportunity_budget_backbone_alpha=float(
+            getattr(config, "team_opportunity_budget_backbone_alpha", 1.0)
+        ),
+        enable_team_ast_budget_head=bool(getattr(config, "enable_team_ast_budget_head", False)),
+        team_ast_budget_head_hidden=int(getattr(config, "team_ast_budget_head_hidden", 128)),
+        enable_assist_share_head=bool(getattr(config, "enable_assist_share_head", False)),
+        assist_share_head_hidden=int(getattr(config, "assist_share_head_hidden", 128)),
+        enable_team_rebound_budget_head=bool(getattr(config, "enable_team_rebound_budget_head", False)),
+        team_rebound_budget_head_hidden=int(getattr(config, "team_rebound_budget_head_hidden", 128)),
+        rebound_budget_parameterization=str(getattr(config, "rebound_budget_parameterization", "absolute")),
+        rebound_oreb_rate_cap=float(getattr(config, "rebound_oreb_rate_cap", 1.0)),
+        rebound_dreb_rate_cap=float(getattr(config, "rebound_dreb_rate_cap", 0.85)),
+        rebound_dreb_deterministic_discount=float(
+            getattr(config, "rebound_dreb_deterministic_discount", 1.0)
+        ),
+        enable_rebound_budget_blend_gate=bool(getattr(config, "enable_rebound_budget_blend_gate", False)),
+        rebound_budget_blend_gate_hidden=int(getattr(config, "rebound_budget_blend_gate_hidden", 64)),
+        rebound_budget_blend_gate_init_alpha=float(getattr(config, "rebound_budget_blend_gate_init_alpha", 0.25)),
+        enable_rebound_share_head=bool(getattr(config, "enable_rebound_share_head", False)),
+        rebound_share_head_hidden=int(getattr(config, "rebound_share_head_hidden", 128)),
+        rebound_share_condition_feature_indices=tuple(rebound_share_condition_feature_indices),
+        rebound_share_condition_feature_mean=tuple(rebound_share_condition_feature_mean),
+        rebound_share_condition_feature_std=tuple(rebound_share_condition_feature_std),
+        rebound_share_condition_hidden=int(getattr(config, "rebound_share_condition_hidden", 32)),
+        assist_share_condition_feature_indices=tuple(assist_share_condition_feature_indices),
+        assist_share_condition_feature_mean=tuple(assist_share_condition_feature_mean),
+        assist_share_condition_feature_std=tuple(assist_share_condition_feature_std),
+        assist_share_condition_hidden=int(getattr(config, "assist_share_condition_hidden", 32)),
+        enable_ast_blend_gate=bool(getattr(config, "enable_ast_blend_gate", False)),
+        ast_blend_gate_hidden=int(getattr(config, "ast_blend_gate_hidden", 128)),
+        ast_blend_gate_init_alpha=float(getattr(config, "ast_blend_gate_init_alpha", 0.75)),
+        backbone_env_adapter_dim=int(getattr(config, "backbone_env_adapter_dim", 0)),
+        backbone_env_adapter_hidden=int(getattr(config, "backbone_env_adapter_hidden", 32)),
     )
+    setattr(model, "gtv2_config", config)
+    return model

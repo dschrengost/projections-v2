@@ -12283,3 +12283,56 @@ Interpretation:
   - if this research line continues, it should move toward a more operative
     team shot-quality / efficiency residual mechanism, not more small sidecar
     input tweaks
+
+We then returned to the strongest team-split branch candidate: the earlier
+market-implied opportunity split. The key refinement was to move the split from
+post-hoc count scaling to a possession-preserving rate reconcile.
+
+Implementation summary:
+
+- new runtime/config flag:
+  `team_opportunity_reconcile_preserve_possessions`
+- side-specific market share is applied through per-team `FGA` / `FTA` rates
+- `TOV` is solved as the residual needed to preserve each team’s possessions
+- this keeps possession accounting coherent while still making the market-implied
+  side split operative
+
+Focused verification:
+
+- targeted reconcile + symmetry tests passed
+- combined focused suite:
+  - `73 passed`
+
+60-game eval-only sweep:
+
+- summary:
+  `/home/daniel/projections-data/training/runs/gtv2_market_team_opp_ratepres_60day_eval_20260329T0300Z/summary.csv`
+- baseline:
+  - `dk_fpts_mae = 5.6243`
+  - `pts_mae_team = 9.8062`
+  - `spread_mae_vs_vegas = 5.3324`
+  - `spread_corr_vs_vegas = 0.3863`
+  - `poss_sym_abs_p95 = 0.3259`
+
+Best variant:
+
+- `market_team_opp_ratepres_a050`
+- `dk_fpts_mae = 5.6218`
+- `pts_mae_team = 9.6435`
+- `spread_mae_vs_vegas = 2.5587`
+- `spread_corr_vs_vegas = 0.9241`
+- `poss_sym_abs_p95 = 0.3153`
+
+Interpretation:
+
+- the earlier opportunity-split mechanism was directionally correct
+- the real bug was where it entered the accounting
+- once the side split is expressed as a possession-preserving rate reconcile,
+  the branch keeps almost all of the spread lift while avoiding the previous
+  symmetry failure
+
+Updated boundary:
+
+- this is the first credible no-retrain team-differentiation fix in the line
+- next step should be promotion-style validation / live shadowing around
+  `alpha ≈ 0.50`, not more architectural detours

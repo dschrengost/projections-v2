@@ -4506,3 +4506,70 @@ Updated next-step boundary:
 - if the shooting/matchup line continues, the next branch should be a more
   operative team shot-quality / efficiency residual mechanism rather than more
   input tweaks to the current sidecar MLP
+
+### Opportunity-split rate-preserving update (2026-03-29)
+
+We implemented the cleaner version of the earlier market-implied opportunity
+split idea:
+
+- keep team possessions fixed
+- apply the side-specific market split through per-team `FGA` / `FTA` rates
+- solve `TOV` as the residual needed to preserve each team’s possession total
+- leave the rest of the generation path unchanged
+
+Implementation summary:
+
+- new config/runtime flag:
+  `team_opportunity_reconcile_preserve_possessions`
+- sampler and training-side reconcile path now support a possession-preserving
+  opportunity reconcile mode
+- this avoids the earlier failure where post-hoc `FGA` / `FTA` count scaling
+  improved spread but blew up possession symmetry
+
+Verification:
+
+- focused tests:
+  - `73 passed`
+- targeted unit coverage now verifies that the opportunity reconcile can shift
+  side shot volume while keeping team possessions unchanged
+
+60-game eval-only sweep:
+
+- summary:
+  `/home/daniel/projections-data/training/runs/gtv2_market_team_opp_ratepres_60day_eval_20260329T0300Z/summary.csv`
+- deltas:
+  `/home/daniel/projections-data/training/runs/gtv2_market_team_opp_ratepres_60day_eval_20260329T0300Z/compare_vs_baseline.csv`
+
+Baseline (`current_live`):
+
+- `dk_fpts_mae = 5.6243`
+- `pts_mae_team = 9.8062`
+- `spread_mae_vs_vegas = 5.3324`
+- `spread_corr_vs_vegas = 0.3863`
+- `poss_sym_abs_p95 = 0.3259`
+
+Best variant from the sweep:
+
+- `market_team_opp_ratepres_a050`
+- `dk_fpts_mae = 5.6218`
+- `pts_mae_team = 9.6435`
+- `spread_mae_vs_vegas = 2.5587`
+- `spread_corr_vs_vegas = 0.9241`
+- `poss_sym_abs_p95 = 0.3153`
+
+Interpretation:
+
+- this preserves the main win from the earlier opportunity-split branch:
+  large spread improvement with essentially flat player-facing error
+- unlike the earlier post-count reconcile version, possession symmetry stays
+  clean
+- this is the first team-differentiation fix in this line that appears broadly
+  shippable without a retrain
+
+Updated next-step boundary:
+
+- do not resume the side-specific possession-head line
+- do not return to direct team-points reconcile for this problem
+- the right next step is promotion-style validation / live shadowing of the
+  rate-preserving opportunity reconcile branch, with `alpha` centered around
+  `0.50`
