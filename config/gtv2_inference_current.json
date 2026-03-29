@@ -18,7 +18,12 @@
   "tree_rate_predictions_csv": null,
   "tree_rate_blend_alpha": 0.75,
   "tree_rate_oreb_share_override_enabled": true,
-  "model_version": "reb_mtfanneal_live_20260329_teamopp_ratepres_a050_sparsegate075_a050_treebundle_a075",
+  "minutes_uncertainty_enabled": true,
+  "minutes_uncertainty_lookup_artifact": "/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_mtfanneal_20260327T050033Z/minutes_uncertainty_lookup/lookup_iqr_20260329T212921Z.json",
+  "minutes_uncertainty_apply_minutes_taper": false,
+  "minutes_uncertainty_preserve_top_k_per_team": 0,
+  "minutes_uncertainty_gaussian_scale": 0.5,
+  "model_version": "reb_mtfanneal_live_20260329_teamopp_ratepres_a050_sparsegate075_a050_treebundle_a075_empminunc050",
   "promoted_at": "2026-03-29T16:05:00Z",
   "bundle_hash": "d863145c6dfd0a4bcc71052d7cd95bc9fe334c8683297f4f3041b6d7f6337275"
 }
