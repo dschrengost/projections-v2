@@ -2532,6 +2532,73 @@ def sample_worlds_for_batch(
                     total_minutes_per_team=240.0,
                     max_minutes_per_player=48.0,
                 )
+            # --- Force-active minutes override (before flow head so it sees correct minutes) ---
+            forced_active_flat = (
+                rep_forced_active_worlds.reshape(rep_forced_active_worlds.shape[0], -1)
+                & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
+            )
+            starter_forced_active_flat = (
+                rep_starter_force_active_worlds.reshape(rep_starter_force_active_worlds.shape[0], -1)
+                & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
+            )
+            manual_forced_active_flat = forced_active_flat & (~starter_forced_active_flat)
+            out_player_mask_flat = _decode_out_player_mask(
+                rep_player_features.reshape(
+                    rep_player_features.shape[0],
+                    -1,
+                    rep_player_features.shape[-1],
+                ),
+                valid_mask=out.player_valid_mask,
+                config=model_config,
+            )
+            forced_active_flat = forced_active_flat & (~out_player_mask_flat)
+            starter_forced_active_flat = starter_forced_active_flat & (~out_player_mask_flat)
+            manual_forced_active_flat = manual_forced_active_flat & (~out_player_mask_flat)
+            if isinstance(score_active_allow_flat, torch.Tensor):
+                # Projected starters bypass the score-surface gate entirely: the
+                # active head can flicker when teammate/props features shift near
+                # tip, so don't let a transient score-surface zero block
+                # force-active for any projected starter.  The out_player_mask
+                # already removes truly OUT players above.
+                # Only non-starter manual force-actives are gated by the score
+                # surface.
+                manual_forced_active_flat = manual_forced_active_flat & score_active_allow_flat
+                forced_active_flat = starter_forced_active_flat | manual_forced_active_flat
+            forced_minutes_anchor_flat = (
+                rep_forced_active_minutes_anchor.reshape(rep_forced_active_minutes_anchor.shape[0], -1)
+                * forced_active_flat.to(dtype=rep_forced_active_minutes_anchor.dtype)
+            )
+            # Seed minutes from props anchor for force-active players the model zeroed
+            # out.  This feeds into the normal simplex + uncertainty pipeline so the
+            # result is team-budget-consistent, not a raw override.
+            bypassed_with_zero_minutes = (
+                forced_active_flat
+                & minutes_for_sampling.le(float(DEFAULT_ACTIVE_MINUTES_TOL))
+                & forced_minutes_anchor_flat.gt(0.0)
+            )
+            if bool(bypassed_with_zero_minutes.any()):
+                minutes_for_sampling = torch.where(
+                    bypassed_with_zero_minutes,
+                    forced_minutes_anchor_flat,
+                    minutes_for_sampling,
+                )
+                minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
+                    minutes_for_sampling,
+                    active_mask_for_sampling | forced_active_flat,
+                    out.player_valid_mask,
+                    out.player_team_index,
+                )
+            if bool(out_player_mask_flat.any()):
+                active_mask_for_sampling = active_mask_for_sampling & (~out_player_mask_flat)
+                minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
+                    minutes_for_sampling.masked_fill(out_player_mask_flat, 0.0),
+                    active_mask_for_sampling,
+                    out.player_valid_mask,
+                    out.player_team_index,
+                )
+            sampled_active_mask = active_mask_for_sampling | forced_active_flat
+            # --- End force-active minutes override ---
+
             z = torch.randn(
                 (rep_player_features.shape[0], out.player_states.shape[1], len(model_flow_target_columns)),
                 device=device,
@@ -2590,70 +2657,9 @@ def sample_worlds_for_batch(
                 flow_projected = flow_projected_base.clone()
                 ast_idx = _flow_idx(contract_flow_target_columns, "ast")
                 flow_projected[..., ast_idx] = ast_override
-            forced_active_flat = (
-                rep_forced_active_worlds.reshape(rep_forced_active_worlds.shape[0], -1)
-                & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
-            )
-            starter_forced_active_flat = (
-                rep_starter_force_active_worlds.reshape(rep_starter_force_active_worlds.shape[0], -1)
-                & rep_player_valid_mask.reshape(rep_player_valid_mask.shape[0], -1)
-            )
-            manual_forced_active_flat = forced_active_flat & (~starter_forced_active_flat)
-            out_player_mask_flat = _decode_out_player_mask(
-                rep_player_features.reshape(
-                    rep_player_features.shape[0],
-                    -1,
-                    rep_player_features.shape[-1],
-                ),
-                valid_mask=out.player_valid_mask,
-                config=model_config,
-            )
-            forced_active_flat = forced_active_flat & (~out_player_mask_flat)
-            starter_forced_active_flat = starter_forced_active_flat & (~out_player_mask_flat)
-            manual_forced_active_flat = manual_forced_active_flat & (~out_player_mask_flat)
-            if isinstance(score_active_allow_flat, torch.Tensor):
-                # Projected starters bypass the score-surface gate entirely: the
-                # active head can flicker when teammate/props features shift near
-                # tip, so don't let a transient score-surface zero block
-                # force-active for any projected starter.  The out_player_mask
-                # already removes truly OUT players above (line 2611-2613).
-                # Only non-starter manual force-actives are gated by the score
-                # surface.
-                manual_forced_active_flat = manual_forced_active_flat & score_active_allow_flat
-                forced_active_flat = starter_forced_active_flat | manual_forced_active_flat
-            forced_minutes_anchor_flat = (
-                rep_forced_active_minutes_anchor.reshape(rep_forced_active_minutes_anchor.shape[0], -1)
-                * forced_active_flat.to(dtype=rep_forced_active_minutes_anchor.dtype)
-            )
-            # Seed minutes from props anchor for force-active players the model zeroed
-            # out.  This feeds into the normal simplex + uncertainty pipeline so the
-            # result is team-budget-consistent, not a raw override.
-            bypassed_with_zero_minutes = (
-                forced_active_flat
-                & minutes_for_sampling.le(float(DEFAULT_ACTIVE_MINUTES_TOL))
-                & forced_minutes_anchor_flat.gt(0.0)
-            )
-            if bool(bypassed_with_zero_minutes.any()):
-                minutes_for_sampling = torch.where(
-                    bypassed_with_zero_minutes,
-                    forced_minutes_anchor_flat,
-                    minutes_for_sampling,
-                )
-                minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
-                    minutes_for_sampling,
-                    active_mask_for_sampling | forced_active_flat,
-                    out.player_valid_mask,
-                    out.player_team_index,
-                )
-            if bool(out_player_mask_flat.any()):
-                active_mask_for_sampling = active_mask_for_sampling & (~out_player_mask_flat)
-                minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
-                    minutes_for_sampling.masked_fill(out_player_mask_flat, 0.0),
-                    active_mask_for_sampling,
-                    out.player_valid_mask,
-                    out.player_team_index,
-                )
-            sampled_active_mask = active_mask_for_sampling | forced_active_flat
+            # forced_active_flat, sampled_active_mask, out_player_mask_flat already
+            # computed before the flow head call (see "Force-active minutes override"
+            # block above).
             minutes_before_floor = minutes_for_sampling
             if minutes_uncertainty_config is not None and bool(minutes_uncertainty_config.enabled):
                 sigma = _estimate_minutes_sigma(
