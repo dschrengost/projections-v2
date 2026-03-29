@@ -12718,3 +12718,63 @@ Updated operational read:
 - this is the first full `AST + OREB + DREB` tree-share hybrid that is both
   structurally coherent and broadly competitive
 - it is now a real promotion candidate rather than just a research branch
+
+### Live tree bundle path
+
+The failed first live attempt established an operational requirement: tree-rate
+overrides cannot point at historical eval CSVs. They must point at a live-scored
+artifact for the current slate.
+
+Required production shape:
+
+- persisted bundle with saved tree models and feature contract
+- run-scoped live scorer that consumes current GTv2 features and emits
+  `pred_ast_per_min`, `pred_oreb_per_min`, `pred_dreb_per_min`
+- hard no-op guard if the predictions artifact matches zero players
+
+Implemented path:
+
+- bundle format:
+  `projections/rotation/tree_rate_bundle.py`
+- trainer:
+  `scripts/rotation/train_tree_rate_bundle.py`
+- live scorer:
+  `scripts/rotation/score_tree_rate_live.py`
+- live flow integration:
+  `prefect_flows/live_nba_pipeline_v3.py`
+
+First real bundle:
+
+- `/home/daniel/projections-data/artifacts/tree_rate_bundles/tree_rate_astreb_lgbm_livev1_20260329T1620Z`
+
+Live-slate sanity with the real scorer:
+
+- Jokic AST: `4.04 -> 8.52`
+- Nembhard AST: `3.14 -> 9.02`
+- Brunson AST: `3.13 -> 6.34`
+- KAT REB: `6.64 -> 9.34`
+- Bam REB: `7.05 -> 9.40`
+
+60-game end-to-end gate on the same selected packet:
+
+- control:
+  - `dk_fpts_mae = 5.621`
+  - `reb_mae_player = 1.660`
+  - `ast_mae_player = 1.296`
+  - `poss_sym_abs_p95 = 0.437`
+- `tree_bundle_a050`:
+  - `dk_fpts_mae = 5.446`
+  - `reb_mae_player = 1.580`
+  - `ast_mae_player = 1.012`
+  - `poss_sym_abs_p95 = 0.320`
+- `tree_bundle_a075`:
+  - `dk_fpts_mae = 5.360`
+  - `reb_mae_player = 1.498`
+  - `ast_mae_player = 0.898`
+  - `poss_sym_abs_p95 = 0.294`
+
+Operational boundary:
+
+- the real live bundle path validates the tree hybrid idea
+- `tree_bundle_a075` is now the leading candidate for AST/REB selective live
+  override

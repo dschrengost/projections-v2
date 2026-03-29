@@ -4977,3 +4977,61 @@ Updated boundary:
   both structurally coherent and broadly competitive
 - if the goal is a selective live hybrid for AST/REB, this is now a serious
   promotion candidate
+
+### Live tree-rate bundle path and 60-game gate
+
+The first live ship failed because prod was pointed at a historical evaluation
+CSV rather than a live-scored tree predictions artifact. The fallback path then
+matched zero players and collapsed AST. That was hotfixed by disabling the tree
+override in prod and adding a hard no-op guard when `player_count_with_predictions == 0`.
+
+To make the tree path real for production:
+
+- added a persisted tree bundle format in
+  `projections/rotation/tree_rate_bundle.py`
+- added bundle trainer / live scorer entrypoints in
+  `scripts/rotation/train_tree_rate_bundle.py` and
+  `scripts/rotation/score_tree_rate_live.py`
+- wired `prefect_flows/live_nba_pipeline_v3.py` to score a run-scoped live tree
+  predictions CSV from `tree_rate_bundle_dir` before world generation
+
+First real live bundle:
+
+- bundle:
+  `/home/daniel/projections-data/artifacts/tree_rate_bundles/tree_rate_astreb_lgbm_livev1_20260329T1620Z`
+- targets: `ast_per_min`, `oreb_per_min`, `dreb_per_min`
+- training source:
+  `joint_rotation_rates_v1_shootmatch_20260329T014610Z`
+
+Real live-slate scorer sanity:
+
+- Jokic AST: `4.04 -> 8.52`
+- Nembhard AST: `3.14 -> 9.02`
+- Brunson AST: `3.13 -> 6.34`
+- KAT REB: `6.64 -> 9.34`
+- Bam REB: `7.05 -> 9.40`
+
+60-game end-to-end gate using the real bundle path on the same selected packet:
+
+- control:
+  - `dk_fpts_mae = 5.621`
+  - `reb_mae_player = 1.660`
+  - `ast_mae_player = 1.296`
+  - `poss_sym_abs_p95 = 0.437`
+- `tree_bundle_a050`:
+  - `dk_fpts_mae = 5.446`
+  - `reb_mae_player = 1.580`
+  - `ast_mae_player = 1.012`
+  - `poss_sym_abs_p95 = 0.320`
+- `tree_bundle_a075`:
+  - `dk_fpts_mae = 5.360`
+  - `reb_mae_player = 1.498`
+  - `ast_mae_player = 0.898`
+  - `poss_sym_abs_p95 = 0.294`
+
+Current read:
+
+- the real live bundle path validates the earlier offline result
+- this is no longer just a historical CSV artifact trick
+- `tree_bundle_a075` is the current leader and a legitimate live promotion
+  candidate, subject to one final live shadow / promotion decision

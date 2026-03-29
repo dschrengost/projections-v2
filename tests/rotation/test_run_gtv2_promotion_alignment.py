@@ -266,3 +266,46 @@ def test_apply_tree_rate_mean_override_does_not_allocate_rebounds_to_zero_minute
     zero_min_rows = out["minutes"] <= 1e-9
     assert out.loc[zero_min_rows, "oreb"].abs().max() == pytest.approx(0.0)
     assert out.loc[zero_min_rows, "dreb"].abs().max() == pytest.approx(0.0)
+
+
+def test_apply_tree_rate_mean_override_no_matching_players_is_noop(tmp_path) -> None:
+    worlds = pd.DataFrame(
+        {
+            "game_date": ["2026-03-01", "2026-03-01"],
+            "game_id": [1, 1],
+            "team_id": [10, 10],
+            "player_id": [100, 101],
+            "world_idx": [0, 0],
+            "minutes": [30.0, 28.0],
+            "pts": [20.0, 15.0],
+            "oreb": [2.0, 1.0],
+            "dreb": [6.0, 5.0],
+            "ast": [7.0, 4.0],
+            "stl": [1.0, 0.0],
+            "blk": [0.0, 1.0],
+            "tov": [3.0, 2.0],
+            "reb": [8.0, 6.0],
+            "dk_fpts": [40.5, 31.0],
+        }
+    )
+    pred_csv = tmp_path / "tree_preds.csv"
+    pd.DataFrame(
+        {
+            "game_date": ["2026-03-02"],
+            "game_id": [2],
+            "team_id": [99],
+            "player_id": [999],
+            "pred_ast_per_min": [0.4],
+        }
+    ).to_csv(pred_csv, index=False)
+
+    out, report = _apply_tree_rate_mean_override(
+        worlds,
+        predictions_csv=pred_csv,
+        blend_alpha=0.75,
+    )
+
+    assert report["applied"] is False
+    assert report["player_count_with_predictions"] == 0
+    assert report["skip_reason"] == "no_matching_players"
+    pd.testing.assert_frame_equal(out, worlds)

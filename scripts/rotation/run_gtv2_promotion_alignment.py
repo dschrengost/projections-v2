@@ -46,6 +46,10 @@ from projections.rotation.sample_worlds_v2 import (
     summarize_worlds_to_projections,
 )
 from projections.rotation.set_model import zfill_game_id_series
+from projections.rotation.tree_rate_bundle import (
+    load_tree_rate_bundle,
+    score_tree_rate_bundle_features,
+)
 from scripts.rotation.eval_make_rate_calibration import (
     _actual_player_metrics,
     _actual_team_concentration,
@@ -67,6 +71,7 @@ class VariantSpec:
     name: str
     run_dir: str
     active_temperature: float
+    tree_rate_bundle_dir: str | None = None
     tree_rate_predictions_csv: str | None = None
     tree_rate_blend_alpha: float = 0.0
     tree_rate_oreb_share_override_enabled: bool = False
@@ -448,7 +453,8 @@ def _override_rebound_share_to_target_mean(
 def _apply_tree_rate_mean_override(
     worlds: pd.DataFrame,
     *,
-    predictions_csv: Path,
+    predictions_csv: Path | None = None,
+    predictions_df: pd.DataFrame | None = None,
     blend_alpha: float,
     oreb_share_override_enabled: bool = False,
     role_bucket_df: pd.DataFrame | None = None,
@@ -458,9 +464,16 @@ def _apply_tree_rate_mean_override(
     share_cap_min: float = 0.0,
     share_cap_max: float = 1.0,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    if not predictions_csv.exists():
-        raise FileNotFoundError(f"tree-rate predictions csv not found: {predictions_csv}")
-    pred_df = _coerce_join_keys(pd.read_csv(predictions_csv), name="tree_rate_predictions")
+    if predictions_df is not None:
+        pred_df = _coerce_join_keys(predictions_df.copy(), name="tree_rate_predictions")
+        predictions_source = "dataframe"
+    else:
+        if predictions_csv is None:
+            raise ValueError("Either predictions_csv or predictions_df must be provided")
+        if not predictions_csv.exists():
+            raise FileNotFoundError(f"tree-rate predictions csv not found: {predictions_csv}")
+        pred_df = _coerce_join_keys(pd.read_csv(predictions_csv), name="tree_rate_predictions")
+        predictions_source = str(predictions_csv)
     stat_to_rate_col = {
         "ast": "pred_ast_per_min",
         "oreb": "pred_oreb_per_min",
@@ -480,6 +493,25 @@ def _apply_tree_rate_mean_override(
     work = worlds.merge(pred_df, on=["game_date", "game_id", "team_id", "player_id"], how="left", validate="many_to_one")
     if work.empty:
         raise ValueError("tree-rate override merge produced no rows")
+    override_keys = pd.Series(False, index=work.index)
+    for rate_col in keep_pred_cols:
+        override_keys = override_keys | work[rate_col].notna()
+    matched_player_count = int(
+        work.loc[override_keys, ["game_date", "game_id", "team_id", "player_id"]].drop_duplicates().shape[0]
+    )
+    if matched_player_count <= 0:
+        return worlds.copy(), {
+            "applied": False,
+            "predictions_csv": str(predictions_csv) if predictions_csv else None,
+            "predictions_source": predictions_source,
+            "blend_alpha": float(np.clip(blend_alpha, 0.0, 1.0)),
+            "available_stats": available_stats,
+            "player_count_with_predictions": 0,
+            "stat_reports": [],
+            "oreb_share_override_enabled": bool(oreb_share_override_enabled),
+            "dreb_bucket_hierarchy_enabled": False,
+            "skip_reason": "no_matching_players",
+        }
     bucket_col_name: str | None = None
     if dreb_bucket_hierarchy_enabled and role_bucket_df is not None and "pred_dreb_per_min" in keep_pred_cols:
         required_cols = ["game_date", "game_id", "team_id", "player_id", "pos_bucket"]
@@ -555,17 +587,13 @@ def _apply_tree_rate_mean_override(
         ).fillna(0.0)
     work["dk_fpts"] = _compute_world_dk_fpts_from_frame(work)
 
-    override_keys = pd.Series(False, index=work.index)
-    for rate_col in keep_pred_cols:
-        override_keys = override_keys | work[rate_col].notna()
     report = {
         "applied": True,
-        "predictions_csv": str(predictions_csv),
+        "predictions_csv": str(predictions_csv) if predictions_csv else None,
+        "predictions_source": predictions_source,
         "blend_alpha": alpha,
         "available_stats": available_stats,
-        "player_count_with_predictions": int(
-            work.loc[override_keys, ["game_date", "game_id", "team_id", "player_id"]].drop_duplicates().shape[0]
-        ),
+        "player_count_with_predictions": matched_player_count,
         "stat_reports": stat_reports,
         "oreb_share_override_enabled": bool(oreb_share_override_enabled),
         "dreb_bucket_hierarchy_enabled": bool(bucket_col_name is not None),
@@ -905,13 +933,41 @@ def _apply_live_postprocessing(
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     worlds = raw_worlds.copy()
     tree_override_report = {"applied": False, "reason": "disabled"}
+    tree_predictions_report = {"applied": False, "reason": "disabled"}
     role_bucket_df: pd.DataFrame | None = None
     if "pos_bucket" in ctx.selected_features_df.columns:
         role_bucket_df = ctx.selected_features_df.loc[:, ["game_date", "game_id", "team_id", "player_id", "pos_bucket"]].copy()
-    if spec.tree_rate_predictions_csv and float(spec.tree_rate_blend_alpha) > 0.0:
+    tree_predictions_df: pd.DataFrame | None = None
+    if spec.tree_rate_bundle_dir and float(spec.tree_rate_blend_alpha) > 0.0:
+        bundle = load_tree_rate_bundle(Path(str(spec.tree_rate_bundle_dir)).expanduser().resolve())
+        tree_predictions_df = score_tree_rate_bundle_features(
+            features_df=ctx.selected_features_df.copy(),
+            bundle=bundle,
+            include_extra_cols=[],
+            game_date=None,
+        )
+        tree_predictions_report = {
+            "applied": True,
+            "bundle_dir": str(spec.tree_rate_bundle_dir),
+            "row_count": int(len(tree_predictions_df)),
+            "targets": list(bundle.targets),
+            "feature_count": int(len(bundle.feature_columns)),
+            "model_type": str(bundle.model_type),
+        }
+    elif spec.tree_rate_predictions_csv and float(spec.tree_rate_blend_alpha) > 0.0:
+        tree_predictions_report = {
+            "applied": True,
+            "predictions_csv": str(spec.tree_rate_predictions_csv),
+        }
+    if (tree_predictions_df is not None or spec.tree_rate_predictions_csv) and float(spec.tree_rate_blend_alpha) > 0.0:
         worlds, tree_override_report = _apply_tree_rate_mean_override(
             worlds,
-            predictions_csv=Path(str(spec.tree_rate_predictions_csv)).expanduser().resolve(),
+            predictions_csv=(
+                Path(str(spec.tree_rate_predictions_csv)).expanduser().resolve()
+                if spec.tree_rate_predictions_csv
+                else None
+            ),
+            predictions_df=tree_predictions_df,
             blend_alpha=float(spec.tree_rate_blend_alpha),
             oreb_share_override_enabled=bool(spec.tree_rate_oreb_share_override_enabled),
             role_bucket_df=role_bucket_df,
@@ -944,6 +1000,7 @@ def _apply_live_postprocessing(
     )
     worlds, repair_report = _repair_world_frame_contract_fields(worlds)
     return worlds, {
+        "tree_rate_predictions": tree_predictions_report,
         "tree_rate_override": tree_override_report,
         "props_uplift": props_report,
         "world_realism_controls": realism_report,
@@ -1502,9 +1559,11 @@ def _flatten_variant_row(
     realism_meta = postprocess_meta["world_realism_controls"]
     repair_meta = postprocess_meta["world_contract_repair"]
     tree_meta = postprocess_meta["tree_rate_override"]
+    tree_predictions_meta = postprocess_meta.get("tree_rate_predictions", {})
     return {
         "variant": spec.name,
         "run_dir": spec.run_dir,
+        "tree_rate_bundle_dir": str(spec.tree_rate_bundle_dir) if spec.tree_rate_bundle_dir else None,
         "tree_rate_predictions_csv": str(spec.tree_rate_predictions_csv) if spec.tree_rate_predictions_csv else None,
         "tree_rate_blend_alpha": float(spec.tree_rate_blend_alpha),
         "tree_rate_oreb_share_override_enabled": bool(spec.tree_rate_oreb_share_override_enabled),
@@ -1531,6 +1590,7 @@ def _flatten_variant_row(
         "post_world_rows": int(len(post_worlds)),
         "tree_rate_override_applied": bool(tree_meta.get("applied", False)),
         "tree_rate_override_player_count": int(tree_meta.get("player_count_with_predictions", 0) or 0),
+        "tree_rate_predictions_generated": bool(tree_predictions_meta.get("applied", False)),
         "props_uplift_applied": bool(props_meta.get("applied", False)),
         "props_total_adjusted_players": int(props_meta.get("total_adjusted_players", 0) or 0),
         "world_realism_applied": bool(realism_meta.get("applied", False)),

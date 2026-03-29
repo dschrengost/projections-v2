@@ -67,6 +67,9 @@ from projections.rotation.gtv2_promotion_hybrid import (
     assert_promotion_hybrid_compatible,
 )
 from projections.rotation.sample_worlds_v2 import _coerce_join_keys
+from projections.rotation.tree_rate_bundle import (
+    score_tree_rate_bundle_features_to_csv,
+)
 from projections.runtime_stamp import (
     enforce_clean_tree,
     enforce_prod_sanity,
@@ -309,6 +312,7 @@ def _load_gtv2_inference_current_config() -> dict[str, Any]:
         "sparse_blend_alpha": 1.0,
         "sparse_require_no_props": False,
         "sparse_gate_artifact": None,
+        "tree_rate_bundle_dir": None,
         "tree_rate_predictions_csv": None,
         "tree_rate_blend_alpha": 0.0,
         "tree_rate_oreb_share_override_enabled": False,
@@ -513,6 +517,25 @@ def _apply_tree_rate_mean_override_to_worlds(
     keep_pred_cols = [stat_to_rate_col[stat] for stat in available_stats]
     pred_df = pred_df.loc[:, ["game_date", "game_id", "team_id", "player_id", *keep_pred_cols]].drop_duplicates(["game_date", "game_id", "team_id", "player_id"])
     work = worlds.merge(pred_df, on=["game_date", "game_id", "team_id", "player_id"], how="left", validate="many_to_one")
+    override_keys = pd.Series(False, index=work.index)
+    for rate_col in keep_pred_cols:
+        override_keys = override_keys | work[rate_col].notna()
+    matched_player_count = int(
+        work.loc[override_keys, ["game_date", "game_id", "team_id", "player_id"]]
+        .drop_duplicates()
+        .shape[0]
+    )
+    if matched_player_count <= 0:
+        return worlds.copy(), {
+            "applied": False,
+            "predictions_csv": str(predictions_csv),
+            "blend_alpha": float(np.clip(blend_alpha, 0.0, 1.0)),
+            "available_stats": available_stats,
+            "player_count_with_predictions": 0,
+            "stat_reports": [],
+            "oreb_share_override_enabled": bool(oreb_share_override_enabled),
+            "skip_reason": "no_matching_players",
+        }
     minutes_mean = (
         work.groupby(["game_date", "game_id", "team_id", "player_id"], as_index=False)["minutes"]
         .mean()
@@ -544,15 +567,12 @@ def _apply_tree_rate_mean_override_to_worlds(
     if {"oreb", "dreb"} & set(available_stats):
         work["reb"] = pd.to_numeric(work["oreb"], errors="coerce").fillna(0.0) + pd.to_numeric(work["dreb"], errors="coerce").fillna(0.0)
     work["dk_fpts"] = _compute_tree_world_dk_fpts(work)
-    override_keys = pd.Series(False, index=work.index)
-    for rate_col in keep_pred_cols:
-        override_keys = override_keys | work[rate_col].notna()
     report = {
         "applied": True,
         "predictions_csv": str(predictions_csv),
         "blend_alpha": alpha,
         "available_stats": available_stats,
-        "player_count_with_predictions": int(work.loc[override_keys, ["game_date", "game_id", "team_id", "player_id"]].drop_duplicates().shape[0]),
+        "player_count_with_predictions": matched_player_count,
         "stat_reports": stat_reports,
         "oreb_share_override_enabled": bool(oreb_share_override_enabled),
     }
@@ -6231,6 +6251,7 @@ def generate_worlds_gtv2_live_task(
     sparse_blend_alpha: float = 1.0,
     sparse_require_no_props: bool = False,
     sparse_gate_artifact: str | None = None,
+    tree_rate_bundle_dir: str | None = None,
     tree_rate_predictions_csv: str | None = None,
     tree_rate_blend_alpha: float = 0.0,
     tree_rate_oreb_share_override_enabled: bool = False,
@@ -6346,6 +6367,33 @@ def generate_worlds_gtv2_live_task(
             as_of_ts=run_as_of_ts,
         )
         logger.info("Applied force-active world guardrails: %s", force_active_diag)
+        tree_rate_predictions_report: dict[str, Any]
+        resolved_tree_rate_predictions_csv = (
+            str(tree_rate_predictions_csv).strip() if tree_rate_predictions_csv else ""
+        )
+        if (
+            not resolved_tree_rate_predictions_csv
+            and tree_rate_bundle_dir
+            and float(tree_rate_blend_alpha) > 0.0
+        ):
+            tree_rate_output_csv = run_dir / "tree_rate_predictions.csv"
+            tree_rate_predictions_report = score_tree_rate_bundle_features_to_csv(
+                features_df=features_df_raw,
+                bundle_dir=Path(str(tree_rate_bundle_dir)).expanduser().resolve(),
+                output_csv=tree_rate_output_csv,
+                include_extra_cols=["player_name"],
+                game_date=game_date,
+            )
+            resolved_tree_rate_predictions_csv = str(tree_rate_output_csv)
+            logger.info("Scored tree rate bundle for live override: %s", tree_rate_predictions_report)
+        elif resolved_tree_rate_predictions_csv:
+            tree_rate_predictions_report = {
+                "applied": False,
+                "reason": "external_predictions_csv",
+                "output_csv": resolved_tree_rate_predictions_csv,
+            }
+        else:
+            tree_rate_predictions_report = {"applied": False, "reason": "disabled"}
         contract_checks_seed: dict[str, Any]
         triton_request_count = 0
         raw_worlds_path: Path | None = None
@@ -6648,10 +6696,10 @@ def generate_worlds_gtv2_live_task(
                 world_key_report,
             )
         tree_rate_override_report: dict[str, Any]
-        if tree_rate_predictions_csv and float(tree_rate_blend_alpha) > 0.0:
+        if resolved_tree_rate_predictions_csv and float(tree_rate_blend_alpha) > 0.0:
             worlds_df, tree_rate_override_report = _apply_tree_rate_mean_override_to_worlds(
                 worlds_df,
-                predictions_csv=Path(str(tree_rate_predictions_csv)).expanduser().resolve(),
+                predictions_csv=Path(str(resolved_tree_rate_predictions_csv)).expanduser().resolve(),
                 blend_alpha=float(tree_rate_blend_alpha),
                 oreb_share_override_enabled=bool(tree_rate_oreb_share_override_enabled),
             )
@@ -6795,6 +6843,7 @@ def generate_worlds_gtv2_live_task(
             "triton_request_count": int(triton_request_count),
             "force_active_guardrails": force_active_diag,
             "game_date_normalization": game_date_normalization_report,
+            "tree_rate_predictions": tree_rate_predictions_report,
             "tree_rate_override": tree_rate_override_report,
             "props_uplift_calibration": props_uplift_report,
             "propless_tail_calibration": propless_tail_report,
@@ -8384,6 +8433,10 @@ def nba_live_pipeline_v3_flow(
             ),
             sparse_gate_artifact=(
                 str(gtv2_current_cfg.get("sparse_gate_artifact") or "").strip()
+                or None
+            ),
+            tree_rate_bundle_dir=(
+                str(gtv2_current_cfg.get("tree_rate_bundle_dir") or "").strip()
                 or None
             ),
             tree_rate_predictions_csv=(
