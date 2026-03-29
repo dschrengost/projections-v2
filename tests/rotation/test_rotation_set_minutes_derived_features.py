@@ -290,3 +290,71 @@ def test_role_change_features_zero_when_priors_missing() -> None:
     assert np.isclose(float(result["role_change_minutes_5v20"].iloc[0]), -20.0)
     # _prior_10 also missing → 0 - 0 = 0
     assert np.isclose(float(result["role_change_minutes_5v10"].iloc[0]), 0.0)
+
+
+def test_context_priors_match_bucket_and_backoff_to_global() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "game_id": 1,
+                "team_id": 100,
+                "player_id": 1,
+                "depth_same_pos_not_out": 0,
+                "minutes_from_stints_prior_20": 20.0,
+                "started_proxy_rate_prior_20": 0.2,
+                "minutes_from_stints_ctx_same_pos_thin_prior_20": 32.0,
+                "minutes_from_stints_ctx_same_pos_normal_prior_20": 18.0,
+                "started_proxy_rate_ctx_same_pos_thin_prior_20": 1.0,
+                "started_proxy_rate_ctx_same_pos_normal_prior_20": 0.4,
+                "ctx_same_pos_thin_prior_n_games_20": 3,
+                "ctx_same_pos_normal_prior_n_games_20": 5,
+            },
+            {
+                "game_id": 1,
+                "team_id": 100,
+                "player_id": 2,
+                "depth_same_pos_not_out": 2,
+                "minutes_from_stints_prior_20": 14.0,
+                "started_proxy_rate_prior_20": 0.1,
+                "minutes_from_stints_ctx_same_pos_normal_prior_20": 25.0,
+                "started_proxy_rate_ctx_same_pos_normal_prior_20": 0.8,
+                "ctx_same_pos_normal_prior_n_games_20": 1,
+            },
+            {
+                "game_id": 1,
+                "team_id": 100,
+                "player_id": 3,
+                "depth_same_pos_not_out": 5,
+                "minutes_from_stints_prior_20": 10.0,
+                "started_proxy_rate_prior_20": 0.0,
+            },
+        ]
+    )
+
+    result = add_rotation_set_derived_features(
+        df,
+        feature_columns=[
+            "ctx_minutes_from_stints_prior_20",
+            "ctx_started_proxy_rate_prior_20",
+            "ctx_prior_n_games_20",
+            "ctx_prior_backoff_used_20",
+        ],
+    )
+
+    p1 = result.loc[result["player_id"] == 1].iloc[0]
+    assert np.isclose(float(p1["ctx_minutes_from_stints_prior_20"]), 32.0)
+    assert np.isclose(float(p1["ctx_started_proxy_rate_prior_20"]), 1.0)
+    assert int(p1["ctx_prior_n_games_20"]) == 3
+    assert int(p1["ctx_prior_backoff_used_20"]) == 0
+
+    p2 = result.loc[result["player_id"] == 2].iloc[0]
+    assert np.isclose(float(p2["ctx_minutes_from_stints_prior_20"]), 14.0)
+    assert np.isclose(float(p2["ctx_started_proxy_rate_prior_20"]), 0.1)
+    assert int(p2["ctx_prior_n_games_20"]) == 1
+    assert int(p2["ctx_prior_backoff_used_20"]) == 1
+
+    p3 = result.loc[result["player_id"] == 3].iloc[0]
+    assert np.isclose(float(p3["ctx_minutes_from_stints_prior_20"]), 10.0)
+    assert np.isclose(float(p3["ctx_started_proxy_rate_prior_20"]), 0.0)
+    assert int(p3["ctx_prior_n_games_20"]) == 0
+    assert int(p3["ctx_prior_backoff_used_20"]) == 1

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scripts.rotation.sweep_game_transformer_v2_phase2 import (
     EvalMetrics,
+    _select_trials,
     _build_eval_cmd,
     _composite_score,
     _diff_metrics,
@@ -333,3 +334,32 @@ def test_build_eval_cmd_uses_eval_device_override() -> None:
 
     device_idx = cmd.index("--device")
     assert cmd[device_idx + 1] == "cpu"
+
+
+def test_select_trials_sparse_recall_preset_has_targeted_knobs() -> None:
+    args = Namespace(trials_json=None, trial_preset="sparse_recall")
+    trials = _select_trials(args)
+
+    assert len(trials) >= 3
+    names = {t.name for t in trials}
+    assert "sparse_recall_baseline" in names
+
+    baseline = next(t for t in trials if t.name == "sparse_recall_baseline")
+    assert baseline.params["w_member"] >= 0.8
+    assert baseline.params["active_positive_weight"] >= 2.0
+    assert baseline.params["lineup_available_sample_weight"] >= 3.0
+
+
+def test_select_trials_sparse_hurdle_preset_includes_hurdle_variants() -> None:
+    args = Namespace(trials_json=None, trial_preset="sparse_hurdle")
+    trials = _select_trials(args)
+
+    names = {t.name for t in trials}
+    assert "sparse_hurdle_baseline" in names
+    assert "sparse_hurdle_moderate" in names
+    assert "sparse_hurdle_strong" in names
+
+    moderate = next(t for t in trials if t.name == "sparse_hurdle_moderate")
+    strong = next(t for t in trials if t.name == "sparse_hurdle_strong")
+    assert moderate.params["enable_minutes_hurdle_head"] is True
+    assert strong.params["w_minutes_hurdle_nll"] > moderate.params["w_minutes_hurdle_nll"]

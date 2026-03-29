@@ -2487,6 +2487,7 @@ def _build_minutes_live_logic(
             attach_prop_implied_minutes,
             compute_player_pra_priors_asof,
             load_fpts_training_base_history_multi_season,
+            load_rates_training_base_pra_history_multi_season,
         )
 
         prior_end = (target_day - pd.Timedelta(days=1)).normalize()
@@ -2497,20 +2498,113 @@ def _build_minutes_live_logic(
         prop_implied_minutes_diag["lookback_days"] = int(lookback_days)
 
         player_ids: list[int] | None = None
-        if action_props_matched_rows > 0 and "player_id" in live_slice.columns:
-            has_props = pd.to_numeric(live_slice.get("an_has_any_props", 0), errors="coerce").fillna(0.0).gt(0.0)
-            pid = pd.to_numeric(live_slice.loc[has_props, "player_id"], errors="coerce").dropna()
-            if not pid.empty:
-                player_ids = pid.astype(int).unique().tolist()
-        prop_implied_minutes_diag["players_with_props"] = len(player_ids or [])
+        players_with_props: list[int] = []
+        if "player_id" in live_slice.columns:
+            pid_all = pd.to_numeric(live_slice["player_id"], errors="coerce").dropna()
+            if not pid_all.empty:
+                player_ids = pid_all.astype(int).unique().tolist()
+            has_props = (
+                pd.to_numeric(live_slice.get("an_has_any_props", 0), errors="coerce")
+                .fillna(0.0)
+                .gt(0.0)
+            )
+            pid_props = pd.to_numeric(
+                live_slice.loc[has_props, "player_id"], errors="coerce"
+            ).dropna()
+            if not pid_props.empty:
+                players_with_props = pid_props.astype(int).unique().tolist()
+        prop_implied_minutes_diag["players_with_props"] = len(players_with_props)
+        prop_implied_minutes_diag["players_considered_for_priors"] = len(player_ids or [])
 
-        history = load_fpts_training_base_history_multi_season(
+        fpts_history = load_fpts_training_base_history_multi_season(
             data_root=data_root,
             start=prior_start,
             end=prior_end,
             player_ids=player_ids,
         )
+        history = fpts_history.copy()
+        prop_implied_minutes_diag["history_rows_fpts"] = int(len(fpts_history))
+        prop_implied_minutes_diag["history_rows_rates_fallback"] = 0
+        prop_implied_minutes_diag["history_source"] = "fpts_training_base"
+
+        needs_rates_fallback = history.empty
+        fpts_latest = pd.to_datetime(
+            history.get("game_date", pd.Series(dtype="datetime64[ns]")),
+            errors="coerce",
+        )
+        latest_fpts_game_date = (
+            fpts_latest.dropna().max() if isinstance(fpts_latest, pd.Series) else None
+        )
+        if latest_fpts_game_date is not None:
+            prop_implied_minutes_diag["history_latest_game_date_fpts"] = (
+                pd.Timestamp(latest_fpts_game_date).date().isoformat()
+            )
+            if pd.Timestamp(latest_fpts_game_date) < (
+                prior_end - pd.Timedelta(days=14)
+            ):
+                needs_rates_fallback = True
+        if player_ids:
+            fpts_player_covered = set(
+                pd.to_numeric(
+                    history.get("player_id", pd.Series(dtype="Int64")),
+                    errors="coerce",
+                )
+                .dropna()
+                .astype(int)
+                .tolist()
+            )
+            coverage_ratio = float(len(fpts_player_covered)) / float(len(player_ids))
+            prop_implied_minutes_diag["history_player_coverage_fpts"] = round(
+                coverage_ratio, 4
+            )
+            if coverage_ratio < 0.85:
+                needs_rates_fallback = True
+
+        if needs_rates_fallback:
+            rates_history = load_rates_training_base_pra_history_multi_season(
+                data_root=data_root,
+                start=prior_start,
+                end=prior_end,
+                player_ids=player_ids,
+            )
+            prop_implied_minutes_diag["history_rows_rates_fallback"] = int(
+                len(rates_history)
+            )
+            if not rates_history.empty:
+                if history.empty:
+                    history = rates_history.copy()
+                    prop_implied_minutes_diag["history_source"] = (
+                        "rates_training_base_fallback"
+                    )
+                else:
+                    merged_history = pd.concat(
+                        [history, rates_history], ignore_index=True
+                    )
+                    merged_history["game_date"] = pd.to_datetime(
+                        merged_history["game_date"], errors="coerce"
+                    ).dt.normalize()
+                    merged_history = merged_history.sort_values(
+                        ["game_date", "game_id"], kind="mergesort"
+                    )
+                    history = merged_history.drop_duplicates(
+                        subset=["game_id", "player_id"], keep="last"
+                    ).reset_index(drop=True)
+                    prop_implied_minutes_diag["history_source"] = (
+                        "fpts_plus_rates_fallback"
+                    )
+
         prop_implied_minutes_diag["history_rows"] = int(len(history))
+        history_latest = pd.to_datetime(
+            history.get("game_date", pd.Series(dtype="datetime64[ns]")),
+            errors="coerce",
+        )
+        latest_history_game_date = (
+            history_latest.dropna().max() if isinstance(history_latest, pd.Series) else None
+        )
+        if latest_history_game_date is not None:
+            prop_implied_minutes_diag["history_latest_game_date"] = (
+                pd.Timestamp(latest_history_game_date).date().isoformat()
+            )
 
         priors = compute_player_pra_priors_asof(history)
         prop_implied_minutes_diag["prior_rows"] = int(len(priors))

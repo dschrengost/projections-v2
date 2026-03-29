@@ -25,6 +25,18 @@ from projections.rotation.game_transformer_v2 import (
 from projections.rotation.set_model import zfill_game_id_series
 
 JOIN_KEYS = ["game_id", "team_id", "player_id", "game_date"]
+SPARSE_CONTEXT_COLUMNS = [
+    "lineup_starter_announced",
+    "is_projected_starter",
+    "is_confirmed_starter",
+    "prior_play_prob",
+    "minutes_from_stints_prior_20",
+    "recent_start_pct_10",
+    "started_proxy_rate_prior_10",
+    "started_proxy_rate_prior_20",
+    "an_has_implied_minutes",
+    "an_implied_minutes",
+]
 
 
 def _utc_now_compact() -> str:
@@ -98,6 +110,10 @@ def _predict(
     device: torch.device,
     active_threshold: float,
     estimated_possessions_idx: int | None,
+    prior_minutes_feature_idx: int | None,
+    feature_mean: np.ndarray,
+    feature_std: np.ndarray,
+    starter_promotion_prior_minutes_max: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     model.eval()
 
@@ -110,10 +126,25 @@ def _predict(
             player_valid_mask = batch["player_valid_mask"].to(device=device)
             game_features = batch["game_features"].to(device=device)
             team_features = batch["team_features"].to(device=device)
+            starter_hint_mask = batch["starter_force_active_worlds"].to(device=device)
+            starter_promotion_candidate_mask = None
+            if prior_minutes_feature_idx is not None and int(prior_minutes_feature_idx) >= 0:
+                idx = int(prior_minutes_feature_idx)
+                if idx < int(player_features.shape[-1]):
+                    mean_i = float(feature_mean[idx])
+                    std_i = float(feature_std[idx])
+                    if not np.isfinite(std_i) or std_i <= 1e-6:
+                        std_i = 1.0
+                    raw_prior_minutes = player_features[..., idx] * std_i + mean_i
+                    starter_promotion_candidate_mask = starter_hint_mask & (
+                        raw_prior_minutes <= float(starter_promotion_prior_minutes_max)
+                    )
 
             forward_kwargs = {
                 "game_features": game_features,
                 "team_features": team_features,
+                "starter_hint_mask": starter_hint_mask,
+                "starter_promotion_candidate_mask": starter_promotion_candidate_mask,
                 "sample_active": False,
                 "run_flow": False,
                 "target_counts": None,
@@ -211,6 +242,286 @@ def _lineup_parity_metrics(player_df: pd.DataFrame) -> dict[str, Any]:
     else:
         out["minutes_mae_gap_abs"] = float("nan")
     return out
+
+
+def _build_sparse_context_frame(val_df: pd.DataFrame) -> pd.DataFrame:
+    if val_df.empty:
+        return pd.DataFrame()
+    cols = [c for c in SPARSE_CONTEXT_COLUMNS if c in val_df.columns]
+    if not cols:
+        return pd.DataFrame()
+
+    ctx = val_df[JOIN_KEYS + cols].copy()
+    ctx["game_id_norm"] = zfill_game_id_series(ctx["game_id"])
+    ctx["game_date"] = pd.to_datetime(ctx["game_date"], errors="coerce").dt.date.astype("string")
+    for col in cols:
+        ctx[col] = pd.to_numeric(ctx[col], errors="coerce")
+    ctx = ctx.drop_duplicates(subset=["game_id_norm", "team_id", "player_id", "game_date"], keep="last")
+    return ctx[["game_id_norm", "team_id", "player_id", "game_date", *cols]]
+
+
+def _attach_sparse_context(player_df: pd.DataFrame, context_df: pd.DataFrame) -> pd.DataFrame:
+    if player_df.empty or context_df.empty:
+        return player_df.copy()
+    merged = player_df.copy()
+    merged["game_date"] = pd.Series(merged["game_date"], copy=False).astype("string")
+    return merged.merge(
+        context_df,
+        on=["game_id_norm", "team_id", "player_id", "game_date"],
+        how="left",
+    )
+
+
+def _sparse_rotation_metrics(
+    player_df: pd.DataFrame,
+    *,
+    active_threshold: float,
+    low_minutes_threshold: float,
+    sparse_prior_play_prob_max: float,
+    sparse_prior_minutes_max: float,
+    starter_promotion_prior_minutes_max: float,
+    starter_promotion_hist_start_rate_max: float,
+    next_up_actual_min: float,
+    next_up_pred_min: float,
+) -> dict[str, Any]:
+    if player_df.empty:
+        return {"n": 0}
+
+    work = player_df.copy()
+    work["minutes_pred"] = pd.to_numeric(work["minutes_pred"], errors="coerce").fillna(0.0)
+    work["minutes_actual"] = pd.to_numeric(work["minutes_actual"], errors="coerce").fillna(0.0)
+    work["active_pred"] = pd.to_numeric(work["active_pred"], errors="coerce").fillna(0).astype(int)
+
+    starter_cols = [c for c in ("lineup_starter_announced", "is_projected_starter", "is_confirmed_starter") if c in work.columns]
+    starter_signal = np.zeros(len(work), dtype=bool)
+    for col in starter_cols:
+        starter_signal |= pd.to_numeric(work[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32) >= 0.5
+    work["starter_signal"] = starter_signal
+
+    hist_start_cols = [
+        c for c in ("recent_start_pct_10", "started_proxy_rate_prior_10", "started_proxy_rate_prior_20") if c in work.columns
+    ]
+    if hist_start_cols:
+        hist_start_arrays = [
+            pd.to_numeric(work[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32) for col in hist_start_cols
+        ]
+        hist_start_rate = np.maximum.reduce(hist_start_arrays)
+    else:
+        hist_start_rate = np.zeros(len(work), dtype=np.float32)
+    work["hist_start_rate"] = hist_start_rate
+
+    sparse_components: list[np.ndarray] = []
+    if "prior_play_prob" in work.columns:
+        sparse_components.append(
+            pd.to_numeric(work["prior_play_prob"], errors="coerce").fillna(1.0).to_numpy(dtype=np.float32)
+            <= float(sparse_prior_play_prob_max)
+        )
+    if "minutes_from_stints_prior_20" in work.columns:
+        sparse_components.append(
+            pd.to_numeric(work["minutes_from_stints_prior_20"], errors="coerce").fillna(48.0).to_numpy(dtype=np.float32)
+            <= float(sparse_prior_minutes_max)
+        )
+    if sparse_components:
+        sparse_prior = np.zeros(len(work), dtype=bool)
+        for comp in sparse_components:
+            sparse_prior |= comp
+    else:
+        sparse_prior = np.zeros(len(work), dtype=bool)
+    work["sparse_prior_signal"] = sparse_prior
+
+    starter_promotion_signal = work["starter_signal"].to_numpy(dtype=bool, copy=True)
+    if "minutes_from_stints_prior_20" in work.columns:
+        starter_promotion_signal &= (
+            pd.to_numeric(work["minutes_from_stints_prior_20"], errors="coerce").fillna(48.0).to_numpy(dtype=np.float32)
+            <= float(starter_promotion_prior_minutes_max)
+        )
+    else:
+        starter_promotion_signal &= np.zeros(len(work), dtype=bool)
+    if hist_start_cols:
+        starter_promotion_signal &= work["hist_start_rate"].to_numpy(dtype=np.float32) <= float(
+            starter_promotion_hist_start_rate_max
+        )
+    else:
+        starter_promotion_signal &= np.zeros(len(work), dtype=bool)
+    work["starter_promotion_signal"] = starter_promotion_signal
+
+    def _slice_metrics(mask: pd.Series | np.ndarray) -> dict[str, Any]:
+        subset = work.loc[mask]
+        if subset.empty:
+            return {
+                "n": 0,
+                "pred_minutes_mean": float("nan"),
+                "actual_minutes_mean": float("nan"),
+                "pred_low_minutes_rate": float("nan"),
+                "active_recall": float("nan"),
+            }
+        pred_minutes = subset["minutes_pred"]
+        actual_minutes = subset["minutes_actual"]
+        actual_active = actual_minutes >= float(active_threshold)
+        active_recall = float((subset.loc[actual_active, "active_pred"] >= 1).mean()) if bool(actual_active.any()) else float("nan")
+        return {
+            "n": int(len(subset)),
+            "pred_minutes_mean": float(pred_minutes.mean()),
+            "actual_minutes_mean": float(actual_minutes.mean()),
+            "pred_low_minutes_rate": float((pred_minutes < float(low_minutes_threshold)).mean()),
+            "active_recall": active_recall,
+        }
+
+    sparse_next_up_mask = work["sparse_prior_signal"] & (work["minutes_actual"] >= float(next_up_actual_min))
+    starter_next_up_mask = work["starter_signal"] & (work["minutes_actual"] >= float(next_up_actual_min))
+    starter_sparse_next_up_mask = sparse_next_up_mask & work["starter_signal"]
+    starter_promotion_next_up_mask = work["starter_promotion_signal"] & (work["minutes_actual"] >= float(next_up_actual_min))
+
+    return {
+        "n": int(len(work)),
+        "thresholds": {
+            "active_threshold": float(active_threshold),
+            "low_minutes_threshold": float(low_minutes_threshold),
+            "sparse_prior_play_prob_max": float(sparse_prior_play_prob_max),
+            "sparse_prior_minutes_max": float(sparse_prior_minutes_max),
+            "starter_promotion_prior_minutes_max": float(starter_promotion_prior_minutes_max),
+            "starter_promotion_hist_start_rate_max": float(starter_promotion_hist_start_rate_max),
+            "next_up_actual_min": float(next_up_actual_min),
+            "next_up_pred_min": float(next_up_pred_min),
+        },
+        "fields_available": {
+            "starter_fields": starter_cols,
+            "has_prior_play_prob": bool("prior_play_prob" in work.columns),
+            "has_minutes_from_stints_prior_20": bool("minutes_from_stints_prior_20" in work.columns),
+            "historical_start_fields": hist_start_cols,
+        },
+        "slices": {
+            "starters": _slice_metrics(work["starter_signal"]),
+            "sparse_prior": _slice_metrics(work["sparse_prior_signal"]),
+            "starter_sparse_prior": _slice_metrics(work["starter_signal"] & work["sparse_prior_signal"]),
+            "starter_promotion_candidate": _slice_metrics(work["starter_promotion_signal"]),
+        },
+        "failure_rates": {
+            "sparse_next_up_underprediction_rate": (
+                float((work.loc[sparse_next_up_mask, "minutes_pred"] < float(next_up_pred_min)).mean())
+                if bool(sparse_next_up_mask.any())
+                else float("nan")
+            ),
+            "starter_next_up_underprediction_rate": (
+                float((work.loc[starter_next_up_mask, "minutes_pred"] < float(next_up_pred_min)).mean())
+                if bool(starter_next_up_mask.any())
+                else float("nan")
+            ),
+            "starter_sparse_next_up_underprediction_rate": (
+                float((work.loc[starter_sparse_next_up_mask, "minutes_pred"] < float(next_up_pred_min)).mean())
+                if bool(starter_sparse_next_up_mask.any())
+                else float("nan")
+            ),
+            "starter_promotion_next_up_underprediction_rate": (
+                float((work.loc[starter_promotion_next_up_mask, "minutes_pred"] < float(next_up_pred_min)).mean())
+                if bool(starter_promotion_next_up_mask.any())
+                else float("nan")
+            ),
+        },
+    }
+
+
+def _bench_riser_metrics(
+    player_df: pd.DataFrame,
+    *,
+    active_threshold: float,
+    low_minutes_threshold: float,
+    bench_hist_start_rate_max: float,
+    bench_riser_actual_min: float,
+    bench_riser_pred_min: float,
+    bench_core_actual_min: float,
+) -> dict[str, Any]:
+    if player_df.empty:
+        return {"n": 0}
+
+    work = player_df.copy()
+    work["minutes_pred"] = pd.to_numeric(work["minutes_pred"], errors="coerce").fillna(0.0)
+    work["minutes_actual"] = pd.to_numeric(work["minutes_actual"], errors="coerce").fillna(0.0)
+    work["active_pred"] = pd.to_numeric(work["active_pred"], errors="coerce").fillna(0).astype(int)
+
+    starter_cols = [c for c in ("lineup_starter_announced", "is_projected_starter", "is_confirmed_starter") if c in work.columns]
+    starter_signal = np.zeros(len(work), dtype=bool)
+    for col in starter_cols:
+        starter_signal |= pd.to_numeric(work[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32) >= 0.5
+    work["starter_signal"] = starter_signal
+
+    hist_start_cols = [
+        c for c in ("recent_start_pct_10", "started_proxy_rate_prior_10", "started_proxy_rate_prior_20") if c in work.columns
+    ]
+    if hist_start_cols:
+        hist_start_arrays = [
+            pd.to_numeric(work[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32) for col in hist_start_cols
+        ]
+        hist_start_rate = np.maximum.reduce(hist_start_arrays)
+    else:
+        hist_start_rate = np.zeros(len(work), dtype=np.float32)
+    work["hist_start_rate"] = hist_start_rate
+
+    nonstarter_signal = ~work["starter_signal"].to_numpy(dtype=bool)
+    work["nonstarter_signal"] = nonstarter_signal
+    bench_riser_signal = nonstarter_signal & (
+        work["hist_start_rate"].to_numpy(dtype=np.float32) <= float(bench_hist_start_rate_max)
+    )
+    work["bench_riser_signal"] = bench_riser_signal
+
+    def _slice_metrics(mask: pd.Series | np.ndarray) -> dict[str, Any]:
+        subset = work.loc[mask]
+        if subset.empty:
+            return {
+                "n": 0,
+                "pred_minutes_mean": float("nan"),
+                "actual_minutes_mean": float("nan"),
+                "pred_low_minutes_rate": float("nan"),
+                "active_recall": float("nan"),
+            }
+        pred_minutes = subset["minutes_pred"]
+        actual_minutes = subset["minutes_actual"]
+        actual_active = actual_minutes >= float(active_threshold)
+        active_recall = float((subset.loc[actual_active, "active_pred"] >= 1).mean()) if bool(actual_active.any()) else float("nan")
+        return {
+            "n": int(len(subset)),
+            "pred_minutes_mean": float(pred_minutes.mean()),
+            "actual_minutes_mean": float(actual_minutes.mean()),
+            "pred_low_minutes_rate": float((pred_minutes < float(low_minutes_threshold)).mean()),
+            "active_recall": active_recall,
+        }
+
+    bench_riser_next_up_mask = work["bench_riser_signal"] & (work["minutes_actual"] >= float(bench_riser_actual_min))
+    bench_core_next_up_mask = work["bench_riser_signal"] & (work["minutes_actual"] >= float(bench_core_actual_min))
+
+    return {
+        "n": int(len(work)),
+        "thresholds": {
+            "active_threshold": float(active_threshold),
+            "low_minutes_threshold": float(low_minutes_threshold),
+            "bench_hist_start_rate_max": float(bench_hist_start_rate_max),
+            "bench_riser_actual_min": float(bench_riser_actual_min),
+            "bench_riser_pred_min": float(bench_riser_pred_min),
+            "bench_core_actual_min": float(bench_core_actual_min),
+        },
+        "fields_available": {
+            "starter_fields": starter_cols,
+            "historical_start_fields": hist_start_cols,
+        },
+        "slices": {
+            "nonstarters": _slice_metrics(work["nonstarter_signal"]),
+            "bench_riser_candidate": _slice_metrics(work["bench_riser_signal"]),
+            "bench_riser_next_up": _slice_metrics(bench_riser_next_up_mask),
+            "bench_core_next_up": _slice_metrics(bench_core_next_up_mask),
+        },
+        "failure_rates": {
+            "bench_riser_underprediction_rate": (
+                float((work.loc[bench_riser_next_up_mask, "minutes_pred"] < float(bench_riser_pred_min)).mean())
+                if bool(bench_riser_next_up_mask.any())
+                else float("nan")
+            ),
+            "bench_core_underprediction_rate": (
+                float((work.loc[bench_core_next_up_mask, "minutes_pred"] < float(bench_riser_pred_min)).mean())
+                if bool(bench_core_next_up_mask.any())
+                else float("nan")
+            ),
+        },
+    }
 
 
 def _active_count_calibration(team_df: pd.DataFrame) -> dict[str, Any]:
@@ -325,6 +636,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--active-threshold", type=float, default=1.0)
+    parser.add_argument("--low-minutes-threshold", type=float, default=8.0)
+    parser.add_argument("--sparse-prior-play-prob-max", type=float, default=0.20)
+    parser.add_argument("--sparse-prior-minutes-max", type=float, default=6.0)
+    parser.add_argument("--starter-promotion-prior-minutes-max", type=float, default=12.0)
+    parser.add_argument("--starter-promotion-hist-start-rate-max", type=float, default=0.20)
+    parser.add_argument("--next-up-actual-min", type=float, default=20.0)
+    parser.add_argument("--next-up-pred-min", type=float, default=10.0)
+    parser.add_argument("--bench-hist-start-rate-max", type=float, default=0.50)
+    parser.add_argument("--bench-riser-actual-min", type=float, default=20.0)
+    parser.add_argument("--bench-riser-pred-min", type=float, default=16.0)
+    parser.add_argument("--bench-core-actual-min", type=float, default=32.0)
     parser.add_argument("--out-json", type=str, default=None)
     parser.add_argument("--out-player-preds", type=str, default=None)
     return parser.parse_args()
@@ -384,6 +706,11 @@ def main() -> None:
     estimated_possessions_idx = None
     if "estimated_possessions" in config.game_feature_columns:
         estimated_possessions_idx = int(config.game_feature_columns.index("estimated_possessions"))
+    prior_minutes_feature_idx = (
+        int(config.feature_columns.index("minutes_from_stints_prior_20"))
+        if "minutes_from_stints_prior_20" in config.feature_columns
+        else None
+    )
 
     player_df, team_df = _predict(
         model,
@@ -391,11 +718,37 @@ def main() -> None:
         device=device,
         active_threshold=float(args.active_threshold),
         estimated_possessions_idx=estimated_possessions_idx,
+        prior_minutes_feature_idx=prior_minutes_feature_idx,
+        feature_mean=np.asarray(config.feature_mean, dtype=np.float32),
+        feature_std=np.asarray(config.feature_std, dtype=np.float32),
+        starter_promotion_prior_minutes_max=18.0,
     )
+    sparse_context_df = _build_sparse_context_frame(val_df)
+    player_eval_df = _attach_sparse_context(player_df, sparse_context_df)
 
-    lineup_parity = _lineup_parity_metrics(player_df)
+    lineup_parity = _lineup_parity_metrics(player_eval_df)
     active_count_cal = _active_count_calibration(team_df)
     possessions_cal = _possessions_calibration(team_df, labels_boxscore_counts_df)
+    sparse_diag = _sparse_rotation_metrics(
+        player_eval_df,
+        active_threshold=float(args.active_threshold),
+        low_minutes_threshold=float(args.low_minutes_threshold),
+        sparse_prior_play_prob_max=float(args.sparse_prior_play_prob_max),
+        sparse_prior_minutes_max=float(args.sparse_prior_minutes_max),
+        starter_promotion_prior_minutes_max=float(args.starter_promotion_prior_minutes_max),
+        starter_promotion_hist_start_rate_max=float(args.starter_promotion_hist_start_rate_max),
+        next_up_actual_min=float(args.next_up_actual_min),
+        next_up_pred_min=float(args.next_up_pred_min),
+    )
+    bench_riser_diag = _bench_riser_metrics(
+        player_eval_df,
+        active_threshold=float(args.active_threshold),
+        low_minutes_threshold=float(args.low_minutes_threshold),
+        bench_hist_start_rate_max=float(args.bench_hist_start_rate_max),
+        bench_riser_actual_min=float(args.bench_riser_actual_min),
+        bench_riser_pred_min=float(args.bench_riser_pred_min),
+        bench_core_actual_min=float(args.bench_core_actual_min),
+    )
 
     payload = {
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -403,19 +756,21 @@ def main() -> None:
         "dataset_dir": str(dataset_dir),
         "val_days": int(args.val_days),
         "active_threshold": float(args.active_threshold),
-        "n_player_rows": int(len(player_df)),
+        "n_player_rows": int(len(player_eval_df)),
         "n_team_rows": int(len(team_df)),
         "lineup_state_parity": lineup_parity,
         "game_volume_calibration": {
             "active_count": active_count_cal,
             "possessions_proxy": possessions_cal,
         },
+        "sparse_rotation_diagnostics": sparse_diag,
+        "bench_riser_diagnostics": bench_riser_diag,
     }
 
     if args.out_player_preds:
         out_player = Path(args.out_player_preds).expanduser()
         out_player.parent.mkdir(parents=True, exist_ok=True)
-        player_df.to_parquet(out_player, index=False)
+        player_eval_df.to_parquet(out_player, index=False)
         payload["out_player_preds"] = str(out_player)
 
     out_json = Path(args.out_json).expanduser() if args.out_json else (run_dir / f"eval_slices_{_utc_now_compact()}.json")

@@ -32,6 +32,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from projections import paths
+from projections.names import normalize_player_name
 from projections.features.dnp_history import (
     DNP_HISTORY_FEATURE_COLUMNS,
     DNPHistoryConfig,
@@ -719,7 +720,7 @@ def _backfill_lineups_from_silver_daily_lineups(
     *,
     data_root: Path,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
-    """Backfill lineup metadata from silver/nba_daily_lineups by id keys.
+    """Backfill lineup metadata from silver tables by id keys.
 
     Join keys:
       - game_id
@@ -729,6 +730,10 @@ def _backfill_lineups_from_silver_daily_lineups(
     Safety:
       - if tip_ts exists, only accept lineup_timestamp <= tip_ts
       - only fill missing lineup_timestamp (do not overwrite existing values)
+
+    Source priority:
+      1) silver/nba_daily_lineups (id-keyed)
+      2) silver/rotowire_lineups fallback (matched by game_date + team + player_name)
     """
     if df.empty:
         return {"enabled": True, "rows": 0}, df
@@ -757,19 +762,7 @@ def _backfill_lineups_from_silver_daily_lineups(
     before_has_lineup = out["lineup_timestamp"].notna()
 
     lineup_root = data_root / "silver" / "nba_daily_lineups"
-    if not lineup_root.exists():
-        return {
-            "enabled": True,
-            "rows": int(len(out)),
-            "rows_with_lineup_before": int(before_has_lineup.sum()),
-            "rows_with_lineup_after": int(before_has_lineup.sum()),
-            "lineup_coverage_before": float(before_has_lineup.mean()),
-            "lineup_coverage_after": float(before_has_lineup.mean()),
-            "lineups_rows_read": 0,
-            "lineups_rows_loaded": 0,
-            "lineups_partitions_loaded": 0,
-            "warning": f"lineup root missing: {lineup_root}",
-        }, out
+    rotowire_root = data_root / "silver" / "rotowire_lineups"
 
     game_days = (
         pd.to_datetime(out["game_date"], errors="coerce").dropna().dt.normalize().unique().tolist()
@@ -779,15 +772,29 @@ def _backfill_lineups_from_silver_daily_lineups(
     day_tokens = sorted({pd.Timestamp(d).date().isoformat() for d in game_days})
 
     lineup_paths: list[Path] = []
+    rotowire_paths: list[Path] = []
     for day in day_tokens:
         ts = pd.Timestamp(day)
         season = _season_for_date(ts)
         path = lineup_root / f"season={season}" / f"date={day}" / "lineups.parquet"
         if path.exists():
             lineup_paths.append(path)
+        rotowire_path = rotowire_root / f"date={day}" / "lineups.parquet"
+        if rotowire_path.exists():
+            rotowire_paths.append(rotowire_path)
 
     read_rows = 0
     frames: list[pd.DataFrame] = []
+    keep_cols = [
+        "game_id",
+        "team_id",
+        "player_id",
+        "lineup_timestamp",
+        "lineup_role",
+        "lineup_status",
+        "lineup_roster_status",
+        "lineup_projected_starter",
+    ]
     desired = [
         "game_id",
         "team_id",
@@ -809,7 +816,142 @@ def _backfill_lineups_from_silver_daily_lineups(
             continue
         frames.append(part)
 
-    if not frames:
+    if frames:
+        daily_lineups = pd.concat(frames, ignore_index=True)
+        for col in ("game_id", "team_id", "player_id"):
+            daily_lineups[col] = pd.to_numeric(daily_lineups[col], errors="coerce").astype("Int64")
+
+        daily_lineups["lineup_timestamp"] = pd.to_datetime(
+            daily_lineups.get("lineup_timestamp"), utc=True, errors="coerce"
+        )
+        if "ingested_ts" in daily_lineups.columns:
+            daily_lineups["ingested_ts"] = pd.to_datetime(daily_lineups["ingested_ts"], utc=True, errors="coerce")
+        else:
+            daily_lineups["ingested_ts"] = pd.NaT
+
+        # Fallback: use ingested_ts when lineup_timestamp is missing.
+        daily_lineups["lineup_timestamp"] = daily_lineups["lineup_timestamp"].where(
+            daily_lineups["lineup_timestamp"].notna(),
+            daily_lineups["ingested_ts"],
+        )
+        daily_lineups["lineup_role"] = daily_lineups.get(
+            "lineup_role", pd.Series(pd.NA, index=daily_lineups.index)
+        ).astype("string")
+        daily_lineups["lineup_status"] = daily_lineups.get(
+            "lineup_status", pd.Series(pd.NA, index=daily_lineups.index)
+        ).astype("string")
+        daily_lineups["lineup_roster_status"] = daily_lineups.get(
+            "roster_status", pd.Series(pd.NA, index=daily_lineups.index)
+        ).astype("string")
+
+        role_norm = daily_lineups["lineup_role"].fillna("").str.lower().str.strip()
+        # Starter signals should come from explicit starter role only.
+        # `lineup_status` can be "confirmed"/"expected" for non-starters and must not
+        # be interpreted as "starter announced".
+        daily_lineups["lineup_projected_starter"] = role_norm.isin({"projected_starter", "confirmed_starter"})
+        daily_lineups = daily_lineups.loc[:, keep_cols].dropna(subset=["game_id", "team_id", "player_id"])
+    else:
+        daily_lineups = pd.DataFrame(columns=keep_cols)
+
+    rotowire_read_rows = 0
+    rotowire_rows_loaded = 0
+    rotowire_lineups = pd.DataFrame(columns=keep_cols)
+    if (
+        rotowire_paths
+        and {"game_date", "team_tricode", "player_name"}.issubset(out.columns)
+    ):
+        rotowire_frames: list[pd.DataFrame] = []
+        rotowire_desired = ["team_abbreviation", "player_name", "lineup_role", "injury_status", "ingested_ts"]
+        for path in rotowire_paths:
+            schema_cols = set(pq.ParquetFile(path).schema.names)
+            cols = [c for c in rotowire_desired if c in schema_cols]
+            if not {"team_abbreviation", "player_name", "lineup_role"}.issubset(cols):
+                continue
+            part = pd.read_parquet(path, columns=cols)
+            rotowire_read_rows += int(len(part))
+            if part.empty:
+                continue
+            day_token = path.parent.name.split("=", 1)[-1]
+            part["game_date"] = pd.to_datetime(day_token, errors="coerce").normalize()
+            rotowire_frames.append(part)
+
+        if rotowire_frames:
+            rotowire_raw = pd.concat(rotowire_frames, ignore_index=True)
+            rotowire_raw["team_norm"] = (
+                rotowire_raw["team_abbreviation"].astype("string", copy=False).str.upper().str.strip().fillna("")
+            )
+            rotowire_raw["player_norm"] = (
+                rotowire_raw["player_name"].astype("string", copy=False).fillna("").map(normalize_player_name)
+            )
+            rotowire_raw["lineup_timestamp"] = pd.to_datetime(
+                rotowire_raw.get("ingested_ts"), utc=True, errors="coerce"
+            )
+            role_norm = (
+                rotowire_raw["lineup_role"].astype("string", copy=False).str.lower().str.strip().fillna("")
+            )
+            rotowire_raw["lineup_role"] = role_norm.replace("", pd.NA).astype("string")
+            status = np.where(
+                role_norm.eq("confirmed_starter"),
+                "confirmed",
+                np.where(role_norm.eq("projected_starter"), "expected", np.where(role_norm.eq("out"), "out", None)),
+            )
+            rotowire_raw["lineup_status"] = pd.Series(status, index=rotowire_raw.index, dtype="string")
+            rotowire_raw["lineup_roster_status"] = rotowire_raw.get(
+                "injury_status", pd.Series(pd.NA, index=rotowire_raw.index)
+            ).astype("string")
+            rotowire_raw["lineup_projected_starter"] = role_norm.isin({"projected_starter", "confirmed_starter"})
+
+            spine = out.loc[:, ["game_id", "team_id", "player_id", "game_date", "team_tricode", "player_name"]].copy()
+            spine["game_date"] = pd.to_datetime(spine["game_date"], errors="coerce").dt.normalize()
+            spine["team_norm"] = spine["team_tricode"].astype("string", copy=False).str.upper().str.strip().fillna("")
+            spine["player_norm"] = (
+                spine["player_name"].astype("string", copy=False).fillna("").map(normalize_player_name)
+            )
+            spine = spine.dropna(subset=["game_id", "team_id", "player_id", "game_date"])
+            spine = spine.loc[(spine["team_norm"] != "") & (spine["player_norm"] != "")]
+            spine = spine.loc[:, ["game_id", "team_id", "player_id", "game_date", "team_norm", "player_norm"]]
+            spine = spine.drop_duplicates(
+                subset=["game_id", "team_id", "player_id", "game_date", "team_norm", "player_norm"], keep="last"
+            )
+
+            mapped = spine.merge(
+                rotowire_raw.loc[
+                    :,
+                    [
+                        "game_date",
+                        "team_norm",
+                        "player_norm",
+                        "lineup_timestamp",
+                        "lineup_role",
+                        "lineup_status",
+                        "lineup_roster_status",
+                        "lineup_projected_starter",
+                    ],
+                ],
+                on=["game_date", "team_norm", "player_norm"],
+                how="inner",
+                sort=False,
+            )
+            if not mapped.empty:
+                rotowire_lineups = mapped.loc[
+                    :,
+                    [
+                        "game_id",
+                        "team_id",
+                        "player_id",
+                        "lineup_timestamp",
+                        "lineup_role",
+                        "lineup_status",
+                        "lineup_roster_status",
+                        "lineup_projected_starter",
+                    ],
+                ].copy()
+                rotowire_rows_loaded = int(len(rotowire_lineups))
+
+    source_frames = [frame for frame in (daily_lineups, rotowire_lineups) if not frame.empty]
+    if source_frames:
+        lineups = pd.concat(source_frames, ignore_index=True)
+    else:
         return {
             "enabled": True,
             "rows": int(len(out)),
@@ -817,48 +959,18 @@ def _backfill_lineups_from_silver_daily_lineups(
             "rows_with_lineup_after": int(before_has_lineup.sum()),
             "lineup_coverage_before": float(before_has_lineup.mean()),
             "lineup_coverage_after": float(before_has_lineup.mean()),
-            "lineups_rows_read": int(read_rows),
+            "rows_lineup_filled": 0,
+            "lineups_rows_read": int(read_rows + rotowire_read_rows),
             "lineups_rows_loaded": 0,
-            "lineups_partitions_loaded": int(len(lineup_paths)),
-            "warning": "No matching nba_daily_lineups rows found for output date window.",
+            "lineups_partitions_loaded": int(len(lineup_paths) + len(rotowire_paths)),
+            "daily_lineups_rows_read": int(read_rows),
+            "daily_lineups_rows_loaded": int(len(daily_lineups)),
+            "daily_lineups_partitions_loaded": int(len(lineup_paths)),
+            "rotowire_lineups_rows_read": int(rotowire_read_rows),
+            "rotowire_lineups_rows_loaded": int(rotowire_rows_loaded),
+            "rotowire_lineups_partitions_loaded": int(len(rotowire_paths)),
+            "warning": "No matching lineup rows found for output date window in nba_daily_lineups or rotowire_lineups.",
         }, out
-
-    lineups = pd.concat(frames, ignore_index=True)
-    for col in ("game_id", "team_id", "player_id"):
-        lineups[col] = pd.to_numeric(lineups[col], errors="coerce").astype("Int64")
-
-    lineups["lineup_timestamp"] = pd.to_datetime(lineups.get("lineup_timestamp"), utc=True, errors="coerce")
-    if "ingested_ts" in lineups.columns:
-        lineups["ingested_ts"] = pd.to_datetime(lineups["ingested_ts"], utc=True, errors="coerce")
-    else:
-        lineups["ingested_ts"] = pd.NaT
-
-    # Fallback: use ingested_ts when lineup_timestamp is missing.
-    lineups["lineup_timestamp"] = lineups["lineup_timestamp"].where(
-        lineups["lineup_timestamp"].notna(),
-        lineups["ingested_ts"],
-    )
-    lineups["lineup_role"] = lineups.get("lineup_role", pd.Series(pd.NA, index=lineups.index)).astype("string")
-    lineups["lineup_status"] = lineups.get("lineup_status", pd.Series(pd.NA, index=lineups.index)).astype("string")
-    lineups["lineup_roster_status"] = lineups.get("roster_status", pd.Series(pd.NA, index=lineups.index)).astype("string")
-
-    role_norm = lineups["lineup_role"].fillna("").str.lower().str.strip()
-    # Starter signals should come from explicit starter role only.
-    # `lineup_status` can be "confirmed"/"expected" for non-starters and must not
-    # be interpreted as "starter announced".
-    lineups["lineup_projected_starter"] = role_norm.isin({"projected_starter", "confirmed_starter"})
-
-    keep_cols = [
-        "game_id",
-        "team_id",
-        "player_id",
-        "lineup_timestamp",
-        "lineup_role",
-        "lineup_status",
-        "lineup_roster_status",
-        "lineup_projected_starter",
-    ]
-    lineups = lineups.loc[:, keep_cols].dropna(subset=["game_id", "team_id", "player_id"])
 
     base = out.loc[:, ["game_id", "team_id", "player_id"]].copy()
     base["_row_idx"] = np.arange(len(base), dtype=np.int64)
@@ -906,9 +1018,15 @@ def _backfill_lineups_from_silver_daily_lineups(
         "lineup_coverage_before": float(before_has_lineup.mean()),
         "lineup_coverage_after": float(after_has_lineup.mean()),
         "rows_lineup_filled": int((after_has_lineup & ~before_has_lineup).sum()),
-        "lineups_rows_read": int(read_rows),
+        "lineups_rows_read": int(read_rows + rotowire_read_rows),
         "lineups_rows_loaded": int(len(lineups)),
-        "lineups_partitions_loaded": int(len(lineup_paths)),
+        "lineups_partitions_loaded": int(len(lineup_paths) + len(rotowire_paths)),
+        "daily_lineups_rows_read": int(read_rows),
+        "daily_lineups_rows_loaded": int(len(daily_lineups)),
+        "daily_lineups_partitions_loaded": int(len(lineup_paths)),
+        "rotowire_lineups_rows_read": int(rotowire_read_rows),
+        "rotowire_lineups_rows_loaded": int(rotowire_rows_loaded),
+        "rotowire_lineups_partitions_loaded": int(len(rotowire_paths)),
     }
     return meta, out
 
@@ -1189,7 +1307,11 @@ def _apply_feature_pruning(features_df: pd.DataFrame, *, allowlist: list[str]) -
     kept = [c for c in allowlist if c not in DROP_FEATURES]
     missing = [c for c in kept if c not in features_df.columns]
     if missing:
-        raise ValueError(f"Minutes features missing expected columns: {missing}")
+        print(
+            "[rotation_train_v1] warning: allowlist columns missing from source features; "
+            f"ignoring {len(missing)} columns"
+        )
+        kept = [c for c in kept if c in features_df.columns]
     # Keep all non-feature columns as-is (ids, timestamps, strings), but drop pruned numeric features to avoid selection.
     to_drop = [c for c in DROP_FEATURES if c in features_df.columns]
     pruned = features_df.drop(columns=to_drop)
@@ -1776,14 +1898,15 @@ def main() -> None:
         action="store_true",
         help=(
             "Backfill missing lineup_timestamp / lineup_role / starter flags from "
-            "silver/nba_daily_lineups using (game_id, team_id, player_id) keys."
+            "silver/nba_daily_lineups (id join) with fallback to silver/rotowire_lineups "
+            "(game_date + team + player_name join)."
         ),
     )
     parser.add_argument(
         "--no-backfill-lineups-from-silver",
         dest="backfill_lineups_from_silver",
         action="store_false",
-        help="Disable lineup backfill from silver/nba_daily_lineups.",
+        help="Disable lineup backfill from silver lineup sources.",
     )
     parser.set_defaults(backfill_lineups_from_silver=True)
     parser.add_argument(

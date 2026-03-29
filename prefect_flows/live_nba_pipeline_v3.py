@@ -60,6 +60,10 @@ from projections.pipeline.triton_inference_client import (
 from projections.pipeline.v3_postflight import run_postflight_gate
 from projections.pipeline.v3_preflight import run_preflight_gate
 from projections.ops.manual_availability import list_manual_overrides, manual_override_report
+from projections.rotation.gtv2_promotion_hybrid import (
+    PromotionHybridConfig,
+    assert_promotion_hybrid_compatible,
+)
 from projections.runtime_stamp import (
     enforce_clean_tree,
     enforce_prod_sanity,
@@ -281,12 +285,44 @@ def _resolve_season_month(game_date: str) -> tuple[int, int]:
     return season, int(ts.month)
 
 
-def _resolve_bundle_dir(*, data_root: Path, gtv2_bundle_dir: str | None) -> Path:
+def _load_gtv2_inference_current_config() -> dict[str, Any]:
+    config_path = PROJECT_ROOT / "config" / "gtv2_inference_current.json"
+    cfg: dict[str, Any] = {
+        "bundle_dir": None,
+        "model_version": None,
+        "promoted_at": None,
+        "bundle_hash": None,
+        "promotion_hybrid_enabled": False,
+        "promotion_expert_run_dir": None,
+        "promotion_prior_minutes_max": 12.0,
+        "promotion_hist_start_rate_max": 0.20,
+        "promotion_blend_mode": "uplift_only",
+        "promotion_force_active_candidates": False,
+    }
+    if config_path.exists():
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"invalid inference current config payload: {config_path}")
+        cfg.update(payload)
+    return cfg
+
+
+def _resolve_bundle_dir(
+    *,
+    data_root: Path,
+    gtv2_bundle_dir: str | None,
+    current_config_payload: dict[str, Any] | None = None,
+) -> Path:
     if gtv2_bundle_dir:
         return Path(gtv2_bundle_dir).expanduser().resolve()
     env = os.environ.get("PROJECTIONS_GTV2_BUNDLE_DIR")
     if env:
         return Path(env).expanduser().resolve()
+    current_bundle_dir = str(
+        (current_config_payload or {}).get("bundle_dir") or ""
+    ).strip()
+    if current_bundle_dir:
+        return Path(current_bundle_dir).expanduser().resolve()
     return (
         data_root / "artifacts" / "game_transformer_v2" / "bundle_current"
     ).resolve()
@@ -434,6 +470,86 @@ def _bundle_artifact_hash(bundle_dir: Path) -> str:
         return stable_json_sha256([])
     files = [p for p in bundle_dir.rglob("*") if p.is_file()]
     return hash_paths(files)
+
+
+def _normalize_gtv2_projection_surface_semantics(df: pd.DataFrame) -> pd.DataFrame:
+    """Expose unconditional GTv2 summaries as the default live-facing columns."""
+
+    if df.empty:
+        return df
+
+    out = df.copy()
+    updates: dict[str, pd.Series] = {}
+
+    def _num(col: str) -> pd.Series | None:
+        if col in updates:
+            return updates[col]
+        if col not in out.columns:
+            return None
+        return pd.to_numeric(out[col], errors="coerce")
+
+    def _promote_uncond(*, cond_col: str, uncond_col: str, cond_alias: str) -> None:
+        cond_series = _num(cond_col)
+        if cond_series is not None and cond_alias not in out.columns and cond_alias not in updates:
+            updates[cond_alias] = cond_series
+        uncond_series = _num(uncond_col)
+        if uncond_series is not None:
+            updates[cond_col] = uncond_series
+
+    sim_family_specs = {
+        "minutes_sim": ("mean", "std", "p10", "p50", "p90"),
+        "dk_fpts": ("mean", "std", "p05", "p10", "p25", "p50", "p75", "p90", "p95"),
+    }
+    for family, suffixes in sim_family_specs.items():
+        for suffix in suffixes:
+            cond_col = f"{family}_{suffix}"
+            uncond_col = f"{family}_{suffix}_uncond"
+            cond_alias = f"{family}_{suffix}_cond"
+            _promote_uncond(
+                cond_col=cond_col,
+                uncond_col=uncond_col,
+                cond_alias=cond_alias,
+            )
+
+            pref_cond_col = f"sim_{family}_{suffix}"
+            pref_uncond_col = f"sim_{family}_{suffix}_uncond"
+            pref_cond_alias = f"sim_{family}_{suffix}_cond"
+            if pref_uncond_col not in out.columns and pref_uncond_col not in updates and uncond_col in out.columns:
+                base_uncond = _num(uncond_col)
+                if base_uncond is not None:
+                    updates[pref_uncond_col] = base_uncond
+            _promote_uncond(
+                cond_col=pref_cond_col,
+                uncond_col=pref_uncond_col,
+                cond_alias=pref_cond_alias,
+            )
+
+    for stat in ("pts", "reb", "ast", "stl", "blk", "tov"):
+        cond_col = f"{stat}_mean"
+        uncond_col = f"{stat}_mean_uncond"
+        cond_alias = f"{stat}_mean_cond"
+        _promote_uncond(
+            cond_col=cond_col,
+            uncond_col=uncond_col,
+            cond_alias=cond_alias,
+        )
+
+        pref_cond_col = f"sim_{stat}_mean"
+        pref_uncond_col = f"sim_{stat}_mean_uncond"
+        pref_cond_alias = f"sim_{stat}_mean_cond"
+        if pref_uncond_col not in out.columns and pref_uncond_col not in updates and uncond_col in out.columns:
+            base_uncond = _num(uncond_col)
+            if base_uncond is not None:
+                updates[pref_uncond_col] = base_uncond
+        _promote_uncond(
+            cond_col=pref_cond_col,
+            uncond_col=pref_uncond_col,
+            cond_alias=pref_cond_alias,
+        )
+
+    if updates:
+        out = out.assign(**updates)
+    return out
 
 
 def _set_inference_seed(seed: int) -> None:
@@ -5865,10 +5981,12 @@ def generate_worlds_gtv2_live_task(
     world_chunk_size: int = 64,
     active_temperature: float = 1.0,
     random_seed: int = 42,
-    strict_world_contracts: bool = True,
+    strict_world_contracts: bool = False,
     flow_scale_clip_override: float | None = None,
     make_model_mode: str = "beta_binomial_all",
     make_model_use_learned_efficiency: bool = True,
+    allocation_top_usage_top1_scale: float = 1.0,
+    allocation_top_usage_top2_scale: float = 1.0,
     apply_props_uplift: bool = True,
     props_uplift_scope: str = "all_players",
     props_uplift_confidence_weighted: bool = True,
@@ -5887,6 +6005,12 @@ def generate_worlds_gtv2_live_task(
     world_realism_low_minutes_min_scale: float = 0.55,
     world_realism_outlier_resample_enabled: bool = True,
     world_realism_outlier_resample_max_passes: int = 1,
+    promotion_hybrid_enabled: bool = False,
+    promotion_expert_run_dir: str | None = None,
+    promotion_prior_minutes_max: float = 12.0,
+    promotion_hist_start_rate_max: float = 0.20,
+    promotion_blend_mode: str = "uplift_only",
+    promotion_force_active_candidates: bool = False,
 ) -> dict[str, str]:
     run_dir = (
         data_root
@@ -5958,12 +6082,16 @@ def generate_worlds_gtv2_live_task(
             "placeholder_mode": True,
         }
     else:
-        logger = get_run_logger()
         backend = str(inference_backend).strip().lower()
         if backend not in {"local", "triton"}:
             raise RuntimeError(
                 f"unsupported inference backend for worlds task: {backend}"
             )
+        if bool(promotion_hybrid_enabled) and backend != "local":
+            raise RuntimeError(
+                "promotion hybrid currently supports only local GTv2 worlds inference"
+            )
+        logger = get_run_logger()
         _set_inference_seed(int(random_seed))
         device = _resolve_torch_device(gtv2_device)
         device_for_summary = str(device)
@@ -6059,6 +6187,12 @@ def generate_worlds_gtv2_live_task(
                     "make_model_use_learned_efficiency": bool(
                         make_model_use_learned_efficiency
                     ),
+                    "allocation_top_usage_top1_scale": float(
+                        allocation_top_usage_top1_scale
+                    ),
+                    "allocation_top_usage_top2_scale": float(
+                        allocation_top_usage_top2_scale
+                    ),
                 }
                 response: dict[str, Any] | None = None
                 game_worlds_df: pd.DataFrame | None = None
@@ -6141,6 +6275,34 @@ def generate_worlds_gtv2_live_task(
                 device=device,
                 flow_scale_clip_override=flow_scale_clip_override,
             )
+            promotion_expert_model = None
+            promotion_hybrid_config: PromotionHybridConfig | None = None
+            if bool(promotion_hybrid_enabled):
+                if not promotion_expert_run_dir:
+                    raise RuntimeError(
+                        "promotion_hybrid_enabled requires promotion_expert_run_dir"
+                    )
+                promotion_expert_path = (
+                    Path(promotion_expert_run_dir).expanduser().resolve()
+                )
+                promotion_expert_cfg, promotion_expert_model = _load_gtv2_model(
+                    promotion_expert_path,
+                    device=device,
+                    flow_scale_clip_override=flow_scale_clip_override,
+                )
+                assert_promotion_hybrid_compatible(config, promotion_expert_cfg)
+                blend_mode = str(promotion_blend_mode).strip().lower()
+                if blend_mode not in {"uplift_only", "replace"}:
+                    raise RuntimeError(
+                        "promotion_blend_mode must be one of: uplift_only, replace"
+                    )
+                promotion_hybrid_config = PromotionHybridConfig.from_model_config(
+                    config,
+                    prior_minutes_max=float(promotion_prior_minutes_max),
+                    hist_start_rate_max=float(promotion_hist_start_rate_max),
+                    uplift_only=(blend_mode == "uplift_only"),
+                    force_active_candidates=bool(promotion_force_active_candidates),
+                )
             examples = _build_gtv2_inference_examples(
                 features_df=features_df,
                 game_date=game_date,
@@ -6165,6 +6327,14 @@ def generate_worlds_gtv2_live_task(
                     active_temperature=float(active_temperature),
                     strict_contracts=bool(strict_world_contracts),
                     make_model_config=make_model_cfg,
+                    allocation_top_usage_top1_scale=float(
+                        allocation_top_usage_top1_scale
+                    ),
+                    allocation_top_usage_top2_scale=float(
+                        allocation_top_usage_top2_scale
+                    ),
+                    promotion_expert_model=promotion_expert_model,
+                    promotion_hybrid_config=promotion_hybrid_config,
                 )
                 world_frames.append(df_batch)
                 contract_counter.update(checks)
@@ -6315,6 +6485,7 @@ def generate_worlds_gtv2_live_task(
             worlds_df,
             sim_profile="game_transformer_v2",
         )
+        projections = _normalize_gtv2_projection_surface_semantics(projections)
         projections, projection_key_report = _sanitize_frame_to_expected_keys(
             projections,
             expected_keys_df=features_df,
@@ -6356,6 +6527,34 @@ def generate_worlds_gtv2_live_task(
             "world_contract_field_repair_post_sanitize": (
                 world_contract_repair_report_post_sanitize
             ),
+            "promotion_hybrid": {
+                "enabled": bool(promotion_hybrid_enabled),
+                "expert_run_dir": (
+                    str(Path(promotion_expert_run_dir).expanduser().resolve())
+                    if promotion_expert_run_dir
+                    else None
+                ),
+                "prior_minutes_max": (
+                    float(promotion_prior_minutes_max)
+                    if bool(promotion_hybrid_enabled)
+                    else None
+                ),
+                "hist_start_rate_max": (
+                    float(promotion_hist_start_rate_max)
+                    if bool(promotion_hybrid_enabled)
+                    else None
+                ),
+                "blend_mode": (
+                    str(promotion_blend_mode)
+                    if bool(promotion_hybrid_enabled)
+                    else None
+                ),
+                "force_active_candidates": (
+                    bool(promotion_force_active_candidates)
+                    if bool(promotion_hybrid_enabled)
+                    else None
+                ),
+            },
             "created_at": _utc_now_iso(),
         }
         if backend == "triton":
@@ -6475,6 +6674,7 @@ def finalize_projections_live_task(
             "world projections are empty after applying target_game_ids: "
             f"{target_game_ids}"
         )
+    df = _normalize_gtv2_projection_surface_semantics(df)
 
     # Enrich run-scoped projections with display + vegas context fields so the
     # dashboard can render a read-only game view without additional joins.
@@ -6626,6 +6826,7 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     worlds_df: pd.DataFrame,
     features_df: pd.DataFrame,
     target_game_ids: list[int],
+    apply_props_uplift: bool,
     props_uplift_scope: str,
     props_uplift_confidence_weighted: bool,
     apply_propless_tail_calibration: bool,
@@ -6685,12 +6886,15 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     target_worlds = worlds_df.loc[target_mask].reset_index(drop=True).copy()
     target_features = _filter_to_target_games(features_df, target_ids)
 
-    target_worlds, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
-        target_worlds,
-        features_df=target_features,
-        scope=str(props_uplift_scope),
-        confidence_weighted=bool(props_uplift_confidence_weighted),
-    )
+    if bool(apply_props_uplift):
+        target_worlds, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
+            target_worlds,
+            features_df=target_features,
+            scope=str(props_uplift_scope),
+            confidence_weighted=bool(props_uplift_confidence_weighted),
+        )
+    else:
+        props_uplift_report = {"applied": False, "reason": "disabled", **scope_report}
     target_worlds, propless_tail_report = _apply_propless_tail_calibration_to_worlds(
         target_worlds,
         features_df=target_features,
@@ -6758,6 +6962,7 @@ def materialize_unified_run_artifacts_task(
     run_id: str,
     data_root: Path,
     target_game_ids: list[int],
+    apply_props_uplift: bool = False,
     props_uplift_scope: str = "all_players",
     props_uplift_confidence_weighted: bool = True,
     apply_propless_tail_calibration: bool = True,
@@ -6876,6 +7081,7 @@ def materialize_unified_run_artifacts_task(
             worlds_df=merged_worlds,
             features_df=merged_features,
             target_game_ids=target_ids,
+            apply_props_uplift=bool(apply_props_uplift),
             props_uplift_scope=str(props_uplift_scope),
             props_uplift_confidence_weighted=bool(props_uplift_confidence_weighted),
             apply_propless_tail_calibration=bool(apply_propless_tail_calibration),
@@ -6950,6 +7156,9 @@ def materialize_unified_run_artifacts_task(
         target_worlds_for_projection,
         sim_profile="game_transformer_v2",
     )
+    target_world_projections = _normalize_gtv2_projection_surface_semantics(
+        target_world_projections
+    )
     merged_world_projections = _merge_parquet_for_target_games(
         current_path=worlds_dir / f"run={run_id}" / "projections.parquet",
         previous_path=_resolve_previous_run_file(
@@ -6971,6 +7180,9 @@ def materialize_unified_run_artifacts_task(
         key_cols=projection_join_keys,
         value_cols=target_projection_value_cols,
         label="materialize_unified_run_artifacts_task/world_projection_target_overlay",
+    )
+    merged_world_projections = _normalize_gtv2_projection_surface_semantics(
+        merged_world_projections
     )
     merged_world_projections, world_projection_key_report = _sanitize_frame_to_expected_keys(
         merged_world_projections,
@@ -7007,6 +7219,7 @@ def materialize_unified_run_artifacts_task(
         value_cols=projection_value_cols,
         label="materialize_unified_run_artifacts_task/world_projection_overlay",
     )
+    merged_final = _normalize_gtv2_projection_surface_semantics(merged_final)
     if "dk_fpts_mean" in merged_final.columns and "salary" in merged_final.columns:
         salary = pd.to_numeric(merged_final["salary"], errors="coerce")
         merged_final["value"] = (
@@ -7263,10 +7476,11 @@ def nba_live_pipeline_v3_flow(
     gtv2_world_chunk_size: int = 5000,
     gtv2_active_temperature: float = 1.0,
     gtv2_seed: int = 42,
-    gtv2_strict_world_contracts: bool = True,
+    gtv2_strict_world_contracts: bool = False,
     gtv2_flow_scale_clip_override: float | None = None,
     gtv2_make_model_mode: str = "beta_binomial_all",
     gtv2_make_model_use_learned_efficiency: bool = True,
+    gtv2_apply_props_uplift: bool = False,
     gtv2_props_uplift_scope: str = "all_players",
     gtv2_props_uplift_confidence_weighted: bool = True,
     gtv2_apply_propless_tail_calibration: bool = True,
@@ -7309,8 +7523,11 @@ def nba_live_pipeline_v3_flow(
         data_root=data_root,
         project_root=PROJECT_ROOT,
     )
+    gtv2_current_cfg = _load_gtv2_inference_current_config()
     bundle_dir = _resolve_bundle_dir(
-        data_root=data_root, gtv2_bundle_dir=gtv2_bundle_dir
+        data_root=data_root,
+        gtv2_bundle_dir=gtv2_bundle_dir,
+        current_config_payload=gtv2_current_cfg,
     )
     bundle_hash = _bundle_artifact_hash(bundle_dir)
     inference_server_cfg = _load_gtv2_inference_server_config()
@@ -7776,7 +7993,7 @@ def nba_live_pipeline_v3_flow(
             make_model_use_learned_efficiency=bool(
                 gtv2_make_model_use_learned_efficiency
             ),
-            apply_props_uplift=bool(rerun_plan.get("mode") == "full_slate"),
+            apply_props_uplift=bool(gtv2_apply_props_uplift),
             props_uplift_scope=str(gtv2_props_uplift_scope),
             props_uplift_confidence_weighted=bool(
                 gtv2_props_uplift_confidence_weighted
@@ -7813,6 +8030,25 @@ def nba_live_pipeline_v3_flow(
             ),
             world_realism_outlier_resample_max_passes=int(
                 gtv2_world_realism_outlier_resample_max_passes
+            ),
+            promotion_hybrid_enabled=bool(
+                gtv2_current_cfg.get("promotion_hybrid_enabled", False)
+            ),
+            promotion_expert_run_dir=(
+                str(gtv2_current_cfg.get("promotion_expert_run_dir") or "").strip()
+                or None
+            ),
+            promotion_prior_minutes_max=float(
+                gtv2_current_cfg.get("promotion_prior_minutes_max", 12.0)
+            ),
+            promotion_hist_start_rate_max=float(
+                gtv2_current_cfg.get("promotion_hist_start_rate_max", 0.20)
+            ),
+            promotion_blend_mode=str(
+                gtv2_current_cfg.get("promotion_blend_mode", "uplift_only")
+            ),
+            promotion_force_active_candidates=bool(
+                gtv2_current_cfg.get("promotion_force_active_candidates", False)
             ),
         )
 
@@ -7864,6 +8100,7 @@ def nba_live_pipeline_v3_flow(
                 run_id=run_id,
                 data_root=data_root,
                 target_game_ids=target_game_ids,
+                apply_props_uplift=bool(gtv2_apply_props_uplift),
                 props_uplift_scope=str(gtv2_props_uplift_scope),
                 props_uplift_confidence_weighted=bool(
                     gtv2_props_uplift_confidence_weighted

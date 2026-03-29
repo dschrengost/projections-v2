@@ -22,6 +22,7 @@ from projections.features.dnp_history import (
     derive_roster_active_pre_tip,
 )
 from projections.rotation.rotation_set_minutes_features_v1 import (
+    SAME_POS_CONTEXT_BUCKETS,
     ROTATION_SET_DERIVED_FEATURES,
     add_rotation_set_derived_features,
     apply_odds_missing_flags,
@@ -34,6 +35,53 @@ KEY_COLS: tuple[str, str, str] = ("game_id", "team_id", "player_id")
 OPPONENT_TEAM_ID_COL = "opponent_team_id"
 _MAX_REASONABLE_PRIORS_PARTITION_ROWS = 5000
 _logger = logging.getLogger(__name__)
+
+_PLAYER_PRIOR_REFRESH_BASE_COLS: tuple[str, ...] = (
+    "minutes_from_stints",
+    "started_proxy",
+    "fg2_pct",
+    "fg3_pct",
+    "ft_pct",
+    "efg_pct",
+    "fg2a_per_min",
+    "fg3a_per_min",
+    "fta_per_min",
+    "three_pa_share",
+)
+_PLAYER_PRIOR_REFRESH_STD_COLS: tuple[str, ...] = ("minutes_from_stints",)
+_TEAM_PRIOR_REFRESH_BASE_COLS: tuple[str, ...] = (
+    "depth_6",
+    "depth_10",
+    "depth_14",
+    "effective_n",
+    "bench_conc_top1",
+    "bench_conc_top2",
+    "starter_pool_minutes",
+    "bench_pool_minutes",
+    "team_total_minutes_from_stints",
+    "bench_share",
+    "starter_share",
+    "depth_gap_10_6",
+    "fg2_pct_allowed",
+    "fg3_pct_allowed",
+    "fta_rate_allowed",
+    "efg_pct_allowed",
+    "three_pa_share_allowed",
+)
+_TEAM_PRIOR_REFRESH_STD_COLS: tuple[str, ...] = (
+    "depth_6",
+    "depth_10",
+    "depth_14",
+    "effective_n",
+    "bench_conc_top1",
+    "bench_conc_top2",
+    "starter_pool_minutes",
+    "bench_pool_minutes",
+    "team_total_minutes_from_stints",
+    "bench_share",
+    "starter_share",
+    "depth_gap_10_6",
+)
 
 
 class RotationLiveFeaturesError(RuntimeError):
@@ -173,8 +221,39 @@ def _update_player_priors_with_latest_labels(
     except Exception:
         return player_priors
 
+    counts_path = data_root / "gold" / "labels_boxscore_counts" / "labels_boxscore_counts.parquet"
+    counts_labels = pd.DataFrame()
+    if counts_path.exists():
+        try:
+            counts_labels = pd.read_parquet(
+                counts_path,
+                columns=["player_id", "game_date", "fga2", "fg2m", "fga3", "fg3m", "fta", "ftm", "minutes"],
+            )
+        except Exception:
+            counts_labels = pd.DataFrame()
+
     labels["player_id"] = pd.to_numeric(labels["player_id"], errors="coerce").astype("Int64")
     labels["game_date"] = pd.to_datetime(labels["game_date"], errors="coerce")
+    if "minutes" in labels.columns:
+        labels["minutes"] = pd.to_numeric(labels["minutes"], errors="coerce")
+    if "starter_flag_label" in labels.columns:
+        labels["starter_flag_label"] = pd.to_numeric(
+            labels["starter_flag_label"], errors="coerce"
+        )
+    if not counts_labels.empty:
+        counts_labels["player_id"] = pd.to_numeric(counts_labels["player_id"], errors="coerce").astype("Int64")
+        counts_labels["game_date"] = pd.to_datetime(counts_labels["game_date"], errors="coerce")
+        for col in ("fga2", "fg2m", "fga3", "fg3m", "fta", "ftm", "minutes"):
+            counts_labels[col] = pd.to_numeric(counts_labels[col], errors="coerce").fillna(0.0)
+        fga = counts_labels["fga2"] + counts_labels["fga3"]
+        counts_labels["fg2_pct"] = (counts_labels["fg2m"] / counts_labels["fga2"].replace(0.0, pd.NA)).fillna(0.0)
+        counts_labels["fg3_pct"] = (counts_labels["fg3m"] / counts_labels["fga3"].replace(0.0, pd.NA)).fillna(0.0)
+        counts_labels["ft_pct"] = (counts_labels["ftm"] / counts_labels["fta"].replace(0.0, pd.NA)).fillna(0.0)
+        counts_labels["efg_pct"] = ((counts_labels["fg2m"] + 1.5 * counts_labels["fg3m"]) / fga.replace(0.0, pd.NA)).fillna(0.0)
+        counts_labels["fg2a_per_min"] = (counts_labels["fga2"] / counts_labels["minutes"].replace(0.0, pd.NA)).fillna(0.0)
+        counts_labels["fg3a_per_min"] = (counts_labels["fga3"] / counts_labels["minutes"].replace(0.0, pd.NA)).fillna(0.0)
+        counts_labels["fta_per_min"] = (counts_labels["fta"] / counts_labels["minutes"].replace(0.0, pd.NA)).fillna(0.0)
+        counts_labels["three_pa_share"] = (counts_labels["fga3"] / fga.replace(0.0, pd.NA)).fillna(0.0)
 
     # For each player, get their latest game from priors and check if labels
     # have that game's results
@@ -185,6 +264,7 @@ def _update_player_priors_with_latest_labels(
     if "game_id" not in updated.columns:
         return player_priors
 
+    windows: tuple[int, ...] = (5, 10, 20)
     for idx, row in updated.iterrows():
         person_id = row["person_id"]
         prior_game_id = row.get("game_id") or row.get("game_id_norm")
@@ -195,28 +275,220 @@ def _update_player_priors_with_latest_labels(
         player_labels = labels[labels["player_id"] == int(person_id)].copy()
         if player_labels.empty:
             continue
+        player_counts = counts_labels[counts_labels["player_id"] == int(person_id)].copy() if not counts_labels.empty else pd.DataFrame()
 
         player_labels = player_labels.sort_values("game_date", ascending=False)
+        if not player_counts.empty:
+            player_counts = player_counts.sort_values("game_date", ascending=False)
 
-        # Get the last 5 games including the prior game
-        # The prior was computed BEFORE prior_game_id, so we need to include it
-        last5 = player_labels.head(5)
-        if last5.empty:
-            continue
+        for window in windows:
+            last_n = player_labels.head(window)
+            if last_n.empty:
+                continue
 
-        # Update started_proxy_rate_prior_5 using starter_flag_label
-        if "starter_flag_label" in last5.columns and "started_proxy_rate_prior_5" in updated.columns:
-            new_start_rate = last5["starter_flag_label"].mean()
-            if not pd.isna(new_start_rate):
-                updated.at[idx, "started_proxy_rate_prior_5"] = new_start_rate
+            n_games = int(len(last_n))
+            start_col = f"started_proxy_rate_prior_{window}"
+            start_missing_col = f"{start_col}_missing"
+            minutes_col = f"minutes_from_stints_prior_{window}"
+            minutes_std_col = f"minutes_from_stints_std_prior_{window}"
+            minutes_missing_col = f"{minutes_col}_missing"
+            n_games_col = f"player_prior_n_games_{window}"
+            source_date_col = f"player_prior_source_max_game_date_{window}"
 
-        # Update minutes_from_stints_prior_5 using minutes
-        if "minutes" in last5.columns and "minutes_from_stints_prior_5" in updated.columns:
-            new_minutes = last5["minutes"].mean()
-            if not pd.isna(new_minutes):
-                updated.at[idx, "minutes_from_stints_prior_5"] = new_minutes
+            if "starter_flag_label" in last_n.columns and start_col in updated.columns:
+                new_start_rate = pd.to_numeric(
+                    last_n["starter_flag_label"], errors="coerce"
+                ).mean()
+                if not pd.isna(new_start_rate):
+                    updated.at[idx, start_col] = float(new_start_rate)
+                    if start_missing_col in updated.columns:
+                        updated.at[idx, start_missing_col] = 0
+
+            if "minutes" in last_n.columns and minutes_col in updated.columns:
+                minutes_series = pd.to_numeric(last_n["minutes"], errors="coerce").dropna()
+                if not minutes_series.empty:
+                    updated.at[idx, minutes_col] = float(minutes_series.mean())
+                    if minutes_std_col in updated.columns:
+                        # Priors std columns are population-style rolling std.
+                        updated.at[idx, minutes_std_col] = float(
+                            minutes_series.std(ddof=0)
+                        )
+                    if minutes_missing_col in updated.columns:
+                        updated.at[idx, minutes_missing_col] = 0
+
+            if not player_counts.empty:
+                last_n_counts = player_counts.head(window)
+                for col in _PLAYER_PRIOR_REFRESH_BASE_COLS:
+                    if col in {"minutes_from_stints", "started_proxy"}:
+                        continue
+                    prior_col = f"{col}_prior_{window}"
+                    if prior_col not in updated.columns or col not in last_n_counts.columns:
+                        continue
+                    series = pd.to_numeric(last_n_counts[col], errors="coerce").fillna(0.0)
+                    updated.at[idx, prior_col] = float(series.mean())
+                    miss_col = f"{prior_col}_missing"
+                    if miss_col in updated.columns:
+                        updated.at[idx, miss_col] = 0
+
+            if n_games_col in updated.columns:
+                updated.at[idx, n_games_col] = n_games
+
+            if source_date_col in updated.columns:
+                latest_date = pd.to_datetime(last_n["game_date"], errors="coerce").max()
+                if pd.notna(latest_date):
+                    updated.at[idx, source_date_col] = latest_date
 
     return updated
+
+
+def _refresh_latest_player_priors_from_history(player_history: pd.DataFrame) -> pd.DataFrame:
+    """Refresh latest player priors from stored observed history rows."""
+
+    if player_history.empty:
+        return player_history
+
+    required = {"person_id", "game_date", "minutes_from_stints", "started_proxy"}
+    if not required.issubset(player_history.columns):
+        return pd.DataFrame()
+
+    history = player_history.copy()
+    history["person_id"] = pd.to_numeric(history["person_id"], errors="coerce").astype("Int64")
+    history["game_date"] = pd.to_datetime(history["game_date"], errors="coerce")
+    history["minutes_from_stints"] = pd.to_numeric(
+        history["minutes_from_stints"], errors="coerce"
+    ).fillna(0.0)
+    history["started_proxy"] = pd.to_numeric(
+        history["started_proxy"], errors="coerce"
+    ).fillna(0.0)
+    for col in _PLAYER_PRIOR_REFRESH_BASE_COLS:
+        if col in {"minutes_from_stints", "started_proxy"}:
+            continue
+        if col not in history.columns:
+            history[col] = 0.0
+        history[col] = pd.to_numeric(history[col], errors="coerce").fillna(0.0)
+    history["ctx_same_pos_bucket"] = (
+        history.get("ctx_same_pos_bucket", pd.Series(pd.NA, index=history.index))
+        .astype("string")
+        .fillna("unknown")
+        .str.lower()
+        .str.strip()
+    )
+    history = history.dropna(subset=["person_id", "game_date"]).copy()
+    if history.empty:
+        return pd.DataFrame()
+
+    refreshed_rows: list[pd.Series] = []
+    windows: tuple[int, ...] = (5, 10, 20)
+    player_sort_cols = [c for c in ("person_id", "game_date", "game_id") if c in history.columns]
+    for _, player_hist in history.sort_values(
+        player_sort_cols,
+        kind="mergesort",
+    ).groupby("person_id", sort=False):
+        latest = player_hist.iloc[-1].copy()
+        for window in windows:
+            last_n = player_hist.tail(window).copy()
+            n_games = int(len(last_n))
+            latest[f"minutes_from_stints_prior_{window}"] = float(last_n["minutes_from_stints"].mean())
+            latest[f"minutes_from_stints_std_prior_{window}"] = float(last_n["minutes_from_stints"].std(ddof=0))
+            latest[f"started_proxy_rate_prior_{window}"] = float(last_n["started_proxy"].mean())
+            for col in _PLAYER_PRIOR_REFRESH_BASE_COLS:
+                if col in {"minutes_from_stints", "started_proxy"} or col not in last_n.columns:
+                    continue
+                latest[f"{col}_prior_{window}"] = float(pd.to_numeric(last_n[col], errors="coerce").fillna(0.0).mean())
+                latest[f"{col}_prior_{window}_missing"] = 0
+            for col in _PLAYER_PRIOR_REFRESH_STD_COLS:
+                if col == "minutes_from_stints" or col not in last_n.columns:
+                    continue
+                latest[f"{col}_std_prior_{window}"] = float(pd.to_numeric(last_n[col], errors="coerce").fillna(0.0).std(ddof=0))
+                latest[f"{col}_std_prior_{window}_missing"] = 0
+            latest[f"player_prior_n_games_{window}"] = n_games
+            latest[f"player_prior_source_max_game_date_{window}"] = pd.to_datetime(
+                last_n["game_date"], errors="coerce"
+            ).max()
+            for bucket in SAME_POS_CONTEXT_BUCKETS:
+                matched = last_n.loc[last_n["ctx_same_pos_bucket"] == bucket].copy()
+                latest[f"ctx_same_pos_{bucket}_prior_n_games_{window}"] = int(len(matched))
+                latest[f"ctx_same_pos_{bucket}_prior_source_max_game_date_{window}"] = (
+                    pd.to_datetime(matched["game_date"], errors="coerce").max()
+                    if not matched.empty
+                    else pd.NaT
+                )
+                latest[f"minutes_from_stints_ctx_same_pos_{bucket}_prior_{window}"] = float(
+                    pd.to_numeric(matched["minutes_from_stints"], errors="coerce")
+                    .fillna(0.0)
+                    .mean()
+                ) if not matched.empty else 0.0
+                latest[f"started_proxy_rate_ctx_same_pos_{bucket}_prior_{window}"] = float(
+                    pd.to_numeric(matched["started_proxy"], errors="coerce")
+                    .fillna(0.0)
+                    .mean()
+                ) if not matched.empty else 0.0
+        refreshed_rows.append(latest)
+
+    if not refreshed_rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(refreshed_rows).reset_index(drop=True)
+
+
+def _refresh_latest_team_priors_from_history(team_history: pd.DataFrame) -> pd.DataFrame:
+    """Refresh latest team priors from stored observed team history rows."""
+
+    if team_history.empty:
+        return team_history
+
+    required = {"team_id", "game_date"}
+    if not required.issubset(team_history.columns):
+        return pd.DataFrame()
+
+    history = team_history.copy()
+    history["team_id"] = pd.to_numeric(history["team_id"], errors="coerce").astype("Int64")
+    history["game_date"] = pd.to_datetime(history["game_date"], errors="coerce")
+    available_cols = [c for c in _TEAM_PRIOR_REFRESH_BASE_COLS if c in history.columns]
+    if not available_cols:
+        return pd.DataFrame()
+    for col in available_cols:
+        history[col] = pd.to_numeric(history[col], errors="coerce").fillna(0.0)
+    if "team_ot_flag" in history.columns:
+        history["team_ot_flag"] = pd.to_numeric(history["team_ot_flag"], errors="coerce").fillna(0.0)
+    history = history.dropna(subset=["team_id", "game_date"]).copy()
+    if history.empty:
+        return pd.DataFrame()
+
+    refreshed_rows: list[pd.Series] = []
+    windows: tuple[int, ...] = (5, 10, 20)
+    team_sort_cols = [c for c in ("team_id", "game_date", "game_id") if c in history.columns]
+    for _, team_hist in history.sort_values(
+        team_sort_cols,
+        kind="mergesort",
+    ).groupby("team_id", sort=False):
+        latest = team_hist.iloc[-1].copy()
+        for window in windows:
+            last_n = team_hist.tail(window).copy()
+            n_games = int(len(last_n))
+            latest[f"team_prior_n_games_{window}"] = n_games
+            latest[f"team_prior_source_max_game_date_{window}"] = pd.to_datetime(
+                last_n["game_date"], errors="coerce"
+            ).max()
+            for col in available_cols:
+                latest[f"{col}_prior_{window}"] = float(pd.to_numeric(last_n[col], errors="coerce").fillna(0.0).mean())
+                latest[f"{col}_prior_{window}_missing"] = 0
+            for col in _TEAM_PRIOR_REFRESH_STD_COLS:
+                if col not in last_n.columns:
+                    continue
+                latest[f"{col}_std_prior_{window}"] = float(pd.to_numeric(last_n[col], errors="coerce").fillna(0.0).std(ddof=0))
+                latest[f"{col}_std_prior_{window}_missing"] = 0
+            if "team_ot_flag" in last_n.columns:
+                latest[f"team_ot_rate_prior_{window}"] = float(
+                    pd.to_numeric(last_n["team_ot_flag"], errors="coerce").fillna(0.0).mean()
+                )
+                latest[f"team_ot_rate_prior_{window}_missing"] = 0
+        refreshed_rows.append(latest)
+
+    if not refreshed_rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(refreshed_rows).reset_index(drop=True)
 
 
 def load_latest_rotation_priors_by_entity(
@@ -247,7 +519,7 @@ def load_latest_rotation_priors_by_entity(
     team_root = data_root / "silver" / "rotation_priors_v1" / "team_game_priors" / f"season={int(season)}"
     player_root = data_root / "silver" / "rotation_priors_v1" / "player_game_priors" / f"season={int(season)}"
 
-    def _load_all_and_get_latest(root: Path, entity_col: str, filter_ids: set[int] | None) -> pd.DataFrame:
+    def _load_all_history(root: Path, entity_col: str, filter_ids: set[int] | None) -> pd.DataFrame:
         if not root.exists():
             return pd.DataFrame()
 
@@ -315,28 +587,49 @@ def load_latest_rotation_priors_by_entity(
         combined["game_date"] = pd.to_datetime(combined["game_date"], errors="coerce")
         combined[entity_col] = pd.to_numeric(combined[entity_col], errors="coerce").astype("Int64")
 
-        # Filter to requested entities if provided
         if filter_ids:
             combined = combined[combined[entity_col].isin(filter_ids)].copy()
 
         if combined.empty:
             return pd.DataFrame()
 
-        # Get the most recent row per entity
-        combined = combined.sort_values("game_date", ascending=False, kind="stable", na_position="last")
-        latest = combined.drop_duplicates(subset=[entity_col], keep="first").reset_index(drop=True)
-
-        return latest
+        return combined
 
     team_filter = set(int(t) for t in team_ids) if team_ids else None
     player_filter = set(int(p) for p in player_ids) if player_ids else None
 
-    team_priors = _load_all_and_get_latest(team_root, "team_id", team_filter)
-    player_priors = _load_all_and_get_latest(player_root, "person_id", player_filter)
+    team_history = _load_all_history(team_root, "team_id", team_filter)
+    if not team_history.empty:
+        team_sort_cols = [c for c in ("team_id", "game_date", "game_id") if c in team_history.columns]
+        team_history = team_history.sort_values(team_sort_cols, kind="mergesort", na_position="last")
+        refreshed_team = _refresh_latest_team_priors_from_history(team_history)
+        if refreshed_team.empty:
+            team_priors = team_history.sort_values(
+                "game_date", ascending=False, kind="stable", na_position="last"
+            ).drop_duplicates(subset=["team_id"], keep="first").reset_index(drop=True)
+        else:
+            team_priors = refreshed_team
+    else:
+        team_priors = pd.DataFrame()
 
-    # Update player priors with latest box score results
-    # This fixes the "pre-game vs post-game" prior staleness issue
-    player_priors = _update_player_priors_with_latest_labels(player_priors, data_root, season)
+    player_history = _load_all_history(player_root, "person_id", player_filter)
+    if not player_history.empty:
+        player_sort_cols = [c for c in ("person_id", "game_date", "game_id") if c in player_history.columns]
+        player_history = player_history.sort_values(
+            player_sort_cols,
+            kind="mergesort",
+            na_position="last",
+        )
+        refreshed = _refresh_latest_player_priors_from_history(player_history)
+        if refreshed.empty:
+            latest_player = player_history.sort_values(
+                "game_date", ascending=False, kind="stable", na_position="last"
+            ).drop_duplicates(subset=["person_id"], keep="first").reset_index(drop=True)
+            player_priors = _update_player_priors_with_latest_labels(latest_player, data_root, season)
+        else:
+            player_priors = refreshed
+    else:
+        player_priors = pd.DataFrame()
 
     return team_priors, player_priors
 

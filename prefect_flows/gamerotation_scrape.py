@@ -28,6 +28,8 @@ def _run_gamerotation_scrape(
     data_root: Path,
     overwrite: bool,
     timeout_s: float,
+    max_failure_rate: float | None,
+    min_success_coverage: float | None,
     subprocess_timeout_s: float | None,
 ) -> None:
     env = os.environ.copy()
@@ -43,6 +45,10 @@ def _run_gamerotation_scrape(
         "--timeout",
         str(float(timeout_s)),
     ]
+    if max_failure_rate is not None:
+        cmd.extend(["--max-failure-rate", str(float(max_failure_rate))])
+    if min_success_coverage is not None:
+        cmd.extend(["--min-success-coverage", str(float(min_success_coverage))])
     if overwrite:
         cmd.append("--overwrite")
 
@@ -79,7 +85,10 @@ def gamerotation_scrape_task(
     start_date: str | None,
     end_date: str | None,
     overwrite: bool,
+    lookback_days: int,
     timeout_s: float,
+    max_failure_rate: float | None,
+    min_success_coverage: float | None,
     subprocess_timeout_s: float | None,
 ) -> dict[str, str]:
     logger = get_run_logger()
@@ -88,19 +97,32 @@ def gamerotation_scrape_task(
     if game_date is not None:
         start_date = game_date
         end_date = game_date
+    elif start_date is None and end_date is None:
+        # Daily default: rolling lookback ending yesterday in ET.
+        end = datetime.now(tz=ET_TZ).date() - timedelta(days=1)
+        window_days = max(1, int(lookback_days))
+        start = end - timedelta(days=window_days - 1)
+        start_date = start.isoformat()
+        end_date = end.isoformat()
     elif start_date is None or end_date is None:
-        # Daily default: yesterday in ET.
+        # If only one side is provided, default the other to yesterday in ET.
         iso = (datetime.now(tz=ET_TZ).date() - timedelta(days=1)).isoformat()
         start_date = start_date or iso
         end_date = end_date or iso
 
     logger.info(
-        "[gamerotation] start_date=%s end_date=%s overwrite=%s data_root=%s timeout_s=%.1f subprocess_timeout_s=%s",
+        "[gamerotation] start_date=%s end_date=%s overwrite=%s lookback_days=%s data_root=%s timeout_s=%.1f "
+        "max_failure_rate=%s min_success_coverage=%s subprocess_timeout_s=%s",
         start_date,
         end_date,
         overwrite,
+        int(lookback_days),
         data_root,
         float(timeout_s),
+        "disabled" if max_failure_rate is None else f"{float(max_failure_rate):.2f}",
+        "disabled"
+        if min_success_coverage is None
+        else f"{float(min_success_coverage):.2f}",
         "auto"
         if subprocess_timeout_s is None
         else (
@@ -115,6 +137,8 @@ def gamerotation_scrape_task(
         data_root=data_root,
         overwrite=overwrite,
         timeout_s=float(timeout_s),
+        max_failure_rate=max_failure_rate,
+        min_success_coverage=min_success_coverage,
         subprocess_timeout_s=subprocess_timeout_s,
     )
     return {"start_date": str(start_date), "end_date": str(end_date)}
@@ -128,7 +152,10 @@ def gamerotation_scrape_flow(
     end_date: str | None = None,
     overwrite: bool = False,
     write_bronze_copy: bool = True,
+    lookback_days: int = 14,
     timeout_s: float = 20.0,
+    max_failure_rate: float | None = 0.5,
+    min_success_coverage: float | None = 1.0,
     subprocess_timeout_s: float | None = 900.0,
     max_retries: int = 3,
 ) -> dict[str, str]:
@@ -139,6 +166,9 @@ def gamerotation_scrape_flow(
         start_date=start_date,
         end_date=end_date,
         overwrite=overwrite,
+        lookback_days=lookback_days,
         timeout_s=timeout_s,
+        max_failure_rate=max_failure_rate,
+        min_success_coverage=min_success_coverage,
         subprocess_timeout_s=subprocess_timeout_s,
     )

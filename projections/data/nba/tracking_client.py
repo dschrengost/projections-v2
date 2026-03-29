@@ -14,21 +14,25 @@ LOGGER = logging.getLogger(__name__)
 NBA_STATS_TRACKING_URL = "https://stats.nba.com/stats/leaguedashptstats"
 
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
+    "Chrome/140.0.0.0 Safari/537.36"
 )
 
 DEFAULT_HEADERS: Dict[str, str] = {
+    # Keep aligned with the request fingerprint that succeeds for stats endpoints.
+    # stats.nba.com regularly tightens anti-bot filters on /stats/* routes.
+    "Host": "stats.nba.com",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
-    "Host": "stats.nba.com",
-    "Origin": "https://www.nba.com",
+    "Referer": "https://stats.nba.com/",
     "Pragma": "no-cache",
-    "Referer": "https://www.nba.com/stats/",
-    "DNT": "1",
+    "Sec-Ch-Ua": '"Chromium";v="140", "Google Chrome";v="140", "Not;A=Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Fetch-Dest": "empty",
 }
 
 RETRY_STATUS_CODES = {429}
@@ -138,6 +142,7 @@ def fetch_leaguedashptstats(
                 response = session.get(
                     NBA_STATS_TRACKING_URL,
                     params=params,
+                    headers=headers,
                     timeout=timeout,
                 )
                 response.raise_for_status()

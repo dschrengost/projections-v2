@@ -391,6 +391,7 @@ class _CouplingConditioner(nn.Module):
         mean_ctx_weight: float,
         context_mode: str = "mean",
         use_minutes_context: bool = False,
+        env_context_dim: int = 0,
     ) -> None:
         super().__init__()
         if int(output_dim_per_stat) <= 0:
@@ -401,6 +402,7 @@ class _CouplingConditioner(nn.Module):
         self.mean_ctx_weight = float(mean_ctx_weight)
         self.context_mode = str(context_mode).lower()
         self.use_minutes_context = bool(use_minutes_context)
+        self.env_context_dim = int(max(0, env_context_dim))
 
         if self.context_mode not in ("mean", "attention"):
             raise ValueError(f"context_mode must be 'mean' or 'attention', got {context_mode!r}")
@@ -415,6 +417,7 @@ class _CouplingConditioner(nn.Module):
         self.team_proj = nn.Linear(int(d_model), int(hidden_dim))
         self.game_proj = nn.Linear(int(d_model), int(hidden_dim))
         self.minutes_proj = nn.Linear(1, int(hidden_dim)) if self.use_minutes_context else None
+        self.env_proj = nn.Linear(self.env_context_dim, int(hidden_dim)) if self.env_context_dim > 0 else None
         self.out = nn.Sequential(
             nn.LayerNorm(int(hidden_dim)),
             nn.Linear(int(hidden_dim), int(hidden_dim)),
@@ -449,6 +452,7 @@ class _CouplingConditioner(nn.Module):
         player_team_index: torch.Tensor,
         valid_mask: torch.Tensor,
         minutes_context: torch.Tensor | None = None,
+        env_context: torch.Tensor | None = None,
     ) -> torch.Tensor:
         valid = valid_mask.to(dtype=torch.bool)
         team_index = player_team_index.to(dtype=torch.long)
@@ -491,8 +495,17 @@ class _CouplingConditioner(nn.Module):
             if self.minutes_proj is None:
                 raise RuntimeError("minutes_proj is not initialized")
             minutes_h = self.minutes_proj(minutes_context.unsqueeze(-1).to(dtype=y_cond.dtype))
+        env_h = 0.0
+        if self.env_context_dim > 0:
+            if env_context is None:
+                raise ValueError("env_context_dim>0 requires env_context")
+            if env_context.ndim != 2 or env_context.shape[0] != y_cond.shape[0] or env_context.shape[1] != self.env_context_dim:
+                raise ValueError("env_context must have shape (B,E)")
+            if self.env_proj is None:
+                raise RuntimeError("env_proj is not initialized")
+            env_h = self.env_proj(env_context).unsqueeze(1).expand(-1, y_cond.shape[1], -1)
 
-        fused = cond_h + player_h + team_h + game_h + minutes_h
+        fused = cond_h + player_h + team_h + game_h + minutes_h + env_h
         out = self.out(fused)
         # Reshape: the linear layer outputs (B, P, output_dim_per_stat * num_stats).
         # For models trained with torch.chunk (affine coupling), the layout is
@@ -520,6 +533,7 @@ class _AffineCouplingBlock(nn.Module):
         mean_ctx_weight: float,
         context_mode: str = "mean",
         use_minutes_context: bool = False,
+        env_context_dim: int = 0,
     ) -> None:
         super().__init__()
         if stat_mask.ndim != 1 or stat_mask.shape[0] != int(num_stats):
@@ -533,6 +547,7 @@ class _AffineCouplingBlock(nn.Module):
             mean_ctx_weight=float(mean_ctx_weight),
             context_mode=str(context_mode),
             use_minutes_context=bool(use_minutes_context),
+            env_context_dim=int(env_context_dim),
         )
         self.scale_clip = float(scale_clip)
         self.register_buffer("stat_mask", stat_mask.to(dtype=torch.bool), persistent=False)
@@ -553,6 +568,7 @@ class _AffineCouplingBlock(nn.Module):
         valid_mask: torch.Tensor,
         observed_mask: torch.Tensor,
         minutes_context: torch.Tensor | None = None,
+        env_context: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         cond_mask, xform_mask = self._transform_masks(y)
         y_cond = y * cond_mask.to(dtype=y.dtype)
@@ -564,6 +580,7 @@ class _AffineCouplingBlock(nn.Module):
             player_team_index=player_team_index,
             valid_mask=valid_mask,
             minutes_context=minutes_context,
+            env_context=env_context,
         )
         shift = params[..., 0]
         log_scale = params[..., 1]
@@ -585,6 +602,7 @@ class _AffineCouplingBlock(nn.Module):
         valid_mask: torch.Tensor,
         observed_mask: torch.Tensor,
         minutes_context: torch.Tensor | None = None,
+        env_context: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         cond_mask, xform_mask = self._transform_masks(y)
         y_cond = y * cond_mask.to(dtype=y.dtype)
@@ -596,6 +614,7 @@ class _AffineCouplingBlock(nn.Module):
             player_team_index=player_team_index,
             valid_mask=valid_mask,
             minutes_context=minutes_context,
+            env_context=env_context,
         )
         shift = params[..., 0]
         log_scale = params[..., 1]
@@ -624,6 +643,7 @@ class _RQSCouplingBlock(nn.Module):
         mean_ctx_weight: float,
         context_mode: str = "mean",
         use_minutes_context: bool = False,
+        env_context_dim: int = 0,
     ) -> None:
         super().__init__()
         if stat_mask.ndim != 1 or stat_mask.shape[0] != int(num_stats):
@@ -653,6 +673,7 @@ class _RQSCouplingBlock(nn.Module):
             mean_ctx_weight=float(mean_ctx_weight),
             context_mode=str(context_mode),
             use_minutes_context=bool(use_minutes_context),
+            env_context_dim=int(env_context_dim),
         )
         self.register_buffer("stat_mask", stat_mask.to(dtype=torch.bool), persistent=False)
 
@@ -674,6 +695,7 @@ class _RQSCouplingBlock(nn.Module):
         valid_mask: torch.Tensor,
         observed_mask: torch.Tensor,
         minutes_context: torch.Tensor | None,
+        env_context: torch.Tensor | None,
         inverse: bool,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         params = self.conditioner(
@@ -684,6 +706,7 @@ class _RQSCouplingBlock(nn.Module):
             player_team_index=player_team_index,
             valid_mask=valid_mask,
             minutes_context=minutes_context,
+            env_context=env_context,
         )
 
         xform = xform_mask.expand_as(y)
@@ -729,6 +752,7 @@ class _RQSCouplingBlock(nn.Module):
         valid_mask: torch.Tensor,
         observed_mask: torch.Tensor,
         minutes_context: torch.Tensor | None = None,
+        env_context: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         cond_mask, xform_mask = self._transform_masks(y)
         y_cond = y * cond_mask.to(dtype=y.dtype)
@@ -743,6 +767,7 @@ class _RQSCouplingBlock(nn.Module):
             valid_mask=valid_mask,
             observed_mask=observed_mask,
             minutes_context=minutes_context,
+            env_context=env_context,
             inverse=False,
         )
 
@@ -757,6 +782,7 @@ class _RQSCouplingBlock(nn.Module):
         valid_mask: torch.Tensor,
         observed_mask: torch.Tensor,
         minutes_context: torch.Tensor | None = None,
+        env_context: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         cond_mask, xform_mask = self._transform_masks(y)
         y_cond = y * cond_mask.to(dtype=y.dtype)
@@ -771,6 +797,7 @@ class _RQSCouplingBlock(nn.Module):
             valid_mask=valid_mask,
             observed_mask=observed_mask,
             minutes_context=minutes_context,
+            env_context=env_context,
             inverse=True,
         )
 
@@ -808,6 +835,7 @@ class JointGameFlow(nn.Module):
         mean_ctx_weight: float = 1.0,
         context_mode: str = "mean",
         use_minutes_context: bool = False,
+        env_context_dim: int = 0,
     ) -> None:
         super().__init__()
         if int(num_stats) <= 0:
@@ -831,6 +859,7 @@ class JointGameFlow(nn.Module):
         self.rqs_min_bin_height = float(rqs_min_bin_height)
         self.rqs_min_derivative = float(rqs_min_derivative)
         self.use_minutes_context = bool(use_minutes_context)
+        self.env_context_dim = int(max(0, env_context_dim))
 
         blocks: list[nn.Module] = []
         for block_idx in range(self.num_blocks):
@@ -850,6 +879,7 @@ class JointGameFlow(nn.Module):
                         mean_ctx_weight=float(mean_ctx_weight),
                         context_mode=self.context_mode,
                         use_minutes_context=self.use_minutes_context,
+                        env_context_dim=self.env_context_dim,
                     )
                 )
             else:
@@ -868,6 +898,7 @@ class JointGameFlow(nn.Module):
                         mean_ctx_weight=float(mean_ctx_weight),
                         context_mode=self.context_mode,
                         use_minutes_context=self.use_minutes_context,
+                        env_context_dim=self.env_context_dim,
                     )
                 )
         self.blocks = nn.ModuleList(blocks)
@@ -915,6 +946,7 @@ class JointGameFlow(nn.Module):
         valid_mask: torch.Tensor,
         observed_mask: torch.Tensor | None = None,
         minutes_context: torch.Tensor | None = None,
+        env_context: torch.Tensor | None = None,
     ) -> JointGameFlowOutputs:
         if y.ndim != 3:
             raise ValueError("y must have shape (B,P,S)")
@@ -933,6 +965,11 @@ class JointGameFlow(nn.Module):
                 raise ValueError("use_minutes_context=True requires minutes_context")
             if minutes_context.shape != y.shape[:2]:
                 raise ValueError("minutes_context must have shape (B,P)")
+        if self.env_context_dim > 0:
+            if env_context is None:
+                raise ValueError("env_context_dim>0 requires env_context")
+            if env_context.ndim != 2 or env_context.shape[0] != y.shape[0] or env_context.shape[1] != self.env_context_dim:
+                raise ValueError("env_context must have shape (B,E)")
 
         observed = self._resolve_observed_mask(y, valid_mask, observed_mask)
         z = y
@@ -947,6 +984,7 @@ class JointGameFlow(nn.Module):
                 valid_mask=valid_mask,
                 observed_mask=observed,
                 minutes_context=minutes_context,
+                env_context=env_context,
             )
             log_det = log_det + ld
 
@@ -975,6 +1013,7 @@ class JointGameFlow(nn.Module):
         valid_mask: torch.Tensor,
         observed_mask: torch.Tensor | None = None,
         minutes_context: torch.Tensor | None = None,
+        env_context: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if z.ndim != 3:
             raise ValueError("z must have shape (B,P,S)")
@@ -985,6 +1024,11 @@ class JointGameFlow(nn.Module):
                 raise ValueError("use_minutes_context=True requires minutes_context")
             if minutes_context.shape != z.shape[:2]:
                 raise ValueError("minutes_context must have shape (B,P)")
+        if self.env_context_dim > 0:
+            if env_context is None:
+                raise ValueError("env_context_dim>0 requires env_context")
+            if env_context.ndim != 2 or env_context.shape[0] != z.shape[0] or env_context.shape[1] != self.env_context_dim:
+                raise ValueError("env_context must have shape (B,E)")
 
         observed = self._resolve_observed_mask(z, valid_mask, observed_mask)
         y = z
@@ -998,5 +1042,6 @@ class JointGameFlow(nn.Module):
                 valid_mask=valid_mask,
                 observed_mask=observed,
                 minutes_context=minutes_context,
+                env_context=env_context,
             )
         return y

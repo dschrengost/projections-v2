@@ -309,6 +309,116 @@ def _default_all_losses_trials() -> list[Trial]:
     return [Trial(name=_slugify(name), params=params) for name, params in rows]
 
 
+def _default_sparse_recall_trials() -> list[Trial]:
+    """Focused preset for sparse-prior / starter recall in minutes allocation."""
+    base: dict[str, Any] = {
+        "phase2_flow_delay_epochs": 4,
+        "phase2_flow_warmup_epochs": 8,
+        "phase2_anchor_end_weight": 0.85,
+        "enable_possession_backbone": True,
+        "enable_three_pa_share": True,
+        "enable_efficiency_head": True,
+        "enable_usage_share_head": True,
+        "w_minutes": 1.0,
+        "w_minutes_nll": 1.0,
+        "w_count": 0.60,
+        "w_member": 0.80,
+        "active_positive_weight": 2.0,
+        "lineup_available_sample_weight": 3.0,
+        "w_flow_nll": 0.10,
+        "w_poss_nll": 0.20,
+        "w_backbone_nll": 0.10,
+        "w_three_pa_nll": 0.05,
+        "w_poss_regression": 2.0,
+        "w_efficiency_nll": 0.50,
+        "w_usage_share_nll": 0.25,
+        "encoder_lr_scale": 0.05,
+        "backbone_head_lr_scale": 1.5,
+        "backbone_grad_clip_norm": 1.0,
+    }
+    rows: list[tuple[str, dict[str, Any]]] = [
+        ("sparse_recall_baseline", dict(base)),
+        (
+            "sparse_recall_strong_member",
+            {
+                **base,
+                "w_member": 1.00,
+                "active_positive_weight": 3.0,
+                "lineup_available_sample_weight": 4.0,
+                "w_count": 0.70,
+            },
+        ),
+        (
+            "sparse_recall_conservative",
+            {
+                **base,
+                "w_member": 0.70,
+                "active_positive_weight": 1.5,
+                "lineup_available_sample_weight": 2.0,
+                "w_count": 0.55,
+                "phase2_anchor_end_weight": 0.90,
+            },
+        ),
+    ]
+    return [Trial(name=_slugify(name), params=params) for name, params in rows]
+
+
+def _default_sparse_hurdle_trials() -> list[Trial]:
+    """Sparse-prior preset that compares baseline vs hurdle minutes head variants."""
+    base: dict[str, Any] = {
+        "phase2_flow_delay_epochs": 4,
+        "phase2_flow_warmup_epochs": 8,
+        "phase2_anchor_end_weight": 0.85,
+        "enable_possession_backbone": True,
+        "enable_three_pa_share": True,
+        "enable_efficiency_head": True,
+        "enable_usage_share_head": True,
+        "w_minutes": 1.0,
+        "w_minutes_nll": 1.0,
+        "w_count": 0.60,
+        "w_member": 0.80,
+        "active_positive_weight": 2.0,
+        "lineup_available_sample_weight": 3.0,
+        "w_flow_nll": 0.10,
+        "w_poss_nll": 0.20,
+        "w_backbone_nll": 0.10,
+        "w_three_pa_nll": 0.05,
+        "w_poss_regression": 2.0,
+        "w_efficiency_nll": 0.50,
+        "w_usage_share_nll": 0.25,
+        "encoder_lr_scale": 0.05,
+        "backbone_head_lr_scale": 1.5,
+        "backbone_grad_clip_norm": 1.0,
+        "minutes_hurdle_zero_threshold": 0.5,
+    }
+    rows: list[tuple[str, dict[str, Any]]] = [
+        ("sparse_hurdle_baseline", dict(base)),
+        (
+            "sparse_hurdle_moderate",
+            {
+                **base,
+                "enable_minutes_hurdle_head": True,
+                "minutes_hurdle_hidden": 64,
+                "minutes_hurdle_sigma_floor": 0.7,
+                "w_minutes_hurdle_nll": 0.10,
+            },
+        ),
+        (
+            "sparse_hurdle_strong",
+            {
+                **base,
+                "enable_minutes_hurdle_head": True,
+                "minutes_hurdle_hidden": 128,
+                "minutes_hurdle_sigma_floor": 0.7,
+                "w_minutes_hurdle_nll": 0.25,
+                "w_member": 0.90,
+                "active_positive_weight": 2.5,
+            },
+        ),
+    ]
+    return [Trial(name=_slugify(name), params=params) for name, params in rows]
+
+
 def _read_trials_file(path: Path) -> list[Trial]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
@@ -668,6 +778,10 @@ def _select_trials(args: argparse.Namespace) -> list[Trial]:
         return _read_trials_file(Path(args.trials_json).expanduser().resolve())
     if str(args.trial_preset) == "all_losses":
         return _default_all_losses_trials()
+    if str(args.trial_preset) == "sparse_recall":
+        return _default_sparse_recall_trials()
+    if str(args.trial_preset) == "sparse_hurdle":
+        return _default_sparse_hurdle_trials()
     if str(args.trial_preset) == "optimizer_quality":
         return _default_optimizer_trials()
     return _default_trials()
@@ -704,6 +818,8 @@ def _build_train_cmd(
         params_effective.setdefault("enable_efficiency_head", True)
     if _as_float("w_usage_share_nll") > 0.0:
         params_effective.setdefault("enable_usage_share_head", True)
+    if _as_float("w_minutes_hurdle_nll") > 0.0:
+        params_effective.setdefault("enable_minutes_hurdle_head", True)
 
     train_cmd = [
         PYTHON_EXE,
@@ -998,6 +1114,7 @@ def _run_trial_once(
         result["status"] = "eval_failed"
         return result
 
+    eval_payload = json.loads(eval_json.read_text(encoding="utf-8"))
     metrics = _load_eval_metrics(eval_json)
     if not _is_finite_eval(metrics, require_active_acc=bool(str(args.promotion_gate_mode) == "prod_like")):
         result["status"] = "eval_nonfinite"
@@ -1092,6 +1209,7 @@ def _run_trial_once(
         result["snapshot_guard_pass"] = True
 
     result["metrics"] = metrics.__dict__
+    result["sparse_rotation_diagnostics"] = eval_payload.get("sparse_rotation_diagnostics", {})
     result["deltas_vs_baseline"] = deltas
     result["composite_score"] = float(score)
     result["single_run_gate_pass"] = bool(single_gate_pass)
@@ -1137,7 +1255,7 @@ def parse_args() -> argparse.Namespace:
         "--trial-preset",
         type=str,
         default="anchor_recovery",
-        choices=["anchor_recovery", "optimizer_quality", "all_losses"],
+        choices=["anchor_recovery", "optimizer_quality", "all_losses", "sparse_recall", "sparse_hurdle"],
         help="Default trial grid to use when --trials-json is not provided.",
     )
     parser.add_argument("--sweep-root", type=str, default=None)

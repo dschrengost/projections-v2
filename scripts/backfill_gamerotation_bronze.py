@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -95,6 +94,7 @@ class BackfillStats:
     total: int = 0
     fetched: int = 0
     skipped: int = 0
+    retried_existing_failures: int = 0
     failed: int = 0
     failures: list[dict[str, Any]] = field(default_factory=list)
 
@@ -278,6 +278,45 @@ def _append_failure(failures_path: Path, failure: dict[str, Any]) -> None:
         f.write(json.dumps(failure) + "\n")
 
 
+def _existing_wrapper_has_result_sets(path: Path) -> bool:
+    """Return True when an existing wrapper contains a usable response payload."""
+    try:
+        wrapper = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+    if not isinstance(wrapper, dict):
+        return False
+
+    response_json = wrapper.get("response_json")
+    if not isinstance(response_json, dict):
+        return False
+
+    result_sets = response_json.get("resultSets")
+    if isinstance(result_sets, list) and len(result_sets) > 0:
+        return True
+
+    result_set = response_json.get("resultSet")
+    if isinstance(result_set, dict):
+        return True
+    if isinstance(result_set, list) and len(result_set) > 0:
+        return True
+    return False
+
+
+def _success_coverage(games: list[GameRecord], bronze_root: Path) -> tuple[int, int, float]:
+    """Return (successful_wrappers, total_games, coverage_ratio)."""
+    total = len(games)
+    if total <= 0:
+        return 0, 0, 0.0
+    successful = 0
+    for game in games:
+        path = _output_path(bronze_root, game)
+        if path.exists() and _existing_wrapper_has_result_sets(path):
+            successful += 1
+    return successful, total, successful / float(total)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Backfill NBA Stats GameRotation data to bronze storage.",
@@ -331,12 +370,36 @@ def main() -> None:
         help="Log progress every N games (default: 50).",
     )
     parser.add_argument(
+        "--max-failure-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail with non-zero exit when failed/(fetched+failed) exceeds this "
+            "fraction. Disabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--min-success-coverage",
+        type=float,
+        default=None,
+        help=(
+            "Require at least this fraction of selected games to have usable "
+            "response_json/resultSets after the run (includes pre-existing successful files). "
+            "Disabled by default."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Show detailed request logging.",
     )
 
     args = parser.parse_args()
+
+    if args.max_failure_rate is not None and not (0.0 <= float(args.max_failure_rate) <= 1.0):
+        raise SystemExit("--max-failure-rate must be between 0.0 and 1.0")
+    if args.min_success_coverage is not None and not (0.0 <= float(args.min_success_coverage) <= 1.0):
+        raise SystemExit("--min-success-coverage must be between 0.0 and 1.0")
 
     # Resolve data root
     data_root = Path(args.data_root) if args.data_root else paths.get_data_root()
@@ -389,17 +452,21 @@ def main() -> None:
     for i, game in enumerate(games):
         output_path = _output_path(bronze_root, game)
 
-        # Skip if exists and not overwriting
+        # Skip existing files only if they contain a successful response payload.
+        # Failure wrappers (timeouts/HTTP errors) should be retried automatically
+        # even without --overwrite so they don't become permanently stale.
         if output_path.exists() and not args.overwrite:
-            stats.skipped += 1
-            # Progress logging for skips too
-            total_processed = stats.fetched + stats.failed + stats.skipped
-            if total_processed % args.progress_interval == 0:
-                print(
-                    f"[gamerotation] Progress: {total_processed}/{stats.total} "
-                    f"(fetched={stats.fetched}, skipped={stats.skipped}, failed={stats.failed})"
-                )
-            continue
+            if _existing_wrapper_has_result_sets(output_path):
+                stats.skipped += 1
+                # Progress logging for skips too
+                total_processed = stats.fetched + stats.failed + stats.skipped
+                if total_processed % args.progress_interval == 0:
+                    print(
+                        f"[gamerotation] Progress: {total_processed}/{stats.total} "
+                        f"(fetched={stats.fetched}, skipped={stats.skipped}, failed={stats.failed})"
+                    )
+                continue
+            stats.retried_existing_failures += 1
 
         # Log the fetch attempt (every game now, not just first)
         print(f"[gamerotation] Fetching {game.game_id}...", end=" ", flush=True)
@@ -412,7 +479,7 @@ def main() -> None:
         if error is None and response_json is not None:
             _write_response(output_path, game, http_status, response_json, None)
             stats.fetched += 1
-            print(f"✓", flush=True)
+            print("✓", flush=True)
         else:
             # Write error response too (for debugging)
             _write_response(output_path, game, http_status or 0, None, error)
@@ -450,11 +517,35 @@ def main() -> None:
     print(f"  Total games:   {stats.total}")
     print(f"  Fetched:       {stats.fetched}")
     print(f"  Skipped:       {stats.skipped}")
+    print(f"  Retried stale: {stats.retried_existing_failures}")
     print(f"  Failed:        {stats.failed}")
     print(f"  Output dir:    {bronze_root}")
     if stats.failed > 0:
         print(f"  Failures log:  {failures_path}")
+
+    successful, total, coverage = _success_coverage(games, bronze_root)
+    print(f"  Coverage:      {successful}/{total} ({coverage:.1%})")
     print("=" * 60)
+
+    attempted = stats.fetched + stats.failed
+    if args.max_failure_rate is not None and attempted > 0:
+        max_failure_rate = float(args.max_failure_rate)
+        failure_rate = stats.failed / float(attempted)
+        if failure_rate > max_failure_rate:
+            print(
+                "[gamerotation] ERROR: failure rate "
+                f"{failure_rate:.1%} exceeds max {max_failure_rate:.1%}; exiting non-zero."
+            )
+            raise SystemExit(2)
+
+    if args.min_success_coverage is not None:
+        min_success_coverage = float(args.min_success_coverage)
+        if coverage < min_success_coverage:
+            print(
+                "[gamerotation] ERROR: success coverage "
+                f"{coverage:.1%} is below min {min_success_coverage:.1%}; exiting non-zero."
+            )
+            raise SystemExit(2)
 
 
 if __name__ == "__main__":

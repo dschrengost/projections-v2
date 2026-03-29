@@ -27,9 +27,15 @@ from projections.rotation.game_transformer_v2 import (
     build_game_transformer_v2,
     collate_game_level_examples,
 )
+from projections.rotation.gtv2_promotion_hybrid import (
+    BenchRiserHybridConfig,
+    PromotionHybridConfig,
+    assert_promotion_hybrid_compatible,
+)
 from projections.rotation.sample_worlds_v2 import (
     JOIN_KEYS,
     MakeModelConfig,
+    MinutesUncertaintyConfig,
     _coerce_join_keys,
     _resolve_dataset_dir,
     _resolve_run_dir,
@@ -59,6 +65,18 @@ class VariantSpec:
     name: str
     run_dir: str
     active_temperature: float
+    promotion_expert_run_dir: str | None = None
+    promotion_prior_minutes_max: float = 12.0
+    promotion_hist_start_rate_max: float = 0.20
+    promotion_blend_mode: str = "uplift_only"
+    promotion_force_active_candidates: bool = False
+    bench_expert_run_dir: str | None = None
+    bench_prior_minutes_min: float = 12.0
+    bench_prior_play_prob_min: float = 0.80
+    bench_implied_minutes_min: float = 12.0
+    bench_hist_start_rate_max: float = 0.35
+    bench_blend_mode: str = "uplift_only"
+    bench_force_active_candidates: bool = False
     make_model: str = "beta_binomial_all"
     allocation_source: str = "emergent"
     allocation_blend_alpha: float = 0.5
@@ -66,6 +84,18 @@ class VariantSpec:
     props_uplift_scope: str = "stars_only"
     props_uplift_confidence_weighted: bool = True
     apply_world_realism_controls: bool = True
+    minutes_uncertainty_enabled: bool = False
+    minutes_uncertainty_mode: str = "gaussian"
+    minutes_uncertainty_gaussian_scale: float = 1.0
+    minutes_uncertainty_min_sigma: float = 0.75
+    minutes_uncertainty_max_sigma: float = 6.0
+    minutes_uncertainty_fallback_sigma: float = 1.5
+    minutes_uncertainty_use_hurdle_sigma: bool = True
+    minutes_uncertainty_use_prior_std: bool = True
+    minutes_uncertainty_preserve_top_k_per_team: int = 3
+    minutes_uncertainty_full_sigma_at_minutes_or_below: float = 24.0
+    minutes_uncertainty_zero_sigma_at_minutes_or_above: float = 32.0
+    minutes_uncertainty_dirichlet_base_concentration: float = 24.0
 
 
 @dataclass(frozen=True)
@@ -84,6 +114,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--variant-file", type=str, required=True)
     parser.add_argument("--dataset-dir", type=str, default=None)
     parser.add_argument("--out-dir", type=str, required=True)
+    parser.add_argument(
+        "--game-keys-csv",
+        type=str,
+        default=None,
+        help="Optional CSV with columns game_date,game_id to override the default selected validation games.",
+    )
     parser.add_argument("--val-days", type=int, default=60)
     parser.add_argument("--num-games", type=int, default=60)
     parser.add_argument("--num-worlds", type=int, default=256)
@@ -123,7 +159,13 @@ def _load_variant_specs(path: Path) -> list[VariantSpec]:
     return specs
 
 
-def _load_eval_context(dataset_dir: Path, *, val_days: int, num_games: int) -> EvalContext:
+def _load_eval_context(
+    dataset_dir: Path,
+    *,
+    val_days: int,
+    num_games: int,
+    game_keys_csv: Path | None = None,
+) -> EvalContext:
     features_df = _coerce_join_keys(pd.read_parquet(dataset_dir / "features.parquet"), name="features")
     labels_minutes_df = _coerce_join_keys(pd.read_parquet(dataset_dir / "labels_minutes.parquet"), name="labels_minutes")
     labels_counts_df = _coerce_join_keys(pd.read_parquet(dataset_dir / "labels_boxscore_counts.parquet"), name="labels_boxscore_counts")
@@ -134,13 +176,25 @@ def _load_eval_context(dataset_dir: Path, *, val_days: int, num_games: int) -> E
     merged["game_id_norm"] = zfill_game_id_series(merged["game_id"])
     val_df = _split_val(merged, val_days=int(val_days))
 
-    selected_game_keys = (
-        val_df.loc[:, ["game_date", "game_id"]]
-        .drop_duplicates()
-        .sort_values(["game_date", "game_id"], kind="stable")
-        .head(max(1, int(num_games)))
-        .reset_index(drop=True)
-    )
+    if game_keys_csv is not None:
+        selected_game_keys = pd.read_csv(game_keys_csv)
+        missing = {"game_date", "game_id"} - set(selected_game_keys.columns)
+        if missing:
+            raise ValueError(f"game-keys csv missing required columns {sorted(missing)}: {game_keys_csv}")
+        selected_game_keys = selected_game_keys.loc[:, ["game_date", "game_id"]].copy()
+        selected_game_keys["game_date"] = pd.to_datetime(selected_game_keys["game_date"], errors="coerce")
+        selected_game_keys["game_id"] = pd.to_numeric(selected_game_keys["game_id"], errors="coerce").astype("Int64")
+        selected_game_keys = selected_game_keys.dropna(subset=["game_date", "game_id"]).copy()
+        selected_game_keys["game_id"] = selected_game_keys["game_id"].astype(int)
+        selected_game_keys = selected_game_keys.drop_duplicates().reset_index(drop=True)
+    else:
+        selected_game_keys = (
+            val_df.loc[:, ["game_date", "game_id"]]
+            .drop_duplicates()
+            .sort_values(["game_date", "game_id"], kind="stable")
+            .head(max(1, int(num_games)))
+            .reset_index(drop=True)
+        )
     selected_val_df = val_df.merge(selected_game_keys, on=["game_date", "game_id"], how="inner")
     selected_features_df = features_df.merge(selected_game_keys, on=["game_date", "game_id"], how="inner")
     selected_labels_minutes_df = labels_minutes_df.merge(selected_game_keys, on=["game_date", "game_id"], how="inner")
@@ -194,10 +248,58 @@ def _generate_raw_worlds(
     run_dir = _resolve_run_dir(spec.run_dir)
     config = GameTransformerV2Config.load(run_dir / "config.json")
     model = build_game_transformer_v2(config)
+    setattr(model, "gtv2_config", config)
     state = torch.load(run_dir / "model.pt", map_location="cpu")
     model.load_state_dict(state)
     model = model.to(device=device)
     model.eval()
+    promotion_expert_model: torch.nn.Module | None = None
+    promotion_hybrid_config: PromotionHybridConfig | None = None
+    promotion_expert_run_dir: Path | None = None
+    if spec.promotion_expert_run_dir:
+        promotion_expert_run_dir = _resolve_run_dir(str(spec.promotion_expert_run_dir))
+        promotion_expert_cfg = GameTransformerV2Config.load(promotion_expert_run_dir / "config.json")
+        assert_promotion_hybrid_compatible(config, promotion_expert_cfg)
+        promotion_expert_model = build_game_transformer_v2(promotion_expert_cfg)
+        setattr(promotion_expert_model, "gtv2_config", promotion_expert_cfg)
+        expert_state = torch.load(promotion_expert_run_dir / "model.pt", map_location="cpu")
+        promotion_expert_model.load_state_dict(expert_state)
+        promotion_expert_model = promotion_expert_model.to(device=device)
+        promotion_expert_model.eval()
+        promotion_hybrid_config = PromotionHybridConfig.from_model_config(
+            config,
+            prior_minutes_max=float(spec.promotion_prior_minutes_max),
+            hist_start_rate_max=float(spec.promotion_hist_start_rate_max),
+            uplift_only=(str(spec.promotion_blend_mode).strip().lower() == "uplift_only"),
+            force_active_candidates=bool(spec.promotion_force_active_candidates),
+        )
+    bench_expert_model: torch.nn.Module | None = None
+    bench_hybrid_config: BenchRiserHybridConfig | None = None
+    bench_expert_run_dir: Path | None = None
+    if spec.bench_expert_run_dir:
+        bench_expert_run_dir = _resolve_run_dir(str(spec.bench_expert_run_dir))
+        bench_expert_cfg = GameTransformerV2Config.load(bench_expert_run_dir / "config.json")
+        if list(config.feature_columns) != list(bench_expert_cfg.feature_columns):
+            raise ValueError("Bench expert feature_columns must exactly match primary model feature_columns")
+        if list(config.game_feature_columns) != list(bench_expert_cfg.game_feature_columns):
+            raise ValueError("Bench expert game_feature_columns must exactly match primary model game_feature_columns")
+        if list(config.team_feature_columns) != list(bench_expert_cfg.team_feature_columns):
+            raise ValueError("Bench expert team_feature_columns must exactly match primary model team_feature_columns")
+        bench_expert_model = build_game_transformer_v2(bench_expert_cfg)
+        setattr(bench_expert_model, "gtv2_config", bench_expert_cfg)
+        expert_state = torch.load(bench_expert_run_dir / "model.pt", map_location="cpu")
+        bench_expert_model.load_state_dict(expert_state)
+        bench_expert_model = bench_expert_model.to(device=device)
+        bench_expert_model.eval()
+        bench_hybrid_config = BenchRiserHybridConfig.from_model_config(
+            config,
+            prior_minutes_min=float(spec.bench_prior_minutes_min),
+            prior_play_prob_min=float(spec.bench_prior_play_prob_min),
+            implied_minutes_min=float(spec.bench_implied_minutes_min),
+            hist_start_rate_max=float(spec.bench_hist_start_rate_max),
+            uplift_only=(str(spec.bench_blend_mode).strip().lower() == "uplift_only"),
+            force_active_candidates=bool(spec.bench_force_active_candidates),
+        )
 
     examples = build_game_level_examples(
         ctx.selected_val_df,
@@ -224,6 +326,20 @@ def _generate_raw_worlds(
         collate_fn=collate_game_level_examples,
     )
     make_model_config = MakeModelConfig(mode=str(spec.make_model))
+    minutes_uncertainty_config = MinutesUncertaintyConfig(
+        enabled=bool(spec.minutes_uncertainty_enabled),
+        mode=str(spec.minutes_uncertainty_mode),
+        gaussian_scale=float(spec.minutes_uncertainty_gaussian_scale),
+        min_sigma=float(spec.minutes_uncertainty_min_sigma),
+        max_sigma=float(spec.minutes_uncertainty_max_sigma),
+        fallback_sigma=float(spec.minutes_uncertainty_fallback_sigma),
+        use_hurdle_sigma=bool(spec.minutes_uncertainty_use_hurdle_sigma),
+        use_prior_std=bool(spec.minutes_uncertainty_use_prior_std),
+        preserve_top_k_per_team=int(spec.minutes_uncertainty_preserve_top_k_per_team),
+        full_sigma_at_minutes_or_below=float(spec.minutes_uncertainty_full_sigma_at_minutes_or_below),
+        zero_sigma_at_minutes_or_above=float(spec.minutes_uncertainty_zero_sigma_at_minutes_or_above),
+        dirichlet_base_concentration=float(spec.minutes_uncertainty_dirichlet_base_concentration),
+    )
 
     frames: list[pd.DataFrame] = []
     contract_counter: dict[str, int] = {}
@@ -240,6 +356,11 @@ def _generate_raw_worlds(
             make_model_config=make_model_config,
             allocation_source=str(spec.allocation_source),
             allocation_blend_alpha=float(spec.allocation_blend_alpha),
+            minutes_uncertainty_config=minutes_uncertainty_config,
+            promotion_expert_model=promotion_expert_model,
+            promotion_hybrid_config=promotion_hybrid_config,
+            bench_expert_model=bench_expert_model,
+            bench_hybrid_config=bench_hybrid_config,
         )
         frames.append(df_batch)
         for key, value in checks.items():
@@ -248,14 +369,47 @@ def _generate_raw_worlds(
     raw_worlds = _normalize_worlds_df(pd.concat(frames, ignore_index=True) if frames else pd.DataFrame())
 
     del model
+    if promotion_expert_model is not None:
+        del promotion_expert_model
+    if bench_expert_model is not None:
+        del bench_expert_model
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
     return raw_worlds, {
         "run_dir": str(run_dir),
+        "promotion_expert_run_dir": str(promotion_expert_run_dir) if promotion_expert_run_dir is not None else None,
+        "bench_expert_run_dir": str(bench_expert_run_dir) if bench_expert_run_dir is not None else None,
+        "promotion_hybrid": (
+            {
+                "prior_minutes_max": float(promotion_hybrid_config.prior_minutes_max),
+                "hist_start_rate_max": float(promotion_hybrid_config.hist_start_rate_max),
+                "blend_mode": str(spec.promotion_blend_mode),
+            }
+            if promotion_hybrid_config is not None
+            else None
+        ),
+        "bench_hybrid": (
+            {
+                "prior_minutes_min": float(bench_hybrid_config.prior_minutes_min),
+                "prior_play_prob_min": float(bench_hybrid_config.prior_play_prob_min),
+                "implied_minutes_min": float(bench_hybrid_config.implied_minutes_min),
+                "hist_start_rate_max": float(bench_hybrid_config.hist_start_rate_max),
+                "blend_mode": str(spec.bench_blend_mode),
+            }
+            if bench_hybrid_config is not None
+            else None
+        ),
         "contract_checks": contract_counter,
         "num_examples": int(len(examples)),
+        "minutes_uncertainty": {
+            "enabled": bool(spec.minutes_uncertainty_enabled),
+            "mode": str(spec.minutes_uncertainty_mode),
+            "gaussian_scale": float(spec.minutes_uncertainty_gaussian_scale),
+            "use_hurdle_sigma": bool(spec.minutes_uncertainty_use_hurdle_sigma),
+            "use_prior_std": bool(spec.minutes_uncertainty_use_prior_std),
+        },
     }
 
 
@@ -305,6 +459,21 @@ def _calibration_payload(
     labels = ctx.selected_labels_counts_df.copy()
     keys = worlds[["game_date", "game_id", "team_id", "player_id"]].drop_duplicates()
     labels = labels.merge(keys, on=["game_date", "game_id", "team_id", "player_id"], how="inner")
+    required_actual_cols = [
+        "fga2",
+        "fg2m",
+        "fga3",
+        "fg3m",
+        "fta",
+        "ftm",
+        "oreb",
+        "dreb",
+        "ast",
+        "stl",
+        "blk",
+        "tov",
+    ]
+    labels = labels.dropna(subset=[col for col in required_actual_cols if col in labels.columns]).copy()
     if labels.empty:
         raise ValueError(f"no overlap between worlds and labels for {name}")
 
@@ -585,7 +754,12 @@ def _actual_dk_fpts(df: pd.DataFrame) -> pd.Series:
     return base + np.where(qualifiers == 2, 1.5, 0.0) + np.where(qualifiers >= 3, 3.0, 0.0)
 
 
-def _player_summary_payload(worlds: pd.DataFrame, *, ctx: EvalContext) -> tuple[dict[str, Any], pd.DataFrame]:
+def _player_summary_payload(
+    worlds: pd.DataFrame,
+    *,
+    ctx: EvalContext,
+    spec: VariantSpec,
+) -> tuple[dict[str, Any], pd.DataFrame]:
     work = worlds.copy()
     work["pred_reb"] = pd.to_numeric(work["oreb"], errors="coerce").fillna(0.0) + pd.to_numeric(
         work["dreb"], errors="coerce"
@@ -676,6 +850,133 @@ def _player_summary_payload(worlds: pd.DataFrame, *, ctx: EvalContext) -> tuple[
     metrics["pred_active_prob_mean"] = float(pd.to_numeric(merged["pred_active_prob"], errors="coerce").mean())
     metrics["pred_active_prob_4_mean"] = float(pd.to_numeric(merged["pred_active_prob_4"], errors="coerce").mean())
 
+    feature_cols = [
+        "game_date",
+        "game_id",
+        "team_id",
+        "player_id",
+        "lineup_starter_announced",
+        "is_projected_starter",
+        "is_confirmed_starter",
+        "minutes_from_stints_prior_20",
+        "prior_play_prob",
+        "an_implied_minutes",
+        "recent_start_pct_10",
+        "started_proxy_rate_prior_10",
+        "started_proxy_rate_prior_20",
+    ]
+    available_feature_cols = [col for col in feature_cols if col in ctx.selected_features_df.columns]
+    feature_frame = ctx.selected_features_df.loc[:, available_feature_cols].copy()
+    for col in feature_cols:
+        if col not in feature_frame.columns:
+            feature_frame[col] = 0.0
+    feature_frame = _normalize_game_date_str(feature_frame)
+    promo = merged.merge(
+        feature_frame,
+        on=["game_date", "game_id", "team_id", "player_id"],
+        how="left",
+        validate="one_to_one",
+    )
+    starter_signal = np.zeros(len(promo), dtype=bool)
+    for col in ("lineup_starter_announced", "is_projected_starter", "is_confirmed_starter"):
+        starter_signal |= pd.to_numeric(promo[col], errors="coerce").fillna(0.0).to_numpy(dtype=float) >= 0.5
+    hist_start_rate = np.maximum.reduce(
+        [
+            pd.to_numeric(promo["recent_start_pct_10"], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+            pd.to_numeric(promo["started_proxy_rate_prior_10"], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+            pd.to_numeric(promo["started_proxy_rate_prior_20"], errors="coerce").fillna(0.0).to_numpy(dtype=float),
+        ]
+    )
+    prior_minutes = pd.to_numeric(promo["minutes_from_stints_prior_20"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    promo_mask = (
+        starter_signal
+        & (prior_minutes <= float(spec.promotion_prior_minutes_max))
+        & (hist_start_rate <= float(spec.promotion_hist_start_rate_max))
+    )
+    promo_next_up_mask = promo_mask & (
+        pd.to_numeric(promo["actual_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float) >= 20.0
+    )
+    if bool(promo_mask.any()):
+        promo_minutes_bias, promo_minutes_mae = _mae_bias(
+            promo.loc[promo_mask, "pred_minutes"],
+            promo.loc[promo_mask, "actual_minutes"],
+        )
+    else:
+        promo_minutes_bias, promo_minutes_mae = float("nan"), float("nan")
+    metrics["starter_promotion_slice_n"] = float(int(promo_mask.sum()))
+    metrics["starter_promotion_next_up_n"] = float(int(promo_next_up_mask.sum()))
+    metrics["starter_promotion_pred_minutes_mean"] = (
+        float(pd.to_numeric(promo.loc[promo_mask, "pred_minutes"], errors="coerce").mean())
+        if bool(promo_mask.any())
+        else float("nan")
+    )
+    metrics["starter_promotion_minutes_bias_mean"] = promo_minutes_bias
+    metrics["starter_promotion_minutes_mae"] = promo_minutes_mae
+    metrics["starter_promotion_active_recall_at4"] = (
+        float((pd.to_numeric(promo.loc[promo_next_up_mask, "pred_minutes"], errors="coerce").fillna(0.0) >= 4.0).mean())
+        if bool(promo_next_up_mask.any())
+        else float("nan")
+    )
+    metrics["starter_promotion_under10_rate"] = (
+        float((pd.to_numeric(promo.loc[promo_next_up_mask, "pred_minutes"], errors="coerce").fillna(0.0) < 10.0).mean())
+        if bool(promo_next_up_mask.any())
+        else float("nan")
+    )
+    metrics["starter_promotion_low8_rate"] = (
+        float((pd.to_numeric(promo.loc[promo_next_up_mask, "pred_minutes"], errors="coerce").fillna(0.0) < 8.0).mean())
+        if bool(promo_next_up_mask.any())
+        else float("nan")
+    )
+
+    nonstarter_mask = ~starter_signal
+    prior_play_prob = pd.to_numeric(promo["prior_play_prob"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    implied_minutes = pd.to_numeric(promo["an_implied_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    bench_mask = (
+        nonstarter_mask
+        & (prior_minutes >= float(spec.bench_prior_minutes_min))
+        & (prior_play_prob >= float(spec.bench_prior_play_prob_min))
+        & (implied_minutes >= float(spec.bench_implied_minutes_min))
+        & (hist_start_rate <= float(spec.bench_hist_start_rate_max))
+    )
+    bench_next_up_mask = bench_mask & (
+        pd.to_numeric(promo["actual_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float) >= 20.0
+    )
+    bench_core_mask = bench_mask & (
+        pd.to_numeric(promo["actual_minutes"], errors="coerce").fillna(0.0).to_numpy(dtype=float) >= 32.0
+    )
+    if bool(bench_mask.any()):
+        bench_minutes_bias, bench_minutes_mae = _mae_bias(
+            promo.loc[bench_mask, "pred_minutes"],
+            promo.loc[bench_mask, "actual_minutes"],
+        )
+    else:
+        bench_minutes_bias, bench_minutes_mae = float("nan"), float("nan")
+    metrics["bench_riser_slice_n"] = float(int(bench_mask.sum()))
+    metrics["bench_riser_next_up_n"] = float(int(bench_next_up_mask.sum()))
+    metrics["bench_core_next_up_n"] = float(int(bench_core_mask.sum()))
+    metrics["bench_riser_pred_minutes_mean"] = (
+        float(pd.to_numeric(promo.loc[bench_mask, "pred_minutes"], errors="coerce").mean())
+        if bool(bench_mask.any())
+        else float("nan")
+    )
+    metrics["bench_riser_minutes_bias_mean"] = bench_minutes_bias
+    metrics["bench_riser_minutes_mae"] = bench_minutes_mae
+    metrics["bench_riser_active_recall_at4"] = (
+        float((pd.to_numeric(promo.loc[bench_next_up_mask, "pred_minutes"], errors="coerce").fillna(0.0) >= 4.0).mean())
+        if bool(bench_next_up_mask.any())
+        else float("nan")
+    )
+    metrics["bench_riser_under16_rate"] = (
+        float((pd.to_numeric(promo.loc[bench_next_up_mask, "pred_minutes"], errors="coerce").fillna(0.0) < 16.0).mean())
+        if bool(bench_next_up_mask.any())
+        else float("nan")
+    )
+    metrics["bench_riser_low8_rate"] = (
+        float((pd.to_numeric(promo.loc[bench_next_up_mask, "pred_minutes"], errors="coerce").fillna(0.0) < 8.0).mean())
+        if bool(bench_next_up_mask.any())
+        else float("nan")
+    )
+
     return {
         "counts": {
             "n_player_games": int(len(merged)),
@@ -702,12 +1003,20 @@ def _flatten_variant_row(
     return {
         "variant": spec.name,
         "run_dir": spec.run_dir,
+        "promotion_expert_run_dir": str(spec.promotion_expert_run_dir) if spec.promotion_expert_run_dir else None,
+        "bench_expert_run_dir": str(spec.bench_expert_run_dir) if spec.bench_expert_run_dir else None,
+        "promotion_blend_mode": str(spec.promotion_blend_mode),
+        "promotion_force_active_candidates": bool(spec.promotion_force_active_candidates),
+        "bench_blend_mode": str(spec.bench_blend_mode),
+        "bench_force_active_candidates": bool(spec.bench_force_active_candidates),
         "active_temperature": float(spec.active_temperature),
         "make_model": str(spec.make_model),
         "allocation_source": str(spec.allocation_source),
         "apply_props_uplift": bool(spec.apply_props_uplift),
         "props_uplift_scope": str(spec.props_uplift_scope),
         "apply_world_realism_controls": bool(spec.apply_world_realism_controls),
+        "minutes_uncertainty_enabled": bool(spec.minutes_uncertainty_enabled),
+        "minutes_uncertainty_mode": str(spec.minutes_uncertainty_mode),
         "n_games": int(len(post_worlds[["game_date", "game_id"]].drop_duplicates())),
         "raw_world_rows": int(len(raw_worlds)),
         "post_world_rows": int(len(post_worlds)),
@@ -720,6 +1029,21 @@ def _flatten_variant_row(
         "minutes_mae": player_metrics["minutes_mae"],
         "minutes_bias_mean": player_metrics["minutes_bias_mean"],
         "active_acc_at4": player_metrics["active_acc_at4"],
+        "starter_promotion_slice_n": player_metrics["starter_promotion_slice_n"],
+        "starter_promotion_next_up_n": player_metrics["starter_promotion_next_up_n"],
+        "starter_promotion_pred_minutes_mean": player_metrics["starter_promotion_pred_minutes_mean"],
+        "starter_promotion_minutes_mae": player_metrics["starter_promotion_minutes_mae"],
+        "starter_promotion_active_recall_at4": player_metrics["starter_promotion_active_recall_at4"],
+        "starter_promotion_under10_rate": player_metrics["starter_promotion_under10_rate"],
+        "starter_promotion_low8_rate": player_metrics["starter_promotion_low8_rate"],
+        "bench_riser_slice_n": player_metrics["bench_riser_slice_n"],
+        "bench_riser_next_up_n": player_metrics["bench_riser_next_up_n"],
+        "bench_core_next_up_n": player_metrics["bench_core_next_up_n"],
+        "bench_riser_pred_minutes_mean": player_metrics["bench_riser_pred_minutes_mean"],
+        "bench_riser_minutes_mae": player_metrics["bench_riser_minutes_mae"],
+        "bench_riser_active_recall_at4": player_metrics["bench_riser_active_recall_at4"],
+        "bench_riser_under16_rate": player_metrics["bench_riser_under16_rate"],
+        "bench_riser_low8_rate": player_metrics["bench_riser_low8_rate"],
         "pts_mae_player": player_metrics["pts_mae"],
         "reb_mae_player": player_metrics["reb_mae"],
         "ast_mae_player": player_metrics["ast_mae"],
@@ -756,6 +1080,16 @@ def _compare_vs_baseline(summary_df: pd.DataFrame, *, baseline_name: str) -> pd.
         "dk_fpts_mae",
         "minutes_mae",
         "active_acc_at4",
+        "starter_promotion_pred_minutes_mean",
+        "starter_promotion_minutes_mae",
+        "starter_promotion_active_recall_at4",
+        "starter_promotion_under10_rate",
+        "starter_promotion_low8_rate",
+        "bench_riser_pred_minutes_mean",
+        "bench_riser_minutes_mae",
+        "bench_riser_active_recall_at4",
+        "bench_riser_under16_rate",
+        "bench_riser_low8_rate",
         "pts_mae_player",
         "reb_mae_player",
         "ast_mae_player",
@@ -787,7 +1121,13 @@ def main() -> None:
 
     dataset_dir = _resolve_dataset_dir(args.dataset_dir)
     specs = _load_variant_specs(variant_file)
-    ctx = _load_eval_context(dataset_dir, val_days=int(args.val_days), num_games=int(args.num_games))
+    game_keys_csv = Path(args.game_keys_csv).expanduser().resolve() if args.game_keys_csv else None
+    ctx = _load_eval_context(
+        dataset_dir,
+        val_days=int(args.val_days),
+        num_games=int(args.num_games),
+        game_keys_csv=game_keys_csv,
+    )
     ctx.selected_game_keys.to_csv(out_dir / "selected_games.csv", index=False)
 
     device = _resolve_device(args.device)
@@ -822,7 +1162,7 @@ def main() -> None:
             ctx=ctx,
             name=spec.name,
         )
-        player_summary_payload, player_summary_df = _player_summary_payload(post_worlds, ctx=ctx)
+        player_summary_payload, player_summary_df = _player_summary_payload(post_worlds, ctx=ctx, spec=spec)
 
         (variant_dir / "generation_meta.json").write_text(
             json.dumps(generation_meta, indent=2, sort_keys=True),

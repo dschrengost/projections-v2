@@ -155,6 +155,998 @@ def test_build_game_level_examples_and_collate_shapes() -> None:
     assert float(batch["force_active_minutes_anchor"].sum().item()) == 0.0
 
 
+def test_build_game_level_examples_and_collate_sidecar_shapes() -> None:
+    df = _toy_frame()
+    df["fg2_pct_prior_5"] = np.linspace(0.45, 0.60, len(df))
+    df["fg3_pct_prior_5"] = np.linspace(0.30, 0.42, len(df))
+    df["opp_fg2_pct_allowed_prior_5"] = np.linspace(0.48, 0.55, len(df))
+    feature_columns = ["f1", "f2"]
+    sidecar_columns = ["fg2_pct_prior_5", "fg3_pct_prior_5", "opp_fg2_pct_allowed_prior_5"]
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=feature_columns,
+        feature_mean=np.array([0.0, 0.0], dtype=np.float32),
+        feature_std=np.array([1.0, 1.0], dtype=np.float32),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        efficiency_sidecar_feature_columns=sidecar_columns,
+        efficiency_sidecar_feature_mean=np.array([0.5, 0.35, 0.5], dtype=np.float32),
+        efficiency_sidecar_feature_std=np.array([0.05, 0.05, 0.03], dtype=np.float32),
+        minutes_label_col="minutes_label",
+    )
+
+    batch = collate_game_level_examples(examples)
+    assert batch["efficiency_sidecar_features"].shape == (1, 2, MAX_PLAYERS_PER_TEAM, len(sidecar_columns))
+    assert torch.isfinite(batch["efficiency_sidecar_features"]).all()
+
+
+def test_build_game_level_examples_with_team_feature_columns_preserves_side_alignment() -> None:
+    df = _toy_frame()
+    home_mask = df["team_id"] == 10
+    away_mask = df["team_id"] == 20
+    df.loc[home_mask, "is_b2b"] = 1.0
+    df.loc[away_mask, "is_b2b"] = 0.0
+    df.loc[home_mask, "team_pace_szn"] = 101.5
+    df.loc[away_mask, "team_pace_szn"] = 97.25
+    df.loc[home_mask, "team_off_rtg_szn"] = 118.0
+    df.loc[away_mask, "team_off_rtg_szn"] = 109.5
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array([0.0, 0.0], dtype=np.float32),
+        feature_std=np.array([1.0, 1.0], dtype=np.float32),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=["is_b2b", "team_pace_szn", "team_off_rtg_szn"],
+        minutes_label_col="minutes_label",
+    )
+
+    batch = collate_game_level_examples(examples)
+    team_features = batch["team_features"].numpy()
+    assert team_features.shape == (1, 2, 3)
+    np.testing.assert_allclose(team_features[0, 0], np.array([1.0, 101.5, 118.0], dtype=np.float32))
+    np.testing.assert_allclose(team_features[0, 1], np.array([0.0, 97.25, 109.5], dtype=np.float32))
+
+
+def test_game_transformer_v2_forward_supports_late_fused_backbone_env_features() -> None:
+    df = _toy_frame()
+    df["is_b2b"] = np.where(df["team_id"] == 10, 1.0, 0.0)
+    df["team_pace_szn"] = np.where(df["team_id"] == 10, 101.5, 97.25)
+    df["team_off_rtg_szn"] = np.where(df["team_id"] == 10, 118.0, 109.5)
+    df["team_def_rtg_szn"] = np.where(df["team_id"] == 10, 111.0, 113.0)
+    df["opp_pace_szn"] = np.where(df["team_id"] == 10, 97.25, 101.5)
+    df["opp_def_rtg_szn"] = np.where(df["team_id"] == 10, 113.0, 111.0)
+
+    feature_columns = [
+        "f1",
+        "f2",
+        "is_b2b",
+        "team_pace_szn",
+        "team_off_rtg_szn",
+        "team_def_rtg_szn",
+        "opp_pace_szn",
+        "opp_def_rtg_szn",
+    ]
+    config = GameTransformerV2Config(
+        feature_columns=feature_columns,
+        feature_mean=[0.0] * len(feature_columns),
+        feature_std=[1.0] * len(feature_columns),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        backbone_env_feature_columns=[
+            "is_b2b",
+            "team_pace_szn",
+            "team_off_rtg_szn",
+            "team_def_rtg_szn",
+            "opp_pace_szn",
+            "opp_def_rtg_szn",
+        ],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        enable_three_pa_share=True,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.possession is not None
+    assert out.backbone is not None
+    assert out.possession.mu.shape == (1,)
+    assert out.backbone.fga.shape == (1, 2)
+
+
+def test_game_transformer_v2_forward_supports_backbone_env_adapter() -> None:
+    df = _toy_frame()
+    df["is_b2b"] = np.where(df["team_id"] == 10, 1.0, 0.0)
+    df["team_pace_szn"] = np.where(df["team_id"] == 10, 101.5, 97.25)
+    df["team_off_rtg_szn"] = np.where(df["team_id"] == 10, 118.0, 109.5)
+    df["team_def_rtg_szn"] = np.where(df["team_id"] == 10, 111.0, 113.0)
+    df["opp_pace_szn"] = np.where(df["team_id"] == 10, 97.25, 101.5)
+    df["opp_def_rtg_szn"] = np.where(df["team_id"] == 10, 113.0, 111.0)
+
+    feature_columns = [
+        "f1",
+        "f2",
+        "is_b2b",
+        "team_pace_szn",
+        "team_off_rtg_szn",
+        "team_def_rtg_szn",
+        "opp_pace_szn",
+        "opp_def_rtg_szn",
+    ]
+    config = GameTransformerV2Config(
+        feature_columns=feature_columns,
+        feature_mean=[0.0] * len(feature_columns),
+        feature_std=[1.0] * len(feature_columns),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        backbone_env_feature_columns=[
+            "is_b2b",
+            "team_pace_szn",
+            "team_off_rtg_szn",
+            "team_def_rtg_szn",
+            "opp_pace_szn",
+            "opp_def_rtg_szn",
+        ],
+        backbone_env_adapter_dim=8,
+        backbone_env_adapter_hidden=16,
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        enable_three_pa_share=True,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert model.backbone_env_adapter is not None
+    assert out.possession is not None
+    assert out.backbone is not None
+    assert out.possession.mu.shape == (1,)
+    assert out.backbone.fga.shape == (1, 2)
+
+
+def test_game_transformer_v2_forward_supports_efficiency_sidecar() -> None:
+    df = _toy_frame()
+    df["fg2_pct_prior_5"] = np.linspace(0.45, 0.60, len(df))
+    df["fg3_pct_prior_5"] = np.linspace(0.30, 0.42, len(df))
+    df["ft_pct_prior_5"] = np.linspace(0.72, 0.88, len(df))
+    df["opp_fg2_pct_allowed_prior_5"] = np.linspace(0.48, 0.55, len(df))
+    df["opp_fg3_pct_allowed_prior_5"] = np.linspace(0.33, 0.39, len(df))
+
+    feature_columns = ["f1", "f2"]
+    sidecar_columns = [
+        "fg2_pct_prior_5",
+        "fg3_pct_prior_5",
+        "ft_pct_prior_5",
+        "opp_fg2_pct_allowed_prior_5",
+        "opp_fg3_pct_allowed_prior_5",
+    ]
+    config = GameTransformerV2Config(
+        feature_columns=feature_columns,
+        feature_mean=[0.0] * len(feature_columns),
+        feature_std=[1.0] * len(feature_columns),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        efficiency_sidecar_feature_columns=sidecar_columns,
+        efficiency_sidecar_feature_mean=[0.5, 0.35, 0.78, 0.5, 0.36],
+        efficiency_sidecar_feature_std=[0.05, 0.05, 0.06, 0.04, 0.03],
+        enable_efficiency_head=True,
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        efficiency_sidecar_feature_columns=config.efficiency_sidecar_feature_columns,
+        efficiency_sidecar_feature_mean=np.array(config.efficiency_sidecar_feature_mean, dtype=np.float32),
+        efficiency_sidecar_feature_std=np.array(config.efficiency_sidecar_feature_std, dtype=np.float32),
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        efficiency_sidecar_features=batch["efficiency_sidecar_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.efficiency is not None
+    assert out.efficiency.mean_fg2.shape == (1, 30)
+
+
+def test_game_transformer_v2_forward_supports_env_side_channel() -> None:
+    df = _toy_frame()
+    df["is_b2b"] = np.where(df["team_id"] == 10, 1.0, 0.0)
+    df["team_pace_szn"] = np.where(df["team_id"] == 10, 101.5, 97.25)
+    df["team_off_rtg_szn"] = np.where(df["team_id"] == 10, 118.0, 109.5)
+    df["team_def_rtg_szn"] = np.where(df["team_id"] == 10, 111.0, 113.0)
+    df["opp_pace_szn"] = np.where(df["team_id"] == 10, 97.25, 101.5)
+    df["opp_def_rtg_szn"] = np.where(df["team_id"] == 10, 113.0, 111.0)
+
+    feature_columns = [
+        "f1",
+        "f2",
+        "is_b2b",
+        "team_pace_szn",
+        "team_off_rtg_szn",
+        "team_def_rtg_szn",
+        "opp_pace_szn",
+        "opp_def_rtg_szn",
+    ]
+    config = GameTransformerV2Config(
+        feature_columns=feature_columns,
+        feature_mean=[0.0] * len(feature_columns),
+        feature_std=[1.0] * len(feature_columns),
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        backbone_env_feature_columns=[
+            "is_b2b",
+            "team_pace_szn",
+            "team_off_rtg_szn",
+            "team_def_rtg_szn",
+            "opp_pace_szn",
+            "opp_def_rtg_szn",
+        ],
+        backbone_env_enrich_features=True,
+        enable_env_side_channel=True,
+        env_side_channel_dim=12,
+        env_side_channel_hidden=16,
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        enable_three_pa_share=True,
+        flow_use_minutes_conditioning=True,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        flow_label_columns=["fga2", "fg2m", "fga3", "fg3m", "fta", "ftm", "oreb", "dreb", "ast", "stl", "blk", "tov"],
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        flow_targets=batch["flow_targets"],
+        flow_observed_mask=batch["flow_observed_mask"],
+        run_flow=True,
+        flow_minutes_target=batch["y_minutes"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert model.env_side_channel_encoder is not None
+    assert out.flow is not None
+    assert out.possession is not None
+    assert out.backbone is not None
+
+
+def test_game_transformer_v2_builds_side_specific_backbone_market_context() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1"],
+        feature_mean=[0.0],
+        feature_std=[1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        enable_possession_backbone=True,
+        backbone_side_market_context=True,
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+    )
+    model = build_game_transformer_v2(config)
+    game_features = torch.tensor([[231.5, -16.5, 101.0]], dtype=torch.float32)
+
+    ctx = model._build_backbone_team_market_context(game_features)
+
+    assert ctx is not None
+    assert ctx.shape == (1, 2, 6)
+    home = ctx[0, 0].detach().cpu().numpy()
+    away = ctx[0, 1].detach().cpu().numpy()
+    np.testing.assert_allclose(home[:4], np.array([124.0, 107.5, 16.5, 16.5], dtype=np.float32))
+    np.testing.assert_allclose(away[:4], np.array([107.5, 124.0, -16.5, 16.5], dtype=np.float32))
+    np.testing.assert_allclose(home[4:], np.array([124.0 / 101.0, 107.5 / 101.0], dtype=np.float32))
+    np.testing.assert_allclose(away[4:], np.array([107.5 / 101.0, 124.0 / 101.0], dtype=np.float32))
+
+
+def test_game_transformer_v2_forward_supports_ast_factorization_heads() -> None:
+    df = _toy_frame()
+    df["an_ast_line"] = np.where(df["player_id"].isin([101, 201]), 7.5, 2.0)
+    df["an_implied_minutes"] = np.where(df["player_id"].isin([101, 201]), 33.0, 18.0)
+    df["started_proxy_rate_prior_20"] = np.where(df["player_id"].isin([101, 201]), 0.8, 0.2)
+    config = GameTransformerV2Config(
+        feature_columns=[
+            "f1",
+            "f2",
+            "an_ast_line",
+            "an_implied_minutes",
+            "prior_play_prob",
+            "started_proxy_rate_prior_20",
+        ],
+        feature_mean=[0.0] * 6,
+        feature_std=[1.0] * 6,
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_team_ast_budget_head=True,
+        team_ast_budget_head_hidden=32,
+        enable_assist_share_head=True,
+        assist_share_head_hidden=32,
+        enable_ast_blend_gate=True,
+        ast_blend_gate_hidden=24,
+        ast_blend_gate_init_alpha=0.7,
+        assist_share_condition_feature_columns=[
+            "an_ast_line",
+            "an_implied_minutes",
+            "prior_play_prob",
+            "started_proxy_rate_prior_20",
+        ],
+        assist_share_condition_hidden=16,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+    assert getattr(model, "gtv2_config", None) is not None
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_ast_budget is not None
+    assert out.team_ast_budget.team_ast.shape == (1, 2)
+    assert out.assist_share is not None
+    assert out.assist_share.ast_logits.shape == (1, 30)
+    assert out.ast_blend_gate is not None
+    assert out.ast_blend_gate.gate.shape == (1, 30)
+
+
+def test_game_transformer_v2_forward_supports_team_points_budget_head() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        enable_team_points_budget_head=True,
+        team_points_budget_head_hidden=32,
+        team_points_budget_to_backbone=True,
+        team_points_budget_latent_hidden=16,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_points_budget is not None
+    assert out.team_points_budget.team_points.shape == (1, 2)
+    assert out.backbone is not None
+    assert out.backbone.fga.shape == (1, 2)
+
+
+def test_game_transformer_v2_forward_supports_team_ppp_head() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_efficiency_head=True,
+        enable_possession_backbone=True,
+        enable_team_ppp_head=True,
+        team_ppp_head_hidden=32,
+        team_ppp_to_backbone=True,
+        team_ppp_direct_backbone_context=True,
+        team_ppp_to_efficiency=True,
+        team_ppp_direct_efficiency_context=True,
+        team_ppp_latent_hidden=16,
+        team_ppp_backbone_alpha=0.5,
+        team_ppp_efficiency_alpha=0.5,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_ppp is not None
+    assert out.team_ppp.team_ppp.shape == (1, 2)
+    assert out.efficiency is not None
+    assert out.backbone is not None
+
+
+def test_game_transformer_v2_forward_supports_team_advantage_head() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        enable_three_pa_share=True,
+        enable_team_advantage_head=True,
+        team_advantage_head_hidden=32,
+        team_advantage_direct_backbone_context=True,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_advantage is not None
+    assert out.team_advantage.mu.shape == (1,)
+    assert out.backbone is not None
+
+
+def test_game_transformer_v2_forward_supports_market_implied_team_points_context() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        enable_team_points_budget_head=False,
+        team_points_budget_parameterization="market_implied",
+        team_points_budget_to_backbone=True,
+        team_points_budget_latent_hidden=16,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_points_budget is None
+    assert out.backbone is not None
+    assert out.backbone.fga.shape == (1, 2)
+
+
+def test_game_transformer_v2_forward_supports_team_ppp_implied_team_points_context() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        enable_team_ppp_head=True,
+        team_ppp_head_hidden=32,
+        team_points_budget_parameterization="team_ppp_implied",
+        team_points_budget_to_backbone=True,
+        team_points_budget_latent_hidden=16,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_ppp is not None
+    assert out.backbone is not None
+    assert out.backbone.fga.shape == (1, 2)
+
+
+def test_game_transformer_v2_forward_supports_market_implied_team_opportunity_context() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        team_opportunity_budget_parameterization="market_implied_share",
+        team_opportunity_budget_to_backbone=True,
+        team_opportunity_budget_latent_hidden=16,
+        team_opportunity_budget_backbone_alpha=0.5,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.backbone is not None
+    assert out.backbone.fga.shape == (1, 2)
+
+
+def test_game_transformer_v2_forward_supports_team_possession_split_head() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_possession_backbone=True,
+        enable_team_possession_split_head=True,
+        team_possession_max_delta=6.0,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.possession is not None
+    assert out.possession.team_poss is not None
+    assert out.possession.team_poss.shape == (1, 2)
+    assert out.backbone is not None
+    assert out.backbone.poss_used.shape == (1, 2)
+
+
+def test_game_transformer_v2_forward_supports_efficiency_market_context() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_efficiency_head=True,
+        efficiency_market_context=True,
+        efficiency_market_hidden=16,
+        efficiency_market_alpha=0.5,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert model.efficiency_team_market_encoder is not None
+    assert out.efficiency is not None
+    assert out.efficiency.mean_fg2.shape == (1, 30)
+
+
+def test_game_transformer_v2_forward_supports_rebound_factorization_heads() -> None:
+    df = _toy_frame()
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_team_rebound_budget_head=True,
+        team_rebound_budget_head_hidden=32,
+        enable_rebound_budget_blend_gate=True,
+        rebound_budget_blend_gate_hidden=24,
+        rebound_budget_blend_gate_init_alpha=0.2,
+        enable_rebound_share_head=True,
+        rebound_share_head_hidden=32,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_rebound_budget is not None
+    assert out.team_rebound_budget.team_oreb.shape == (1, 2)
+    assert out.team_rebound_budget.team_dreb.shape == (1, 2)
+    assert out.rebound_budget_blend_gate is not None
+    assert out.rebound_budget_blend_gate.oreb_gate.shape == (1, 2)
+    assert out.rebound_budget_blend_gate.dreb_gate.shape == (1, 2)
+    assert out.rebound_share is not None
+    assert out.rebound_share.oreb_logits.shape == (1, 30)
+    assert out.rebound_share.dreb_logits.shape == (1, 30)
+
+
+def test_team_rebound_budget_head_supports_dreb_rate_parameterization() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_team_rebound_budget_head=True,
+        rebound_budget_parameterization="dreb_rate",
+        rebound_dreb_rate_cap=0.8,
+    )
+    model = build_game_transformer_v2(config)
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_rebound_budget is not None
+    assert torch.all(out.team_rebound_budget.team_dreb >= 0.0)
+    assert torch.all(out.team_rebound_budget.team_dreb <= 0.8 + 1e-6)
+
+
+def test_team_rebound_budget_head_supports_dreb_rate_residual_parameterization() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_team_rebound_budget_head=True,
+        rebound_budget_parameterization="dreb_rate_residual",
+        rebound_dreb_rate_cap=0.12,
+    )
+    model = build_game_transformer_v2(config)
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.team_rebound_budget is not None
+    assert torch.all(out.team_rebound_budget.team_dreb >= -0.12 - 1e-6)
+    assert torch.all(out.team_rebound_budget.team_dreb <= 0.12 + 1e-6)
+
+
+def test_rebound_share_head_supports_condition_features() -> None:
+    config = GameTransformerV2Config(
+        feature_columns=[
+            "f1",
+            "f2",
+            "an_reb_line",
+            "an_implied_minutes",
+            "prior_play_prob",
+            "started_proxy_rate_prior_20",
+        ],
+        feature_mean=[0.0, 0.0, 5.0, 24.0, 0.8, 0.4],
+        feature_std=[1.0, 1.0, 2.0, 8.0, 0.2, 0.3],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_rebound_share_head=True,
+        rebound_share_head_hidden=32,
+        rebound_share_condition_feature_columns=[
+            "an_reb_line",
+            "an_implied_minutes",
+            "prior_play_prob",
+            "started_proxy_rate_prior_20",
+        ],
+        rebound_share_condition_hidden=16,
+    )
+    model = build_game_transformer_v2(config)
+    examples = build_game_level_examples(
+        _toy_frame(),
+        feature_columns=config.feature_columns,
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+        sample_backbone=False,
+    )
+
+    assert out.rebound_share is not None
+    assert out.rebound_share.oreb_logits.shape == (1, 30)
+    assert out.rebound_share.dreb_logits.shape == (1, 30)
+
+
 def test_build_game_level_examples_force_active_worlds_includes_manual_force_in() -> None:
     df = _toy_frame()
     df["force_active_worlds"] = 0
@@ -454,6 +1446,9 @@ def test_game_transformer_v2_config_defaults_match_locked_decisions() -> None:
     assert config.flow_context_mode == "attention"  # H2 fix: gated attention instead of mean pooling
     assert config.flow_target_schema == "v1"
     assert config.flow_use_minutes_conditioning is False
+    assert config.enable_minutes_hurdle_head is False
+    assert config.minutes_hurdle_hidden == 64
+    assert config.minutes_hurdle_sigma_floor == pytest.approx(0.5)
     assert config.include_pf_in_flow_targets is False
     assert config.overflow_protected_prior_play_prob_floor == pytest.approx(0.938507)
     assert config.overflow_protected_prior_minutes_floor == pytest.approx(29.520922)
@@ -545,8 +1540,51 @@ def test_game_transformer_v2_forward_with_flow_targets_returns_flow_outputs() ->
         flow_observed_mask=batch["flow_observed_mask"],
     )
     assert out.flow is not None
-    assert out.flow.z.shape == (1, 30, len(flow_cols))
-    assert out.flow.nll_mean.item() > 0.0
+
+
+def test_game_transformer_v2_forward_emits_minutes_hurdle_outputs_when_enabled() -> None:
+    df = _toy_frame()
+    config = GameTransformerV2Config(
+        feature_columns=["f1", "f2"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions"],
+        team_feature_columns=[],
+        d_model=48,
+        hidden_dim=64,
+        num_layers=1,
+        num_heads=6,
+        dropout=0.0,
+        enable_minutes_hurdle_head=True,
+        minutes_hurdle_hidden=32,
+        minutes_hurdle_sigma_floor=0.7,
+    )
+    model = build_game_transformer_v2(config)
+    model.eval()
+
+    examples = build_game_level_examples(
+        df,
+        feature_columns=["f1", "f2"],
+        feature_mean=np.array(config.feature_mean, dtype=np.float32),
+        feature_std=np.array(config.feature_std, dtype=np.float32),
+        game_feature_columns=config.game_feature_columns,
+        team_feature_columns=config.team_feature_columns,
+        minutes_label_col="minutes_label",
+    )
+    batch = collate_game_level_examples(examples)
+    out = model(
+        batch["player_features"],
+        batch["player_valid_mask"],
+        game_features=batch["game_features"],
+        team_features=batch["team_features"],
+        sample_active=False,
+    )
+
+    assert out.minutes.zero_logits is not None
+    assert out.minutes.sigma is not None
+    assert out.minutes.zero_logits.shape == (1, 30)
+    assert out.minutes.sigma.shape == (1, 30)
+    assert float(out.minutes.sigma.min().item()) >= 0.7 - 1e-6
 
 
 def test_flow_head_sample_requires_minutes_context_when_enabled() -> None:

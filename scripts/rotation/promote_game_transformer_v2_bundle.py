@@ -265,6 +265,11 @@ def _update_bundle_current(bundle_root: Path, bundle_dir: Path) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-root", required=True, help="Phase-3 multiseed root directory")
+    parser.add_argument(
+        "--run-dir",
+        default=None,
+        help="Direct run directory containing model.pt/config.json/summary.json (bypasses seed_* selection).",
+    )
     parser.add_argument("--seed", default=None, help="Optional explicit seed id (e.g. 123)")
     parser.add_argument("--bundle-root", default=str(DEFAULT_BUNDLE_ROOT))
     parser.add_argument("--bundle-name", default=None)
@@ -290,12 +295,31 @@ def main() -> None:
     if not candidate_root.exists():
         raise FileNotFoundError(f"candidate_root not found: {candidate_root}")
 
-    selected = _pick_seed(candidate_root, args.seed)
-    seed_dir = Path(str(selected["seed_dir"])).resolve()
-    summary_path = seed_dir / "summary.json"
-    if not summary_path.exists():
-        raise FileNotFoundError(f"missing summary.json in selected seed dir: {seed_dir}")
-    summary = _read_json(summary_path)
+    if args.run_dir:
+        seed_dir = Path(args.run_dir).expanduser().resolve()
+        if not seed_dir.exists():
+            raise FileNotFoundError(f"run_dir not found: {seed_dir}")
+        summary_path = seed_dir / "summary.json"
+        if not summary_path.exists():
+            raise FileNotFoundError(f"missing summary.json in run dir: {seed_dir}")
+        summary = _read_json(summary_path)
+        selected = {
+            "seed_dir": str(seed_dir),
+            "seed": str(seed_dir.name),
+            "crps_mean": None,
+            "p90_err": None,
+            "p95_err": None,
+            "team_total_mae": None,
+            "go_no_go_checks": {},
+            "go_no_go_pass": False,
+        }
+    else:
+        selected = _pick_seed(candidate_root, args.seed)
+        seed_dir = Path(str(selected["seed_dir"])).resolve()
+        summary_path = seed_dir / "summary.json"
+        if not summary_path.exists():
+            raise FileNotFoundError(f"missing summary.json in selected seed dir: {seed_dir}")
+        summary = _read_json(summary_path)
     dataset_dir = (
         Path(args.dataset_dir).expanduser().resolve()
         if args.dataset_dir
@@ -310,7 +334,8 @@ def main() -> None:
         raise FileNotFoundError(f"seed dir missing model/config: {seed_dir}")
 
     bundle_root = Path(args.bundle_root).expanduser().resolve()
-    bundle_name = args.bundle_name or f"phase3_{candidate_root.name}_{seed_dir.name}_{_utc_now_compact()}"
+    bundle_prefix = "run" if args.run_dir else "phase3"
+    bundle_name = args.bundle_name or f"{bundle_prefix}_{candidate_root.name}_{seed_dir.name}_{_utc_now_compact()}"
     bundle_dir = bundle_root / "bundles" / bundle_name
     _prepare_bundle_dir(bundle_dir, overwrite=bool(args.overwrite))
 

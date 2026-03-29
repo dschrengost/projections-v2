@@ -28,6 +28,7 @@ class EfficiencyHead(nn.Module):
         d_model: int,
         hidden_dim: int = 128,
         dropout: float = 0.1,
+        num_team_context_features: int = 0,
         ft_prior_mean: float = 0.77,
         ft_prior_strength: float = 6.0,
         fg2_prior_mean: float = 0.54,
@@ -40,9 +41,13 @@ class EfficiencyHead(nn.Module):
             raise ValueError("d_model must be > 0")
         if hidden_dim <= 0:
             raise ValueError("hidden_dim must be > 0")
+        if num_team_context_features < 0:
+            raise ValueError("num_team_context_features must be >= 0")
+
+        self.num_team_context_features = int(num_team_context_features)
 
         self.net = nn.Sequential(
-            nn.Linear(3 * int(d_model), int(hidden_dim)),
+            nn.Linear(3 * int(d_model) + self.num_team_context_features, int(hidden_dim)),
             nn.GELU(),
             nn.Dropout(float(dropout)),
             nn.Linear(int(hidden_dim), int(hidden_dim)),
@@ -66,6 +71,7 @@ class EfficiencyHead(nn.Module):
         game_state: torch.Tensor,
         player_team_index: torch.Tensor,
         valid_mask: torch.Tensor,
+        team_context: torch.Tensor | None = None,
     ) -> EfficiencyHeadOutputs:
         if player_states.ndim != 3:
             raise ValueError("player_states must have shape (B,P,D)")
@@ -83,7 +89,21 @@ class EfficiencyHead(nn.Module):
         team_ctx = torch.gather(team_states, dim=1, index=gather_idx)
         game_ctx = game_state.unsqueeze(1).expand(bsz, n_players, -1)
 
-        x = torch.cat([player_states, team_ctx, game_ctx], dim=-1)
+        parts = [player_states, team_ctx, game_ctx]
+        if self.num_team_context_features > 0:
+            if team_context is None:
+                raise ValueError("team_context required when num_team_context_features > 0")
+            if team_context.ndim != 3 or team_context.shape[:2] != (bsz, 2):
+                raise ValueError("team_context must have shape (B,2,C)")
+            if int(team_context.shape[-1]) != self.num_team_context_features:
+                raise ValueError("team_context feature dim does not match configured num_team_context_features")
+            gather_team_ctx = player_team_index.to(dtype=torch.long).unsqueeze(-1).expand(
+                -1, -1, team_context.shape[-1]
+            )
+            player_team_context = torch.gather(team_context, dim=1, index=gather_team_ctx)
+            parts.append(player_team_context.to(dtype=player_states.dtype))
+
+        x = torch.cat(parts, dim=-1)
         logits = self.net(x)
         valid_f = valid_mask.to(dtype=logits.dtype).unsqueeze(-1)
         logits = logits * valid_f
@@ -110,4 +130,3 @@ class EfficiencyHead(nn.Module):
             mean_fg2=mean_fg2,
             mean_fg3=mean_fg3,
         )
-

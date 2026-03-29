@@ -25,6 +25,7 @@ from prefect_flows.live_nba_pipeline_v3 import (
     _resample_extreme_game_worlds,
     _run_python_module,
     _report_window_status,
+    _resolve_report_window_wait_policy,
     _repair_world_frame_contract_fields,
     _sanitize_frame_to_expected_keys,
     _stream_validate_parquet,
@@ -867,6 +868,26 @@ def test_rerun_plan_honors_manual_target_override(tmp_path: Path) -> None:
     assert plan["reason"] == "manual_operator_trigger"
     assert plan["target_game_ids"] == [2]
     assert plan["manual_trigger"]["applied_game_ids"] == [2]
+
+
+def test_report_window_wait_policy_skips_manual_target_game_reruns() -> None:
+    wait_allowed, reason = _resolve_report_window_wait_policy(
+        as_of_ts_override=None,
+        replay_mode=False,
+        manual_target_game_ids=[22501053],
+    )
+    assert wait_allowed is False
+    assert reason == "manual_target_game_rerun"
+
+
+def test_report_window_wait_policy_allows_default_runs() -> None:
+    wait_allowed, reason = _resolve_report_window_wait_policy(
+        as_of_ts_override=None,
+        replay_mode=False,
+        manual_target_game_ids=None,
+    )
+    assert wait_allowed is True
+    assert reason == "eligible"
 
 
 def test_rerun_plan_skips_when_manual_targets_not_on_slate(tmp_path: Path) -> None:

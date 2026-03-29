@@ -31,7 +31,11 @@ deployments:
     placeholder_mode: false
     promote_pointers: true
     replay_mode: false
+    gtv2_apply_props_uplift: false
     gtv2_props_uplift_scope: all_players
+    gtv2_apply_propless_tail_calibration: false
+    gtv2_apply_mid_minutes_tail_calibration: false
+    gtv2_apply_world_realism_controls: true
     # Default: auto-select inference backend; `config/gtv2_inference_server.json`
     # controls whether Triton is considered enabled.
     gtv2_inference_backend: auto
@@ -277,7 +281,10 @@ deployments:
   concurrency_limit: 1
   description: Scrape NBA Stats GameRotation daily (updates rotation_v1 inputs).
   entrypoint: prefect_flows/gamerotation_scrape.py:gamerotation_scrape_flow
-  parameters: {}
+  parameters:
+    lookback_days: 14
+    max_failure_rate: 0.5
+    min_success_coverage: 1.0
   work_pool:
     name: projections-local
     work_queue_name: null
@@ -298,6 +305,21 @@ deployments:
     run_pbp_ingest: true
     pbp_fetch_daily_zip: true
     pbp_allow_qa_failures: true
+    run_tracking_ingest: true
+    tracking_target_date: null
+    tracking_lookback_days: 3
+    tracking_max_retries: 3
+    tracking_sleep_seconds: 0.5
+    tracking_timeout_seconds: 20.0
+    tracking_build_roles: true
+    tracking_roles_overwrite_existing: true
+    tracking_guard_enabled: true
+    tracking_guard_strict: true
+    tracking_guard_max_lag_days: 3
+    tracking_guard_recent_window_days: 14
+    tracking_guard_max_recent_missing_dates: 2
+    tracking_guard_required_measures: null
+    tracking_guard_max_recent_measure_gap_dates: 2
     overwrite_rotation_v1: false
     retry_quarantined: true
     clean_priors: false

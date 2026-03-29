@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -30,6 +31,15 @@ def test_resolve_gtv2_inference_backend_auto() -> None:
         )
         == "local"
     )
+
+
+def test_resolve_bundle_dir_uses_current_config_bundle_dir(tmp_path: Path) -> None:
+    bundle_dir = live_nba_pipeline_v3._resolve_bundle_dir(  # noqa: SLF001
+        data_root=tmp_path,
+        gtv2_bundle_dir=None,
+        current_config_payload={"bundle_dir": str(tmp_path / "bundle_from_config")},
+    )
+    assert bundle_dir == (tmp_path / "bundle_from_config").resolve()
 
 
 def test_score_gtv2_live_task_triton_backend(
@@ -146,8 +156,8 @@ def test_score_gtv2_live_task_local_backend_full_slate_runs_per_game_sequentiall
 
     monkeypatch.setattr(
         live_nba_pipeline_v3,
-        "shared_score_gtv2_features_df",
-        _fake_local_score,
+        "_gtv2_inference_runtime",
+        lambda: SimpleNamespace(score_gtv2_features_df=_fake_local_score),
     )
 
     out_path = live_nba_pipeline_v3.score_gtv2_live_task.fn(
@@ -252,14 +262,17 @@ def test_generate_worlds_gtv2_live_task_triton_backend(
     monkeypatch.setattr(live_nba_pipeline_v3, "infer_json_action", _fake_infer)
     monkeypatch.setattr(
         live_nba_pipeline_v3,
-        "summarize_worlds_to_projections",
-        lambda worlds_df, sim_profile: pd.DataFrame(
-            {
-                "game_date": [game_date],
-                "game_id": [22500999],
-                "team_id": [1610612747],
-                "player_id": [1234],
-            }
+        "_gtv2_worlds_runtime",
+        lambda: SimpleNamespace(
+            MakeModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            summarize_worlds_to_projections=lambda worlds_df, sim_profile: pd.DataFrame(
+                {
+                    "game_date": [game_date],
+                    "game_id": [22500999],
+                    "team_id": [1610612747],
+                    "player_id": [1234],
+                }
+            ),
         ),
     )
 
@@ -292,6 +305,57 @@ def test_generate_worlds_gtv2_live_task_triton_backend(
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["inference_backend"] == "triton"
     assert summary["device"] == "cuda:0"
+
+
+def test_generate_worlds_gtv2_live_task_triton_backend_rejects_promotion_hybrid(
+    tmp_path: Path,
+) -> None:
+    game_date = "2026-03-10"
+    run_id = "testrun"
+    features_path = tmp_path / "features.parquet"
+    _write(
+        features_path,
+        pd.DataFrame(
+            {
+                "game_date": [game_date],
+                "game_id": [22500999],
+                "team_id": [1610612747],
+                "player_id": [1234],
+            }
+        ),
+    )
+    scores_path = tmp_path / "scores.parquet"
+    _write(
+        scores_path,
+        pd.DataFrame(
+            {
+                "game_date": [game_date],
+                "game_id": [22500999],
+                "team_id": [1610612747],
+                "player_id": [1234],
+                "minutes_deterministic": [31.2],
+            }
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="promotion hybrid currently supports only local GTv2 worlds inference",
+    ):
+        live_nba_pipeline_v3.generate_worlds_gtv2_live_task.fn(
+            game_date=game_date,
+            run_id=run_id,
+            run_as_of_ts="2026-03-10T18:00:00Z",
+            features_path=features_path,
+            scores_path=scores_path,
+            bundle_dir=tmp_path / "bundle",
+            data_root=tmp_path,
+            sim_worlds=32,
+            placeholder_mode=False,
+            inference_backend="triton",
+            promotion_hybrid_enabled=True,
+            promotion_expert_run_dir=str(tmp_path / "expert"),
+        )
 
 
 def test_generate_worlds_gtv2_live_task_triton_backend_retries_corrupt_game_parquet(
@@ -384,14 +448,17 @@ def test_generate_worlds_gtv2_live_task_triton_backend_retries_corrupt_game_parq
     monkeypatch.setattr(live_nba_pipeline_v3, "infer_json_action", _fake_infer)
     monkeypatch.setattr(
         live_nba_pipeline_v3,
-        "summarize_worlds_to_projections",
-        lambda worlds_df, sim_profile: pd.DataFrame(
-            {
-                "game_date": [game_date],
-                "game_id": [22500999],
-                "team_id": [1610612747],
-                "player_id": [1234],
-            }
+        "_gtv2_worlds_runtime",
+        lambda: SimpleNamespace(
+            MakeModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            summarize_worlds_to_projections=lambda worlds_df, sim_profile: pd.DataFrame(
+                {
+                    "game_date": [game_date],
+                    "game_id": [22500999],
+                    "team_id": [1610612747],
+                    "player_id": [1234],
+                }
+            ),
         ),
     )
 
@@ -586,11 +653,14 @@ def test_generate_worlds_gtv2_live_task_triton_backend_full_slate_runs_per_game_
     monkeypatch.setattr(live_nba_pipeline_v3, "infer_json_action", _fake_infer)
     monkeypatch.setattr(
         live_nba_pipeline_v3,
-        "summarize_worlds_to_projections",
-        lambda worlds_df, sim_profile: (
-            worlds_df[["game_date", "game_id", "team_id", "player_id"]]
-            .drop_duplicates()
-            .reset_index(drop=True)
+        "_gtv2_worlds_runtime",
+        lambda: SimpleNamespace(
+            MakeModelConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            summarize_worlds_to_projections=lambda worlds_df, sim_profile: (
+                worlds_df[["game_date", "game_id", "team_id", "player_id"]]
+                .drop_duplicates()
+                .reset_index(drop=True)
+            ),
         ),
     )
 
@@ -639,3 +709,36 @@ def test_generate_worlds_gtv2_live_task_triton_backend_full_slate_runs_per_game_
 
     worlds = pd.read_parquet(Path(outputs["worlds_path"]))
     assert sorted(worlds["game_id"].astype(int).unique().tolist()) == [22500991, 22500992]
+
+
+def test_normalize_gtv2_projection_surface_semantics_promotes_unconditional_defaults() -> None:
+    df = pd.DataFrame(
+        {
+            "game_id": [1],
+            "team_id": [2],
+            "player_id": [3],
+            "dk_fpts_mean": [30.0],
+            "dk_fpts_mean_uncond": [18.0],
+            "dk_fpts_p50": [29.0],
+            "dk_fpts_p50_uncond": [16.0],
+            "minutes_sim_mean": [34.0],
+            "minutes_sim_mean_uncond": [26.0],
+            "pts_mean": [20.0],
+            "pts_mean_uncond": [12.0],
+            "sim_pts_mean": [20.0],
+            "sim_pts_mean_uncond": [12.0],
+        }
+    )
+
+    out = live_nba_pipeline_v3._normalize_gtv2_projection_surface_semantics(df)  # noqa: SLF001
+
+    assert out.loc[0, "dk_fpts_mean"] == pytest.approx(18.0)
+    assert out.loc[0, "dk_fpts_mean_cond"] == pytest.approx(30.0)
+    assert out.loc[0, "dk_fpts_p50"] == pytest.approx(16.0)
+    assert out.loc[0, "dk_fpts_p50_cond"] == pytest.approx(29.0)
+    assert out.loc[0, "minutes_sim_mean"] == pytest.approx(26.0)
+    assert out.loc[0, "minutes_sim_mean_cond"] == pytest.approx(34.0)
+    assert out.loc[0, "pts_mean"] == pytest.approx(12.0)
+    assert out.loc[0, "pts_mean_cond"] == pytest.approx(20.0)
+    assert out.loc[0, "sim_pts_mean"] == pytest.approx(12.0)
+    assert out.loc[0, "sim_pts_mean_cond"] == pytest.approx(20.0)

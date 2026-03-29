@@ -33,11 +33,13 @@ class PossessionHeadOutputs:
         sigma: Predicted std dev of possessions per game (B,).
         df: Predicted degrees of freedom for Student-t (B,).
         sampled_poss: Sampled possession count per world (B,). None during training.
+        team_poss: Side-specific possessions (B, 2). None when team split is disabled.
     """
     mu: torch.Tensor
     sigma: torch.Tensor
     df: torch.Tensor
     sampled_poss: torch.Tensor | None
+    team_poss: torch.Tensor | None
 
 
 @dataclass(frozen=True)
@@ -50,7 +52,8 @@ class TeamEventBackboneOutputs:
         tov: TOV per team (B, 2).
         oreb: OREB per team (B, 2).
         three_pa_share: 3PA share per team (B, 2). None if shot-mix head disabled.
-        poss_used: The shared possession value used for construction (B,).
+        poss_used: The possession value used for construction. Shape is (B,) for
+            shared possessions and (B, 2) for side-specific possessions.
     """
     fga: torch.Tensor
     fta: torch.Tensor
@@ -76,6 +79,8 @@ class PossessionHead(nn.Module):
         dropout: float = 0.1,
         mu_mode: str = "absolute",
         mu_baseline: float = 100.0,
+        enable_team_possession_split: bool = False,
+        team_possession_max_delta: float = 8.0,
         min_df: float = 2.5,
         max_df: float = 30.0,
         min_sigma: float = 0.5,
@@ -87,6 +92,8 @@ class PossessionHead(nn.Module):
             raise ValueError("mu_mode must be one of: absolute, baseline_delta")
         self.mu_mode = str(mu_mode)
         self.mu_baseline = float(mu_baseline)
+        self.enable_team_possession_split = bool(enable_team_possession_split)
+        self.team_possession_max_delta = float(team_possession_max_delta)
         self.min_df = float(min_df)
         self.max_df = float(max_df)
         self.min_sigma = float(min_sigma)
@@ -94,19 +101,21 @@ class PossessionHead(nn.Module):
         self.num_game_features = int(num_game_features)
 
         input_dim = d_model + int(num_game_features)
+        out_dim = 6 if self.enable_team_possession_split else 3
         self.net = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 3),  # mu, raw_sigma, raw_df
+            nn.Linear(hidden_dim, out_dim),  # total poss params + optional team delta params
         )
         # Initialize output bias for sensible defaults.
         # absolute mode: mu ~ 97 (legacy behavior)
         # baseline_delta mode: delta_mu ~ 0, so mu starts near configured baseline
         with torch.no_grad():
-            mu_bias = 97.0 if self.mu_mode == "absolute" else 0.0
-            self.net[-1].bias.copy_(torch.tensor([mu_bias, 0.0, 0.0]))
+            bias = torch.zeros(out_dim)
+            bias[0] = 97.0 if self.mu_mode == "absolute" else 0.0
+            self.net[-1].bias.copy_(bias)
 
     def forward(
         self,
@@ -148,8 +157,25 @@ class PossessionHead(nn.Module):
         sampled: torch.Tensor | None = None
         if sample:
             sampled = self._sample_student_t(mu, sigma, df)
+        team_poss: torch.Tensor | None = None
+        if self.enable_team_possession_split:
+            raw_delta = raw[:, 3:6]
+            delta_mu = torch.tanh(raw_delta[:, 0]) * self.team_possession_max_delta
+            if sample:
+                delta_sigma = torch.clamp(
+                    nn.functional.softplus(raw_delta[:, 1]) + 0.05,
+                    max=max(0.5, self.team_possession_max_delta),
+                )
+                delta_df = self.min_df + (self.max_df - self.min_df) * torch.sigmoid(raw_delta[:, 2])
+                delta_value = self._sample_student_t(delta_mu, delta_sigma, delta_df)
+            else:
+                delta_value = delta_mu
+            base_poss = sampled if sampled is not None else mu
+            home_poss = torch.clamp(base_poss + 0.5 * delta_value, min=1.0)
+            away_poss = torch.clamp(base_poss - 0.5 * delta_value, min=1.0)
+            team_poss = torch.stack([home_poss, away_poss], dim=1)
 
-        return PossessionHeadOutputs(mu=mu, sigma=sigma, df=df, sampled_poss=sampled)
+        return PossessionHeadOutputs(mu=mu, sigma=sigma, df=df, sampled_poss=sampled, team_poss=team_poss)
 
     @staticmethod
     def _sample_student_t(
@@ -208,16 +234,20 @@ class TeamEventBackbone(nn.Module):
         min_df: float = 2.5,
         max_df: float = 30.0,
         num_game_features: int = 0,
+        num_team_context_features: int = 0,
+        num_advantage_features: int = 0,
     ) -> None:
         super().__init__()
         self.min_df = float(min_df)
         self.max_df = float(max_df)
         self.num_game_features = int(num_game_features)
+        self.num_team_context_features = int(num_team_context_features)
+        self.num_advantage_features = int(num_advantage_features)
 
         # Per-team rate predictor: from [team_state, game_state, poss_embedding, game_features]
         # Outputs for each team: 3 rates * 3 params (mu, raw_sigma, raw_df) = 9
         # Rates: fta_rate, tov_rate, oreb_rate (all as fractions of possessions)
-        input_dim = d_model * 2 + 1 + int(num_game_features)  # team_state + game_state + poss_scalar + game_features
+        input_dim = d_model * 2 + 1 + int(num_game_features) + int(num_team_context_features)
         self.rate_net = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
@@ -239,6 +269,11 @@ class TeamEventBackbone(nn.Module):
             bias[3] = -1.8   # tov_rate mu (logit space)
             bias[6] = -2.2   # oreb_rate mu (logit space)
             self.rate_net[-1].bias.copy_(bias)
+        self.advantage_rate_proj: nn.Linear | None = None
+        if self.num_advantage_features > 0:
+            self.advantage_rate_proj = nn.Linear(self.num_advantage_features, 3, bias=False)
+            with torch.no_grad():
+                self.advantage_rate_proj.weight.zero_()
 
     def forward(
         self,
@@ -248,6 +283,8 @@ class TeamEventBackbone(nn.Module):
         *,
         sample: bool = False,
         game_features: torch.Tensor | None = None,
+        team_context: torch.Tensor | None = None,
+        advantage_context: torch.Tensor | None = None,
     ) -> TeamEventBackboneOutputs:
         """Generate team event vectors.
 
@@ -263,15 +300,21 @@ class TeamEventBackbone(nn.Module):
             raise ValueError("team_states must have shape (B, 2, D)")
         if game_state.ndim != 2:
             raise ValueError("game_state must have shape (B, D)")
-        if poss.ndim != 1:
-            raise ValueError("poss must have shape (B,)")
+        if poss.ndim not in {1, 2}:
+            raise ValueError("poss must have shape (B,) or (B, 2)")
 
         bsz = team_states.shape[0]
         device = team_states.device
         dtype = team_states.dtype
 
         # Expand poss for concatenation
-        poss_feat = poss.unsqueeze(-1).to(dtype=dtype)  # (B, 1)
+        if poss.ndim == 1:
+            poss_2d = poss.unsqueeze(-1).expand(-1, 2)
+        else:
+            if poss.shape[1] != 2:
+                raise ValueError("poss with ndim=2 must have shape (B, 2)")
+            poss_2d = poss
+        poss_feat = poss_2d.mean(dim=1, keepdim=True).to(dtype=dtype)  # (B, 1)
         game_exp = game_state.unsqueeze(1).expand(-1, 2, -1)  # (B, 2, D)
         poss_exp = poss_feat.unsqueeze(1).expand(-1, 2, -1)  # (B, 2, 1)
 
@@ -282,6 +325,12 @@ class TeamEventBackbone(nn.Module):
                 raise ValueError("game_features required when num_game_features > 0")
             gf_exp = game_features.unsqueeze(1).expand(-1, 2, -1)  # (B, 2, G)
             parts.append(gf_exp)
+        if self.num_team_context_features > 0:
+            if team_context is None:
+                raise ValueError("team_context required when num_team_context_features > 0")
+            if team_context.ndim != 3 or team_context.shape[:2] != (bsz, 2):
+                raise ValueError("team_context must have shape (B, 2, C)")
+            parts.append(team_context.to(dtype=team_states.dtype))
         inp = torch.cat(parts, dim=-1)  # (B, 2, 2D+1+G)
         raw = self.rate_net(inp)  # (B, 2, 9)
 
@@ -292,6 +341,18 @@ class TeamEventBackbone(nn.Module):
         rate_mus_logit = raw[:, :, [0, 3, 6]]      # (B, 2, 3)
         rate_raw_sigmas = raw[:, :, [1, 4, 7]]      # (B, 2, 3)
         rate_raw_dfs = raw[:, :, [2, 5, 8]]         # (B, 2, 3)
+        if self.num_advantage_features > 0:
+            if advantage_context is None:
+                raise ValueError("advantage_context required when num_advantage_features > 0")
+            if advantage_context.ndim != 3 or advantage_context.shape[:2] != (bsz, 2):
+                raise ValueError("advantage_context must have shape (B, 2, C)")
+            if int(advantage_context.shape[-1]) != self.num_advantage_features:
+                raise ValueError("advantage_context feature dim does not match configured num_advantage_features")
+            if self.advantage_rate_proj is None:
+                raise RuntimeError("advantage_rate_proj missing despite num_advantage_features > 0")
+            rate_mus_logit = rate_mus_logit + self.advantage_rate_proj(
+                advantage_context.to(device=device, dtype=dtype)
+            )
 
         # Convert to distribution params
         rate_sigmas = torch.clamp(nn.functional.softplus(rate_raw_sigmas) + 0.01, max=2.0)
@@ -310,7 +371,7 @@ class TeamEventBackbone(nn.Module):
         oreb_rate = rates[:, :, 2]  # (B, 2)
 
         # Convert rates to counts using shared possession count
-        poss_2d = poss.unsqueeze(-1).expand(-1, 2)  # (B, 2)
+        poss_2d = poss_2d.to(dtype=dtype)
         fta = fta_rate * poss_2d
         tov = tov_rate * poss_2d
         oreb = oreb_rate * poss_2d
@@ -329,7 +390,7 @@ class TeamEventBackbone(nn.Module):
             tov=tov,
             oreb=oreb,
             three_pa_share=None,  # Populated by ThreePAShareHead if wired
-            poss_used=poss,
+            poss_used=poss_2d if poss.ndim == 2 else poss,
         )
 
     def nll_rates(
@@ -342,6 +403,8 @@ class TeamEventBackbone(nn.Module):
         tov_true: torch.Tensor,
         oreb_true: torch.Tensor,
         game_features: torch.Tensor | None = None,
+        team_context: torch.Tensor | None = None,
+        advantage_context: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute NLL of observed rates under the predicted Student-t in logit space.
 
@@ -352,7 +415,13 @@ class TeamEventBackbone(nn.Module):
         dtype = team_states.dtype
         device = team_states.device
 
-        poss_2d = poss.unsqueeze(-1).expand(-1, 2).clamp(min=1.0)
+        if poss.ndim == 1:
+            poss_2d = poss.unsqueeze(-1).expand(-1, 2)
+        else:
+            if poss.shape[1] != 2:
+                raise ValueError("poss with ndim=2 must have shape (B, 2)")
+            poss_2d = poss
+        poss_2d = poss_2d.clamp(min=1.0)
         # Convert counts to rates
         fta_rate_true = (fta_true / poss_2d).clamp(1e-6, 1.0 - 1e-6)
         tov_rate_true = (tov_true / poss_2d).clamp(1e-6, 1.0 - 1e-6)
@@ -366,7 +435,7 @@ class TeamEventBackbone(nn.Module):
         ], dim=-1)  # (B, 2, 3)
 
         # Get predicted distribution params
-        poss_feat = poss.unsqueeze(-1).to(dtype=dtype)
+        poss_feat = poss_2d.mean(dim=1, keepdim=True).to(dtype=dtype)
         game_exp = game_state.unsqueeze(1).expand(-1, 2, -1)
         poss_exp = poss_feat.unsqueeze(1).expand(-1, 2, -1)
         parts = [team_states, game_exp, poss_exp]
@@ -375,12 +444,30 @@ class TeamEventBackbone(nn.Module):
                 raise ValueError("game_features required when num_game_features > 0")
             gf_exp = game_features.unsqueeze(1).expand(-1, 2, -1)
             parts.append(gf_exp)
+        if self.num_team_context_features > 0:
+            if team_context is None:
+                raise ValueError("team_context required when num_team_context_features > 0")
+            if team_context.ndim != 3 or team_context.shape[:2] != (bsz, 2):
+                raise ValueError("team_context must have shape (B, 2, C)")
+            parts.append(team_context.to(dtype=team_states.dtype))
         inp = torch.cat(parts, dim=-1)
         raw = self.rate_net(inp)  # (B, 2, 9)
 
         rate_mus_logit = raw[:, :, [0, 3, 6]]
         rate_raw_sigmas = raw[:, :, [1, 4, 7]]
         rate_raw_dfs = raw[:, :, [2, 5, 8]]
+        if self.num_advantage_features > 0:
+            if advantage_context is None:
+                raise ValueError("advantage_context required when num_advantage_features > 0")
+            if advantage_context.ndim != 3 or advantage_context.shape[:2] != (bsz, 2):
+                raise ValueError("advantage_context must have shape (B, 2, C)")
+            if int(advantage_context.shape[-1]) != self.num_advantage_features:
+                raise ValueError("advantage_context feature dim does not match configured num_advantage_features")
+            if self.advantage_rate_proj is None:
+                raise RuntimeError("advantage_rate_proj missing despite num_advantage_features > 0")
+            rate_mus_logit = rate_mus_logit + self.advantage_rate_proj(
+                advantage_context.to(device=device, dtype=dtype)
+            )
         rate_sigmas = torch.clamp(nn.functional.softplus(rate_raw_sigmas) + 0.01, max=2.0)
         rate_dfs = self.min_df + (self.max_df - self.min_df) * torch.sigmoid(rate_raw_dfs)
 
@@ -406,14 +493,18 @@ class ThreePAShareHead(nn.Module):
         min_df: float = 2.5,
         max_df: float = 30.0,
         num_game_features: int = 0,
+        num_team_context_features: int = 0,
+        num_advantage_features: int = 0,
     ) -> None:
         super().__init__()
         self.min_df = float(min_df)
         self.max_df = float(max_df)
         self.num_game_features = int(num_game_features)
+        self.num_team_context_features = int(num_team_context_features)
+        self.num_advantage_features = int(num_advantage_features)
 
         # Input: team_state + game_state + FGA_team scalar + game_features
-        input_dim = d_model * 2 + 1 + int(num_game_features)
+        input_dim = d_model * 2 + 1 + int(num_game_features) + int(num_team_context_features)
         self.net = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
@@ -424,6 +515,11 @@ class ThreePAShareHead(nn.Module):
         # Default 3PA share ~ 0.38 -> logit(0.38) ~ -0.49
         with torch.no_grad():
             self.net[-1].bias.copy_(torch.tensor([-0.49, 0.0, 0.0]))
+        self.advantage_mu_proj: nn.Linear | None = None
+        if self.num_advantage_features > 0:
+            self.advantage_mu_proj = nn.Linear(self.num_advantage_features, 1, bias=False)
+            with torch.no_grad():
+                self.advantage_mu_proj.weight.zero_()
 
     def forward(
         self,
@@ -433,6 +529,8 @@ class ThreePAShareHead(nn.Module):
         *,
         sample: bool = False,
         game_features: torch.Tensor | None = None,
+        team_context: torch.Tensor | None = None,
+        advantage_context: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Predict 3PA share per team.
 
@@ -454,12 +552,30 @@ class ThreePAShareHead(nn.Module):
                 raise ValueError("game_features required when num_game_features > 0")
             gf_exp = game_features.unsqueeze(1).expand(-1, 2, -1)
             parts.append(gf_exp)
+        if self.num_team_context_features > 0:
+            if team_context is None:
+                raise ValueError("team_context required when num_team_context_features > 0")
+            if team_context.ndim != 3 or team_context.shape[:2] != (team_states.shape[0], 2):
+                raise ValueError("team_context must have shape (B, 2, C)")
+            parts.append(team_context.to(dtype=team_states.dtype))
         inp = torch.cat(parts, dim=-1)
         raw = self.net(inp)  # (B, 2, 3)
 
         mu_logit = raw[:, :, 0]
         sigma = torch.clamp(nn.functional.softplus(raw[:, :, 1]) + 0.01, max=2.0)
         df = self.min_df + (self.max_df - self.min_df) * torch.sigmoid(raw[:, :, 2])
+        if self.num_advantage_features > 0:
+            if advantage_context is None:
+                raise ValueError("advantage_context required when num_advantage_features > 0")
+            if advantage_context.ndim != 3 or advantage_context.shape[:2] != (team_states.shape[0], 2):
+                raise ValueError("advantage_context must have shape (B, 2, C)")
+            if int(advantage_context.shape[-1]) != self.num_advantage_features:
+                raise ValueError("advantage_context feature dim does not match configured num_advantage_features")
+            if self.advantage_mu_proj is None:
+                raise RuntimeError("advantage_mu_proj missing despite num_advantage_features > 0")
+            mu_logit = mu_logit + self.advantage_mu_proj(
+                advantage_context.to(device=team_states.device, dtype=team_states.dtype)
+            ).squeeze(-1)
 
         if sample:
             logit_sample = _sample_student_t_2d(mu_logit, sigma, df)
@@ -475,6 +591,8 @@ class ThreePAShareHead(nn.Module):
         *,
         three_pa_share_true: torch.Tensor,
         game_features: torch.Tensor | None = None,
+        team_context: torch.Tensor | None = None,
+        advantage_context: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """NLL of observed 3PA share under logit-normal Student-t.
 
@@ -493,12 +611,30 @@ class ThreePAShareHead(nn.Module):
                 raise ValueError("game_features required when num_game_features > 0")
             gf_exp = game_features.unsqueeze(1).expand(-1, 2, -1)
             parts.append(gf_exp)
+        if self.num_team_context_features > 0:
+            if team_context is None:
+                raise ValueError("team_context required when num_team_context_features > 0")
+            if team_context.ndim != 3 or team_context.shape[:2] != (team_states.shape[0], 2):
+                raise ValueError("team_context must have shape (B, 2, C)")
+            parts.append(team_context.to(dtype=team_states.dtype))
         inp = torch.cat(parts, dim=-1)
         raw = self.net(inp)
 
         mu_logit = raw[:, :, 0]
         sigma = torch.clamp(nn.functional.softplus(raw[:, :, 1]) + 0.01, max=2.0)
         df = self.min_df + (self.max_df - self.min_df) * torch.sigmoid(raw[:, :, 2])
+        if self.num_advantage_features > 0:
+            if advantage_context is None:
+                raise ValueError("advantage_context required when num_advantage_features > 0")
+            if advantage_context.ndim != 3 or advantage_context.shape[:2] != (team_states.shape[0], 2):
+                raise ValueError("advantage_context must have shape (B, 2, C)")
+            if int(advantage_context.shape[-1]) != self.num_advantage_features:
+                raise ValueError("advantage_context feature dim does not match configured num_advantage_features")
+            if self.advantage_mu_proj is None:
+                raise RuntimeError("advantage_mu_proj missing despite num_advantage_features > 0")
+            mu_logit = mu_logit + self.advantage_mu_proj(
+                advantage_context.to(device=team_states.device, dtype=team_states.dtype)
+            ).squeeze(-1)
 
         true_clamped = three_pa_share_true.clamp(1e-6, 1.0 - 1e-6)
         true_logit = torch.logit(true_clamped)

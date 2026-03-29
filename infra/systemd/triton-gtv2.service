@@ -20,4 +20,3 @@ ExecStop=/home/daniel/prod/projections-v2/scripts/triton/run_triton_gtv2.sh stop
 
 [Install]
 WantedBy=default.target
-

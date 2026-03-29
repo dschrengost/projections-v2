@@ -21,6 +21,7 @@ import pandas as pd
 
 
 FPTS_TRAINING_BASE_FILENAME = "fpts_training_base.parquet"
+RATES_TRAINING_BASE_FILENAME = "rates_training_base.parquet"
 
 DEFAULT_BASELINE_PRA_PER_MIN: float = 1.0
 DEFAULT_ALPHA_MINUTES: float = 50.0
@@ -57,7 +58,13 @@ def _season_end_day(season: int) -> pd.Timestamp:
     return pd.Timestamp(f"{int(season) + 1}-07-31")
 
 
-def _discover_partition_paths(season_root: Path, *, start: pd.Timestamp, end: pd.Timestamp) -> list[Path]:
+def _discover_partition_paths(
+    season_root: Path,
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    filename: str = FPTS_TRAINING_BASE_FILENAME,
+) -> list[Path]:
     paths: list[Path] = []
     for day_dir in sorted(season_root.glob("game_date=*")):
         try:
@@ -69,7 +76,7 @@ def _discover_partition_paths(season_root: Path, *, start: pd.Timestamp, end: pd
             continue
         if day < start or day > end:
             continue
-        candidate = day_dir / FPTS_TRAINING_BASE_FILENAME
+        candidate = day_dir / str(filename)
         if candidate.exists():
             paths.append(candidate)
     return paths
@@ -94,7 +101,12 @@ def load_fpts_training_base_history(
     if not season_root.exists():
         return pd.DataFrame()
 
-    paths = _discover_partition_paths(season_root, start=start_day, end=end_day)
+    paths = _discover_partition_paths(
+        season_root,
+        start=start_day,
+        end=end_day,
+        filename=FPTS_TRAINING_BASE_FILENAME,
+    )
     if not paths:
         return pd.DataFrame()
 
@@ -153,6 +165,171 @@ def load_fpts_training_base_history_multi_season(
         if slice_start > slice_end:
             continue
         frame = load_fpts_training_base_history(
+            data_root=data_root,
+            season=season,
+            start=slice_start,
+            end=slice_end,
+            player_ids=player_ids,
+        )
+        if not frame.empty:
+            frames.append(frame)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True).reset_index(drop=True)
+
+
+def load_rates_training_base_pra_history(
+    *,
+    data_root: Path,
+    season: int,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    player_ids: Iterable[int] | None = None,
+) -> pd.DataFrame:
+    """Load minimal PRA history from gold/rates_training_base partitions.
+
+    The rates training base does not store raw PTS/REB/AST counts directly, so this
+    reconstructs those totals from per-minute rates and minutes_actual.
+    """
+
+    start_day = pd.Timestamp(start).normalize()
+    end_day = pd.Timestamp(end).normalize()
+    if start_day > end_day:
+        return pd.DataFrame()
+
+    season_root = data_root / "gold" / "rates_training_base" / f"season={int(season)}"
+    if not season_root.exists():
+        return pd.DataFrame()
+
+    paths = _discover_partition_paths(
+        season_root,
+        start=start_day,
+        end=end_day,
+        filename=RATES_TRAINING_BASE_FILENAME,
+    )
+    if not paths:
+        return pd.DataFrame()
+
+    cols = [
+        "game_id",
+        "team_id",
+        "player_id",
+        "game_date",
+        "minutes_actual",
+        "ast_per_min",
+        "oreb_per_min",
+        "dreb_per_min",
+        "fga2_per_min",
+        "fga3_per_min",
+        "fta_per_min",
+        "fg2_pct_label",
+        "fg3_pct_label",
+        "ft_pct_label",
+    ]
+    ids_set = set(int(x) for x in player_ids) if player_ids is not None else None
+
+    frames: list[pd.DataFrame] = []
+    for path in paths:
+        try:
+            frame = pd.read_parquet(path, columns=cols)
+        except Exception:
+            continue
+        if ids_set is not None and "player_id" in frame.columns:
+            pid = pd.to_numeric(frame["player_id"], errors="coerce")
+            frame = frame.loc[pid.isin(ids_set)].copy()
+        if not frame.empty:
+            frames.append(frame)
+
+    if not frames:
+        return pd.DataFrame()
+
+    work = pd.concat(frames, ignore_index=True)
+    work["game_date"] = pd.to_datetime(work["game_date"], errors="coerce").dt.normalize()
+    for col in ("game_id", "team_id", "player_id"):
+        if col in work.columns:
+            work[col] = pd.to_numeric(work[col], errors="coerce").astype("Int64")
+    work = work.dropna(subset=["game_id", "player_id", "game_date"], how="any").copy()
+    if work.empty:
+        return pd.DataFrame()
+
+    minutes = _safe_float_series(
+        work.get("minutes_actual", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0)
+    ast_per_min = _safe_float_series(
+        work.get("ast_per_min", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0)
+    oreb_per_min = _safe_float_series(
+        work.get("oreb_per_min", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0)
+    dreb_per_min = _safe_float_series(
+        work.get("dreb_per_min", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0)
+    fga2_per_min = _safe_float_series(
+        work.get("fga2_per_min", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0)
+    fga3_per_min = _safe_float_series(
+        work.get("fga3_per_min", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0)
+    fta_per_min = _safe_float_series(
+        work.get("fta_per_min", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0)
+    fg2_pct = _safe_float_series(
+        work.get("fg2_pct_label", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0, upper=1.0)
+    fg3_pct = _safe_float_series(
+        work.get("fg3_pct_label", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0, upper=1.0)
+    ft_pct = _safe_float_series(
+        work.get("ft_pct_label", pd.Series(0.0, index=work.index))
+    ).clip(lower=0.0, upper=1.0)
+
+    pts_per_min = (
+        2.0 * fga2_per_min * fg2_pct
+        + 3.0 * fga3_per_min * fg3_pct
+        + fta_per_min * ft_pct
+    )
+    reb_per_min = oreb_per_min + dreb_per_min
+
+    out = pd.DataFrame(
+        {
+            "game_id": work["game_id"],
+            "team_id": work.get("team_id"),
+            "player_id": work["player_id"],
+            "game_date": work["game_date"],
+            "minutes_actual": minutes.astype(float),
+            "pts": (minutes * pts_per_min).astype(float),
+            "reb": (minutes * reb_per_min).astype(float),
+            "ast": (minutes * ast_per_min).astype(float),
+        }
+    )
+    return out.reset_index(drop=True)
+
+
+def load_rates_training_base_pra_history_multi_season(
+    *,
+    data_root: Path,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    player_ids: Iterable[int] | None = None,
+) -> pd.DataFrame:
+    """Load rates-derived PRA history spanning multiple seasons by game_date range."""
+
+    start_day = pd.Timestamp(start).normalize()
+    end_day = pd.Timestamp(end).normalize()
+    if start_day > end_day:
+        return pd.DataFrame()
+
+    start_season = _resolve_season_from_date(start_day)
+    end_season = _resolve_season_from_date(end_day)
+    frames: list[pd.DataFrame] = []
+    for season in range(int(start_season), int(end_season) + 1):
+        season_start = _season_start_day(season)
+        season_end = _season_end_day(season)
+        slice_start = max(start_day, season_start)
+        slice_end = min(end_day, season_end)
+        if slice_start > slice_end:
+            continue
+        frame = load_rates_training_base_pra_history(
             data_root=data_root,
             season=season,
             start=slice_start,
@@ -345,6 +522,7 @@ def attach_prop_implied_minutes(
 
 __all__ = [
     "FPTS_TRAINING_BASE_FILENAME",
+    "RATES_TRAINING_BASE_FILENAME",
     "DEFAULT_LOOKBACK_DAYS",
     "PraPriorConfig",
     "attach_prop_implied_minutes",
@@ -352,4 +530,6 @@ __all__ = [
     "compute_player_pra_priors_asof",
     "load_fpts_training_base_history",
     "load_fpts_training_base_history_multi_season",
+    "load_rates_training_base_pra_history",
+    "load_rates_training_base_pra_history_multi_season",
 ]

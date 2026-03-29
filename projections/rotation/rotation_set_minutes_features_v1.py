@@ -18,8 +18,11 @@ ODDS_COLS: tuple[str, str] = ("spread_home", "total")
 OUT_LIKE_STATUSES: frozenset[str] = frozenset(
     {"OUT", "O", "DOUBTFUL", "D", "INACTIVE"}
 )
+SAME_POS_CONTEXT_BUCKETS: tuple[str, ...] = ("thin", "normal", "deep")
+CONTEXT_PRIOR_WINDOWS: tuple[int, ...] = (5, 10, 20)
+CONTEXT_PRIOR_MIN_MATCH_GAMES = 2
 
-# The 15 derived features required by newer rotation_set_minutes models.
+# Shared derived features used by rotation-set/gameflow minutes datasets.
 ROTATION_SET_DERIVED_FEATURES: tuple[str, ...] = (
     "vac_missing",
     "team_n_players",
@@ -38,6 +41,20 @@ ROTATION_SET_DERIVED_FEATURES: tuple[str, ...] = (
     "role_change_minutes_5v20",
     "role_change_starter_5v10",
     "role_change_minutes_5v10",
+    # Context-conditioned priors: select the matched same-position availability
+    # bucket when there is enough historical support, else back off to global priors.
+    "ctx_minutes_from_stints_prior_5",
+    "ctx_minutes_from_stints_prior_10",
+    "ctx_minutes_from_stints_prior_20",
+    "ctx_started_proxy_rate_prior_5",
+    "ctx_started_proxy_rate_prior_10",
+    "ctx_started_proxy_rate_prior_20",
+    "ctx_prior_n_games_5",
+    "ctx_prior_n_games_10",
+    "ctx_prior_n_games_20",
+    "ctx_prior_backoff_used_5",
+    "ctx_prior_backoff_used_10",
+    "ctx_prior_backoff_used_20",
 )
 
 
@@ -122,6 +139,8 @@ def join_rotation_priors(
     out["team_id"] = pd.to_numeric(out["team_id"], errors="coerce").astype("Int64")
     out["player_id"] = pd.to_numeric(out["player_id"], errors="coerce").astype("Int64")
     out["person_id"] = out["player_id"]
+    if "opponent_team_id" in out.columns:
+        out["opponent_team_id"] = pd.to_numeric(out["opponent_team_id"], errors="coerce").astype("Int64")
 
     if not team_priors.empty:
         tp = team_priors.copy()
@@ -129,9 +148,20 @@ def join_rotation_priors(
             tp["game_id_norm"] = zfill_game_id_series(tp["game_id"])
         tp["team_id"] = pd.to_numeric(tp["team_id"], errors="coerce").astype("Int64")
         tp = tp.drop_duplicates(subset=["game_id_norm", "team_id"], keep="last")
-        tp_cols = ["game_id_norm", "team_id"] + [c for c in tp.columns if "prior_" in str(c).lower()]
+        tp_prior_cols = [c for c in tp.columns if "prior_" in str(c).lower()]
+        tp_cols = ["game_id_norm", "team_id", *tp_prior_cols]
         tp_cols = [c for i, c in enumerate(tp_cols) if c in tp.columns and c not in tp_cols[:i]]
         out = out.merge(tp.loc[:, tp_cols], on=["game_id_norm", "team_id"], how="left", suffixes=("", "_prior_team"))
+
+        if "opponent_team_id" in out.columns:
+            opp_tp = tp.loc[:, tp_cols].rename(columns={"team_id": "opponent_team_id"}).copy()
+            rename_map = {c: f"opp_{c}" for c in tp_prior_cols}
+            opp_tp = opp_tp.rename(columns=rename_map)
+            out = out.merge(
+                opp_tp,
+                on=["game_id_norm", "opponent_team_id"],
+                how="left",
+            )
 
     if not player_priors.empty:
         pp = player_priors.copy()
@@ -219,6 +249,51 @@ def _normalize_pos_bucket(df: pd.DataFrame) -> pd.Series:
     return raw_pos.map(mapping).fillna("W").astype("string")
 
 
+def bucket_same_pos_depth(depth: pd.Series) -> pd.Series:
+    """Bucket same-position depth into coarse availability regimes."""
+
+    values = pd.to_numeric(depth, errors="coerce").fillna(0).astype("float64")
+    out = pd.Series("deep", index=values.index, dtype="string")
+    out = out.mask(values <= 3.0, "normal")
+    out = out.mask(values <= 1.0, "thin")
+    return out
+
+
+def compute_same_pos_depth(df: pd.DataFrame) -> pd.Series:
+    """Compute same-position teammate depth, excluding self when possible."""
+
+    if "depth_same_pos_not_out" in df.columns:
+        return pd.to_numeric(df["depth_same_pos_not_out"], errors="coerce").fillna(0.0).astype("float64")
+    if "depth_same_pos_active" in df.columns:
+        return pd.to_numeric(df["depth_same_pos_active"], errors="coerce").fillna(0.0).astype("float64")
+
+    pos_bucket = _normalize_pos_bucket(df)
+    available_g = (
+        pd.to_numeric(df["available_G_not_out"], errors="coerce").fillna(0.0)
+        if "available_G_not_out" in df.columns
+        else pd.to_numeric(df.get("available_G", 0.0), errors="coerce").fillna(0.0)
+    )
+    available_w = (
+        pd.to_numeric(df["available_W_not_out"], errors="coerce").fillna(0.0)
+        if "available_W_not_out" in df.columns
+        else pd.to_numeric(df.get("available_W", 0.0), errors="coerce").fillna(0.0)
+    )
+    available_b = (
+        pd.to_numeric(df["available_B_not_out"], errors="coerce").fillna(0.0)
+        if "available_B_not_out" in df.columns
+        else pd.to_numeric(df.get("available_B", 0.0), errors="coerce").fillna(0.0)
+    )
+    is_out = _normalize_is_out(df).astype(bool)
+
+    depth_same = pd.Series(0.0, index=df.index, dtype="float64")
+    depth_same = depth_same.where(pos_bucket != "G", available_g.astype("float64"))
+    depth_same = depth_same.where(pos_bucket != "W", available_w.astype("float64"))
+    depth_same = depth_same.where(~pos_bucket.isin(["B", "BIG"]), available_b.astype("float64"))
+    depth_same = depth_same - (~is_out).astype("float64")
+    depth_same = depth_same.where(pos_bucket != "UNK", 0.0)
+    return depth_same.clip(lower=0.0)
+
+
 def _normalize_is_out(df: pd.DataFrame) -> pd.Series:
     """Normalize out status from available columns.
 
@@ -267,6 +342,58 @@ def _normalize_prior_minutes_20(df: pd.DataFrame) -> pd.Series:
     return pd.Series(0.0, index=df.index, dtype="float64")
 
 
+def _select_context_prior_with_backoff(
+    df: pd.DataFrame,
+    *,
+    base_col: str,
+    bucket_base_template: str,
+    count_template: str,
+    out_col: str,
+    count_out_col: str,
+    backoff_col: str,
+    min_match_games: int = CONTEXT_PRIOR_MIN_MATCH_GAMES,
+) -> pd.DataFrame:
+    """Select context-specific prior by current bucket, with global backoff."""
+
+    out = df.copy()
+    current_bucket = bucket_same_pos_depth(compute_same_pos_depth(out))
+    base_vals = (
+        pd.to_numeric(out[base_col], errors="coerce").fillna(0.0)
+        if base_col in out.columns
+        else pd.Series(0.0, index=out.index, dtype="float64")
+    )
+
+    selected_vals = base_vals.copy()
+    selected_counts = pd.Series(0.0, index=out.index, dtype="float64")
+    used_match = pd.Series(False, index=out.index)
+
+    for bucket in SAME_POS_CONTEXT_BUCKETS:
+        value_col = bucket_base_template.format(bucket=bucket)
+        count_col = count_template.format(bucket=bucket)
+        mask = current_bucket.eq(bucket)
+        if not mask.any():
+            continue
+        bucket_vals = (
+            pd.to_numeric(out[value_col], errors="coerce").fillna(0.0)
+            if value_col in out.columns
+            else pd.Series(0.0, index=out.index, dtype="float64")
+        )
+        bucket_counts = (
+            pd.to_numeric(out[count_col], errors="coerce").fillna(0.0)
+            if count_col in out.columns
+            else pd.Series(0.0, index=out.index, dtype="float64")
+        )
+        eligible = mask & bucket_counts.ge(float(min_match_games))
+        selected_counts.loc[mask] = bucket_counts.loc[mask]
+        selected_vals.loc[eligible] = bucket_vals.loc[eligible]
+        used_match.loc[eligible] = True
+
+    out[out_col] = selected_vals.astype("float64")
+    out[count_out_col] = selected_counts.astype("int16")
+    out[backoff_col] = (~used_match).astype("int8")
+    return out
+
+
 def add_rotation_set_derived_features(
     df: pd.DataFrame,
     *,
@@ -274,7 +401,7 @@ def add_rotation_set_derived_features(
 ) -> pd.DataFrame:
     """Add derived features required by rotation_set_minutes models.
 
-    Computes the 15 derived features that depend on team-game context:
+    Computes shared derived features that depend on team-game context:
     - vac_missing: 1 if vacancy columns are missing/NaN, else 0
     - team_n_players: count of players per (game_id, team_id)
     - team_n_not_out: count of not-out players per team-game
@@ -290,6 +417,7 @@ def add_rotation_set_derived_features(
     - role_change_minutes_5v20: minutes_from_stints_prior_5 - minutes_from_stints_prior_20
     - role_change_starter_5v10: started_proxy_rate_prior_5 - started_proxy_rate_prior_10
     - role_change_minutes_5v10: minutes_from_stints_prior_5 - minutes_from_stints_prior_10
+    - ctx_*: same-position-context priors with global backoff
 
     Args:
         df: DataFrame with game_id, team_id, player_id and position/injury columns
@@ -457,6 +585,40 @@ def add_rotation_set_derived_features(
             else pd.Series(0.0, index=out.index)
         )
         out[feat_name] = (short_vals - long_vals).astype("float64")
+
+    for window in CONTEXT_PRIOR_WINDOWS:
+        minutes_out = f"ctx_minutes_from_stints_prior_{window}"
+        counts_out = f"ctx_prior_n_games_{window}"
+        backoff_out = f"ctx_prior_backoff_used_{window}"
+        if minutes_out in needed or counts_out in needed or backoff_out in needed:
+            base_col = f"minutes_from_stints_prior_{window}"
+            selected = _select_context_prior_with_backoff(
+                out,
+                base_col=base_col,
+                bucket_base_template=f"minutes_from_stints_ctx_same_pos_{{bucket}}_prior_{window}",
+                count_template=f"ctx_same_pos_{{bucket}}_prior_n_games_{window}",
+                out_col=minutes_out,
+                count_out_col=counts_out,
+                backoff_col=backoff_out,
+            )
+            out[minutes_out] = pd.to_numeric(selected[minutes_out], errors="coerce").fillna(0.0).astype("float64")
+            out[counts_out] = pd.to_numeric(selected[counts_out], errors="coerce").fillna(0).astype("int16")
+            out[backoff_out] = pd.to_numeric(selected[backoff_out], errors="coerce").fillna(1).astype("int8")
+
+        starter_out = f"ctx_started_proxy_rate_prior_{window}"
+        starter_backoff_out = f"ctx_prior_backoff_used_{window}"
+        if starter_out in needed:
+            base_col = f"started_proxy_rate_prior_{window}"
+            selected = _select_context_prior_with_backoff(
+                out,
+                base_col=base_col,
+                bucket_base_template=f"started_proxy_rate_ctx_same_pos_{{bucket}}_prior_{window}",
+                count_template=f"ctx_same_pos_{{bucket}}_prior_n_games_{window}",
+                out_col=starter_out,
+                count_out_col=counts_out,
+                backoff_col=starter_backoff_out,
+            )
+            out[starter_out] = pd.to_numeric(selected[starter_out], errors="coerce").fillna(0.0).astype("float64")
 
     # Clean up temporary columns
     out = out.drop(columns=["_pos_bucket", "_is_out", "_prior_20", "_is_not_out"], errors="ignore")

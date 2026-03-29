@@ -688,22 +688,27 @@ def _apply_lineup_feature_contract(features_df: pd.DataFrame) -> pd.DataFrame:
     """Apply the lineup/starter feature contract from spec Section 4.7.
 
     Changes:
-    - Derives `lineup_available` per team-game (1 if lineup was scraped for this team-game).
+    - Derives `lineup_available` per team-game (1 if we have usable pre-tip lineup/starter signal).
     - Renames `is_projected_starter` -> `lineup_starter_announced`.
     - Drops `is_confirmed_starter` (redundant) and current-game PBP labels.
     """
     df = features_df.copy()
 
-    # lineup_available: True for every player on a team-game where lineup data
-    # was present at the as_of_ts cutoff. Derived from lineup_timestamp being
-    # non-null for at least one player in that (game_id, team_id) group.
+    # lineup_available: True for every player on a team-game where we have
+    # usable pre-tip lineup/starter context at the as_of_ts cutoff.
+    #
+    # This intentionally includes the fallback projected-starter path below so
+    # train/eval do not treat "projected starter known pre-tip" as equivalent
+    # to "no lineup information at all". For DFS we want the model to act on
+    # usable pre-tip starter information even before a full official lineup is
+    # scraped.
     if "lineup_timestamp" in df.columns:
         has_lineup = df.groupby(["game_id", "team_id"], sort=False)["lineup_timestamp"].transform(
             lambda x: x.notna().any()
         )
-        df["lineup_available"] = has_lineup.astype("int8")
+        lineup_available_strict = has_lineup.astype(bool)
     else:
-        df["lineup_available"] = np.int8(0)
+        lineup_available_strict = pd.Series(False, index=df.index, dtype=bool)
 
     # Derive lineup_starter_announced from lineup metadata.
     # Semantics:
@@ -727,9 +732,20 @@ def _apply_lineup_feature_contract(features_df: pd.DataFrame) -> pd.DataFrame:
         .astype(float)
         .gt(0.0)
     )
-    lineup_present = pd.to_numeric(df.get("lineup_available", 0), errors="coerce").fillna(0).astype(float).gt(0.0)
+    starter_hint = starter_from_lineup | starter_from_flag
+    if {"feature_as_of_ts", "tip_ts"}.issubset(df.columns):
+        feature_as_of = pd.to_datetime(df["feature_as_of_ts"], utc=True, errors="coerce")
+        tip_ts = pd.to_datetime(df["tip_ts"], utc=True, errors="coerce")
+        safe_pre_tip = feature_as_of.notna() & tip_ts.notna() & (feature_as_of <= tip_ts)
+    else:
+        safe_pre_tip = pd.Series(False, index=df.index, dtype=bool)
+    fallback_lineup = (starter_hint & safe_pre_tip).groupby([df["game_id"], df["team_id"]], sort=False).transform(
+        "any"
+    )
+    lineup_present_for_starter = lineup_available_strict | fallback_lineup
+    df["lineup_available"] = lineup_present_for_starter.astype("int8")
     df["lineup_starter_announced"] = (
-        (lineup_present & (starter_from_lineup | starter_from_flag)).astype("int8")
+        (lineup_present_for_starter & (starter_from_lineup | starter_from_flag)).astype("int8")
     )
     if "is_projected_starter" in df.columns:
         df = df.drop(columns=["is_projected_starter"])

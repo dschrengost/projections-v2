@@ -79,7 +79,7 @@ Rules:
 | `minutes-labels-refresh` | 3:40 AM daily | Materialize `gold/labels_minutes_v1` from boxscore raw partitions |
 | `rates-training-base-refresh` | 4:05 AM daily | Refresh rates training base partitions |
 | `gamerotation-scrape` | 4:15 AM daily | Scrape NBA Stats GameRotation feed |
-| `rotation-priors-update` | 4:45 AM daily | Rebuild rotation priors after scrape |
+| `rotation-priors-update` | 4:45 AM daily | Rebuild rotation priors + refresh PBP vendor + refresh/guard NBA tracking |
 | `nightly-eval` | 3 AM daily | Model evaluation + GTv2 nightly calibration monitor (`reports/gtv2_calibration/`) |
 | `minutes-retrain-pipeline` | Weekly (Tue 10 AM ET) | Minutes recency retrain + head-to-head eval vs prod |
 | `rates-retrain-pipeline` | Weekly trigger (Tue 10 AM ET, biweekly gate in flow) | Rates recency retrain + calibration diagnostics + head-to-head guardrails + auto-promotion |
@@ -184,6 +184,26 @@ For any preflight/postflight hard failure, capture these artifacts in the incide
   - `run_pbp_ingest: true`
   - `pbp_fetch_daily_zip: true`
   - `pbp_allow_qa_failures: true` (writes QA artifacts and permits publish on known outliers)
+
+### NBA Tracking Daily Refresh
+
+`rotation-priors-update` also owns daily `stats.nba.com` tracking refresh (bronze + gold roles).
+
+- Scrape task: `scripts/tracking/scrape_tracking_raw.py backfill`
+  - Nightly default: trailing 3-day window ending at ET yesterday (`tracking_lookback_days: 3`)
+- Role build task: `scripts/tracking/build_tracking_roles.py`
+  - Nightly default: rebuild current season window from Oct 1 to ET yesterday
+- Coverage guard task (Prefect-native):
+  - compares `bronze/boxscores_raw` vs `bronze/nba/tracking`
+  - enforces lag and recent missing-date limits
+  - checks required measure-type presence for recent dates
+
+Default deployment behavior:
+
+- `run_tracking_ingest: true`
+- `tracking_build_roles: true`
+- `tracking_guard_enabled: true`
+- `tracking_guard_strict: true`
 
 ## Systemd Services
 

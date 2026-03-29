@@ -100,6 +100,7 @@ def load_gtv2_model(
     model = build_game_transformer_v2(config)
     state = torch.load(model_path, map_location=device)
     model.load_state_dict(state)
+    setattr(model, "gtv2_config", config)
     if flow_scale_clip_override is not None:
         model.flow_head.set_scale_clip(float(flow_scale_clip_override))
     model = model.to(device=device)
@@ -154,6 +155,30 @@ def build_gtv2_inference_examples(
     return examples
 
 
+def _build_out_player_lookup(features_df: pd.DataFrame) -> pd.DataFrame:
+    lookup = features_df.loc[:, [c for c in ("game_id", "team_id", "player_id", "is_out", "status") if c in features_df.columns]].copy()
+    if lookup.empty:
+        return pd.DataFrame(columns=["game_id", "team_id", "player_id", "out_player"])
+    for col in ("game_id", "team_id", "player_id"):
+        if col not in lookup.columns:
+            return pd.DataFrame(columns=["game_id", "team_id", "player_id", "out_player"])
+        lookup[col] = pd.to_numeric(lookup[col], errors="coerce").astype("Int64")
+    status_out = pd.Series(False, index=lookup.index)
+    if "status" in lookup.columns:
+        status = lookup["status"].fillna("").astype(str).str.upper().str.strip()
+        status_out = (
+            status.isin({"OUT", "O", "INACTIVE", "D", "DOUBTFUL", "SUSPENDED"})
+            | status.str.contains("DOUBT", na=False)
+        )
+    is_out = pd.Series(False, index=lookup.index)
+    if "is_out" in lookup.columns:
+        is_out = pd.to_numeric(lookup["is_out"], errors="coerce").fillna(0.0).ge(1.0)
+    lookup["out_player"] = (status_out | is_out).astype(bool)
+    return lookup.loc[:, ["game_id", "team_id", "player_id", "out_player"]].drop_duplicates(
+        subset=["game_id", "team_id", "player_id"], keep="last"
+    )
+
+
 def score_gtv2_features_df(
     *,
     features_df: pd.DataFrame,
@@ -163,6 +188,7 @@ def score_gtv2_features_df(
     device: torch.device,
     batch_size: int = 4,
 ) -> pd.DataFrame:
+    out_lookup = _build_out_player_lookup(features_df)
     examples = build_gtv2_inference_examples(
         features_df=features_df,
         game_date=game_date,
@@ -233,6 +259,19 @@ def score_gtv2_features_df(
     if not rows:
         raise RuntimeError("GTV2 scoring produced zero rows")
     scores = pd.DataFrame(rows)
+    if not out_lookup.empty:
+        scores = scores.merge(
+            out_lookup,
+            on=["game_id", "team_id", "player_id"],
+            how="left",
+        )
+        out_mask = scores["out_player"].fillna(False).astype(bool)
+        if bool(out_mask.any()):
+            scores.loc[out_mask, "minutes_deterministic"] = 0.0
+            scores.loc[out_mask, "active_deterministic"] = 0
+            scores.loc[out_mask, "active_logit"] = -40.0
+            scores.loc[out_mask, "active_prob_proxy"] = 0.0
+        scores = scores.drop(columns=["out_player"], errors="ignore")
     scores = scores.sort_values(
         ["game_date", "game_id", "team_id", "player_id"]
     ).reset_index(drop=True)

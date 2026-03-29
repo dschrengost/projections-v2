@@ -92,14 +92,19 @@ each game, so special handling is needed for live inference.
    are excluded when loading priors. This prevents team_id mismatches when a player's
    most recent game was an All-Star game.
 
-2. **Prior freshness update**: After loading priors, `_update_player_priors_with_latest_labels()`
-   refreshes rolling columns (`started_proxy_rate_prior_5`, `minutes_from_stints_prior_5`)
-   using box score labels. This ensures "next man up" situations reflect the player's
-   most recent game results.
+2. **Prior freshness update**: After loading priors, live inference refreshes the latest
+   player/team rolling priors from stored history, and falls back to `_update_player_priors_with_latest_labels()`
+   when needed. This now covers both rotation priors (`started_proxy_rate_prior_5`,
+   `minutes_from_stints_prior_5`) and the newer shooting / opponent-allowance priors.
 
 Key prior columns affected:
 - `started_proxy_rate_prior_5` — rolling starter rate (used by gate_prob model)
 - `minutes_from_stints_prior_5` — rolling minutes average
+- player shooting priors such as `fg2_pct_prior_5`, `fg3_pct_prior_5`, `ft_pct_prior_5`,
+  `fg2a_per_min_prior_5`, `fg3a_per_min_prior_5`, `fta_per_min_prior_5`, and `three_pa_share_prior_5`
+- opponent-team defensive priors joined via `opponent_team_id`, such as
+  `opp_fg2_pct_allowed_prior_5`, `opp_fg3_pct_allowed_prior_5`, `opp_fta_rate_allowed_prior_5`,
+  `opp_efg_pct_allowed_prior_5`, and `opp_three_pa_share_allowed_prior_5`
 
 Without these adjustments, players returning from All-Star break or newly elevated to
 starter roles may be incorrectly zeroed out due to stale prior data.

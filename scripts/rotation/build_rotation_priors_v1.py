@@ -20,9 +20,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from projections import paths
+from projections.rotation.rotation_set_minutes_features_v1 import (
+    SAME_POS_CONTEXT_BUCKETS,
+    bucket_same_pos_depth,
+    compute_same_pos_depth,
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,15 @@ PLAYER_PRIOR_BASE_COLS: tuple[str, ...] = (
     "first_in_minute",
     "last_out_minute",
     "max_stint_minutes",
+    # Shooting / shot-mix priors.
+    "fg2_pct",
+    "fg3_pct",
+    "ft_pct",
+    "efg_pct",
+    "fg2a_per_min",
+    "fg3a_per_min",
+    "fta_per_min",
+    "three_pa_share",
 )
 
 TEAM_PRIOR_BASE_COLS: tuple[str, ...] = (
@@ -58,6 +73,12 @@ TEAM_PRIOR_BASE_COLS: tuple[str, ...] = (
     "bench_share",
     "starter_share",
     "depth_gap_10_6",
+    # Defensive shot-quality allowance priors.
+    "fg2_pct_allowed",
+    "fg3_pct_allowed",
+    "fta_rate_allowed",
+    "efg_pct_allowed",
+    "three_pa_share_allowed",
 )
 
 # Columns for rolling volatility priors (std across trailing games, shifted).
@@ -82,6 +103,30 @@ TEAM_VOLATILITY_COLS: tuple[str, ...] = (
     "bench_share",
     "starter_share",
     "depth_gap_10_6",
+)
+
+PLAYER_CONTEXT_BASE_COLS: tuple[str, ...] = (
+    "minutes_from_stints",
+    "started_proxy",
+)
+
+PLAYER_SHOOTING_BASE_COLS: tuple[str, ...] = (
+    "fg2_pct",
+    "fg3_pct",
+    "ft_pct",
+    "efg_pct",
+    "fg2a_per_min",
+    "fg3a_per_min",
+    "fta_per_min",
+    "three_pa_share",
+)
+
+TEAM_DEFENSE_ALLOWED_BASE_COLS: tuple[str, ...] = (
+    "fg2_pct_allowed",
+    "fg3_pct_allowed",
+    "fta_rate_allowed",
+    "efg_pct_allowed",
+    "three_pa_share_allowed",
 )
 
 
@@ -248,6 +293,164 @@ def _load_rotation_team_shape(data_root: Path) -> pd.DataFrame:
     return out
 
 
+def _safe_rate(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    denom = pd.to_numeric(denominator, errors="coerce").astype("float64")
+    denom = denom.where(denom.ne(0.0), np.nan)
+    num = pd.to_numeric(numerator, errors="coerce")
+    return (num / denom).fillna(0.0).astype("float64")
+
+
+def _load_boxscore_counts(data_root: Path) -> pd.DataFrame:
+    counts_path = data_root / "gold" / "labels_boxscore_counts" / "labels_boxscore_counts.parquet"
+    if not counts_path.exists():
+        return pd.DataFrame()
+
+    try:
+        counts = pd.read_parquet(
+            counts_path,
+            columns=[
+                "game_id",
+                "team_id",
+                "player_id",
+                "game_date",
+                "season",
+                "fga2",
+                "fg2m",
+                "fga3",
+                "fg3m",
+                "fta",
+                "ftm",
+                "minutes",
+            ],
+        )
+    except Exception:
+        return pd.DataFrame()
+
+    if counts.empty:
+        return counts
+
+    counts = counts.copy()
+    counts["game_id_norm"] = counts["game_id"].map(_zfill_game_id)
+    counts["team_id"] = pd.to_numeric(counts["team_id"], errors="coerce").astype("Int64")
+    counts["person_id"] = pd.to_numeric(counts["player_id"], errors="coerce").astype("Int64")
+    counts["game_date"] = pd.to_datetime(counts["game_date"], errors="coerce").dt.normalize()
+    for col in ("fga2", "fg2m", "fga3", "fg3m", "fta", "ftm", "minutes"):
+        counts[col] = pd.to_numeric(counts[col], errors="coerce").fillna(0.0).astype("float64")
+
+    fga = counts["fga2"] + counts["fga3"]
+    fgm = counts["fg2m"] + counts["fg3m"]
+    counts["fg2_pct"] = _safe_rate(counts["fg2m"], counts["fga2"])
+    counts["fg3_pct"] = _safe_rate(counts["fg3m"], counts["fga3"])
+    counts["ft_pct"] = _safe_rate(counts["ftm"], counts["fta"])
+    counts["efg_pct"] = _safe_rate(counts["fg2m"] + 1.5 * counts["fg3m"], fga)
+    counts["fg2a_per_min"] = _safe_rate(counts["fga2"], counts["minutes"])
+    counts["fg3a_per_min"] = _safe_rate(counts["fga3"], counts["minutes"])
+    counts["fta_per_min"] = _safe_rate(counts["fta"], counts["minutes"])
+    counts["three_pa_share"] = _safe_rate(counts["fga3"], fga)
+    counts["fgm_total"] = fgm.astype("float64")
+    counts["fga_total"] = fga.astype("float64")
+    return counts
+
+
+def _build_team_allowed_boxscore_features(counts: pd.DataFrame) -> pd.DataFrame:
+    if counts.empty:
+        return pd.DataFrame()
+
+    team_totals = (
+        counts.groupby(["game_id_norm", "team_id"], sort=False, as_index=False)
+        .agg(
+            {
+                "game_date": "last",
+                "season": "last",
+                "fga2": "sum",
+                "fg2m": "sum",
+                "fga3": "sum",
+                "fg3m": "sum",
+                "fta": "sum",
+                "ftm": "sum",
+                "fgm_total": "sum",
+                "fga_total": "sum",
+            }
+        )
+        .copy()
+    )
+    if team_totals.empty:
+        return team_totals
+
+    opp = team_totals.rename(
+        columns={
+            "team_id": "opponent_team_id",
+            "fga2": "opp_fga2",
+            "fg2m": "opp_fg2m",
+            "fga3": "opp_fga3",
+            "fg3m": "opp_fg3m",
+            "fta": "opp_fta",
+            "ftm": "opp_ftm",
+            "fgm_total": "opp_fgm_total",
+            "fga_total": "opp_fga_total",
+        }
+    )
+    paired = team_totals.merge(opp, on="game_id_norm", how="inner", sort=False)
+    paired = paired.loc[paired["team_id"] != paired["opponent_team_id"]].copy()
+    if paired.empty:
+        return pd.DataFrame(columns=["game_id_norm", "team_id", *TEAM_DEFENSE_ALLOWED_BASE_COLS])
+
+    allowed = paired.loc[:, ["game_id_norm", "team_id"]].copy()
+    allowed["fg2_pct_allowed"] = _safe_rate(paired["opp_fg2m"], paired["opp_fga2"])
+    allowed["fg3_pct_allowed"] = _safe_rate(paired["opp_fg3m"], paired["opp_fga3"])
+    allowed["fta_rate_allowed"] = _safe_rate(paired["opp_fta"], paired["opp_fga_total"])
+    allowed["efg_pct_allowed"] = _safe_rate(
+        paired["opp_fg2m"] + 1.5 * paired["opp_fg3m"],
+        paired["opp_fga_total"],
+    )
+    allowed["three_pa_share_allowed"] = _safe_rate(paired["opp_fga3"], paired["opp_fga_total"])
+    allowed = allowed.drop_duplicates(subset=["game_id_norm", "team_id"], keep="last")
+    return allowed
+
+
+def _load_player_context_features(data_root: Path) -> pd.DataFrame:
+    """Load historical pre-tip context snapshots used for context priors."""
+
+    root = data_root / "gold" / "features_minutes_v1"
+    frames: list[pd.DataFrame] = []
+    desired_cols = [
+        "game_id",
+        "game_date",
+        "team_id",
+        "player_id",
+        "pos_bucket",
+        "available_G",
+        "available_W",
+        "available_B",
+        "depth_same_pos_active",
+    ]
+
+    for path in sorted(root.glob("season=*/month=*/features.parquet")):
+        try:
+            df = pd.read_parquet(path, columns=desired_cols)
+        except Exception:
+            continue
+        if df.empty:
+            continue
+        frames.append(df)
+
+    if not frames:
+        return pd.DataFrame()
+
+    out = pd.concat(frames, ignore_index=True)
+    out["game_id_norm"] = out["game_id"].map(_zfill_game_id)
+    out["team_id"] = pd.to_numeric(out["team_id"], errors="coerce").astype("Int64")
+    out["person_id"] = pd.to_numeric(out["player_id"], errors="coerce").astype("Int64")
+    out["game_date"] = pd.to_datetime(out["game_date"], errors="coerce").dt.normalize()
+    out["ctx_same_pos_bucket"] = bucket_same_pos_depth(compute_same_pos_depth(out))
+    out = out.dropna(subset=["game_id_norm", "team_id", "person_id", "game_date"]).copy()
+    out = out.drop_duplicates(
+        subset=["game_id_norm", "team_id", "person_id"],
+        keep="last",
+    )
+    return out.loc[:, ["game_id_norm", "team_id", "person_id", "game_date", "ctx_same_pos_bucket"]]
+
+
 def _prior_columns_player() -> list[str]:
     return list(PLAYER_PRIOR_BASE_COLS)
 
@@ -341,6 +544,77 @@ def _compute_group_priors(
     return work
 
 
+def _compute_context_bucket_priors(
+    df: pd.DataFrame,
+    *,
+    group_cols: list[str],
+    date_col: str,
+    windows: list[int],
+    value_cols: list[str],
+    bucket_col: str,
+    bucket_values: tuple[str, ...],
+) -> pd.DataFrame:
+    """Compute rolling priors within coarse context buckets over trailing games."""
+
+    work = df.copy()
+    work[date_col] = pd.to_datetime(work[date_col], errors="coerce").dt.normalize()
+    work = work.sort_values(
+        [*group_cols, date_col, "game_id_norm"], kind="mergesort"
+    ).reset_index(drop=True)
+    bucket_series = work[bucket_col].astype("string").fillna("unknown").str.lower().str.strip()
+    group_keys = [work[col] for col in group_cols]
+
+    for window in windows:
+        for bucket in bucket_values:
+            bucket_mask = bucket_series.eq(bucket)
+            count_col = f"ctx_same_pos_{bucket}_prior_n_games_{window}"
+            max_col = f"ctx_same_pos_{bucket}_prior_source_max_game_date_{window}"
+
+            def _roll_count(s: pd.Series) -> pd.Series:
+                shifted = s.shift(1)
+                return shifted.rolling(window, min_periods=1).count()
+
+            masked_dates = work[date_col].where(bucket_mask)
+            work[count_col] = (
+                masked_dates.groupby(group_keys, sort=False)
+                .apply(_roll_count)
+                .reset_index(level=group_cols, drop=True)
+                .fillna(0)
+                .astype("int16")
+            )
+
+            def _roll_max_ns(s: pd.Series) -> pd.Series:
+                shifted = s.shift(1)
+                shifted_ns = shifted.astype("int64", copy=False)
+                return shifted_ns.rolling(window, min_periods=1).max()
+
+            max_ns = (
+                masked_dates.groupby(group_keys, sort=False)
+                .apply(_roll_max_ns)
+                .reset_index(level=group_cols, drop=True)
+            )
+            work[max_col] = pd.to_datetime(max_ns, errors="coerce")
+            work.loc[work[count_col] == 0, max_col] = pd.NaT
+
+            for base_col in value_cols:
+                out_col = f"{base_col}_ctx_same_pos_{bucket}_prior_{window}"
+
+                def _roll_mean(s: pd.Series) -> pd.Series:
+                    shifted = s.shift(1)
+                    return shifted.rolling(window, min_periods=1).mean()
+
+                masked_vals = work[base_col].where(bucket_mask)
+                work[out_col] = (
+                    masked_vals.groupby(group_keys, sort=False)
+                    .apply(_roll_mean)
+                    .reset_index(level=group_cols, drop=True)
+                    .fillna(0.0)
+                    .astype("float64")
+                )
+
+    return work
+
+
 def _write_partitioned(
     df: pd.DataFrame,
     *,
@@ -417,6 +691,8 @@ def main() -> None:
 
     player = _load_rotation_player_labels(inputs.data_root)
     team = _load_rotation_team_shape(inputs.data_root)
+    player_context = _load_player_context_features(inputs.data_root)
+    boxscore_counts = _load_boxscore_counts(inputs.data_root)
     if player.empty or team.empty:
         raise RuntimeError(
             "[rotation_priors_v1] rotation_v1 inputs missing; run build_rotation_dataset_v1 first"
@@ -447,6 +723,52 @@ def main() -> None:
         lambda d: _season_for_date(pd.Timestamp(d)) if pd.notna(d) else pd.NA
     )
 
+    if not boxscore_counts.empty:
+        player_boxscore_cols = ["game_id_norm", "team_id", "person_id", *PLAYER_SHOOTING_BASE_COLS]
+        player = player.merge(
+            boxscore_counts.loc[:, [c for c in player_boxscore_cols if c in boxscore_counts.columns]].drop_duplicates(
+                subset=["game_id_norm", "team_id", "person_id"],
+                keep="last",
+            ),
+            on=["game_id_norm", "team_id", "person_id"],
+            how="left",
+            sort=False,
+        )
+        team_allowed = _build_team_allowed_boxscore_features(boxscore_counts)
+        if not team_allowed.empty:
+            team = team.merge(
+                team_allowed,
+                on=["game_id_norm", "team_id"],
+                how="left",
+                sort=False,
+            )
+
+    for col in PLAYER_SHOOTING_BASE_COLS:
+        if col not in player.columns:
+            player[col] = 0.0
+        player[col] = pd.to_numeric(player[col], errors="coerce").fillna(0.0).astype("float64")
+
+    for col in TEAM_DEFENSE_ALLOWED_BASE_COLS:
+        if col not in team.columns:
+            team[col] = 0.0
+        team[col] = pd.to_numeric(team[col], errors="coerce").fillna(0.0).astype("float64")
+
+    if not player_context.empty:
+        player = player.merge(
+            player_context.drop(columns=["game_date"], errors="ignore"),
+            on=["game_id_norm", "team_id", "person_id"],
+            how="left",
+            sort=False,
+        )
+    player["ctx_same_pos_bucket"] = (
+        player.get("ctx_same_pos_bucket", pd.Series(pd.NA, index=player.index))
+        .astype("string")
+        .fillna("unknown")
+        .str.lower()
+        .str.strip()
+    )
+    player_context_match_rate = float(player["ctx_same_pos_bucket"].ne("unknown").mean()) if len(player) else 0.0
+
     # Player priors (group by person_id).
     player_work = _compute_group_priors(
         player,
@@ -456,6 +778,43 @@ def main() -> None:
         value_cols=_prior_columns_player(),
         prefix="player",
         std_value_cols=list(PLAYER_VOLATILITY_COLS),
+    )
+
+    player_ctx_work = _compute_context_bucket_priors(
+        player,
+        group_cols=["person_id"],
+        date_col="game_date",
+        windows=inputs.windows,
+        value_cols=list(PLAYER_CONTEXT_BASE_COLS),
+        bucket_col="ctx_same_pos_bucket",
+        bucket_values=SAME_POS_CONTEXT_BUCKETS,
+    )
+    player_ctx_cols = [
+        "game_id_norm",
+        "team_id",
+        "person_id",
+        *[
+            c
+            for c in player_ctx_work.columns
+            if "_ctx_same_pos_" in c and "_prior_" in c
+        ],
+        *[
+            c
+            for c in player_ctx_work.columns
+            if c.startswith("ctx_same_pos_") and "_prior_n_games_" in c
+        ],
+        *[
+            c
+            for c in player_ctx_work.columns
+            if c.startswith("ctx_same_pos_") and "_prior_source_max_game_date_" in c
+        ],
+    ]
+    player_ctx_cols = [c for i, c in enumerate(player_ctx_cols) if c in player_ctx_work.columns and c not in player_ctx_cols[:i]]
+    player_work = player_work.merge(
+        player_ctx_work.loc[:, player_ctx_cols],
+        on=["game_id_norm", "team_id", "person_id"],
+        how="left",
+        sort=False,
     )
 
     # Convert started_proxy rolling mean to a "rate" name to match downstream expectations.
@@ -469,6 +828,12 @@ def main() -> None:
         if miss not in player_work.columns and f"{src}_missing" in player_work.columns:
             player_work[miss] = player_work[f"{src}_missing"]
             player_work = player_work.drop(columns=[f"{src}_missing"])
+        for bucket in SAME_POS_CONTEXT_BUCKETS:
+            ctx_src = f"started_proxy_ctx_same_pos_{bucket}_prior_{window}"
+            ctx_dst = f"started_proxy_rate_ctx_same_pos_{bucket}_prior_{window}"
+            if ctx_src in player_work.columns:
+                player_work[ctx_dst] = player_work[ctx_src]
+                player_work = player_work.drop(columns=[ctx_src])
 
     player_work["game_id"] = player_work["game_id_norm"]
     player_work = player_work[
@@ -479,6 +844,10 @@ def main() -> None:
             "team_id",
             "person_id",
             "game_date",
+            "ctx_same_pos_bucket",
+            "minutes_from_stints",
+            "started_proxy",
+            *[c for c in PLAYER_SHOOTING_BASE_COLS if c in player_work.columns],
             *[c for c in player_work.columns if c.startswith("player_prior_")],
             *[
                 c
@@ -522,6 +891,7 @@ def main() -> None:
             "game_id_norm",
             "team_id",
             "game_date",
+            *[c for c in TEAM_PRIOR_BASE_COLS if c in team_work.columns],
             *[c for c in team_work.columns if c.startswith("team_prior_")],
             *[
                 c
@@ -590,6 +960,10 @@ def main() -> None:
                 inputs.data_root / "silver" / "rotation_v1" / "team_game_shape"
             ),
             "schedule_root": str(inputs.data_root / "silver" / "schedule"),
+            "player_context_root": str(inputs.data_root / "gold" / "features_minutes_v1"),
+            "boxscore_counts_path": str(
+                inputs.data_root / "gold" / "labels_boxscore_counts" / "labels_boxscore_counts.parquet"
+            ),
         },
         "outputs": {
             "root": str(root),
@@ -599,6 +973,8 @@ def main() -> None:
         "input_coverage": {
             "player_labels_missing_game_date_rate": player_missing_game_date_rate,
             "team_shape_missing_game_date_rate": team_missing_game_date_rate,
+            "player_context_match_rate": player_context_match_rate,
+            "boxscore_counts_available": bool(not boxscore_counts.empty),
         },
         "write_summary": {
             "player_partitions_written": player_written,
