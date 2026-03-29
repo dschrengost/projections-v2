@@ -983,6 +983,61 @@ def _attach_gtv2_force_active_worlds(
     }
 
 
+def _attach_gtv2_score_surface(
+    features_df: pd.DataFrame,
+    *,
+    scores_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    out = features_df.copy()
+    if out.empty:
+        out["gtv2_score_minutes_deterministic"] = pd.Series(dtype="float32")
+        out["gtv2_score_active_deterministic"] = pd.Series(dtype="float32")
+        out["gtv2_score_active_prob_proxy"] = pd.Series(dtype="float32")
+        return out, {"rows": 0, "matched_rows": 0, "missing_rows": 0}
+    if scores_df.empty:
+        out["gtv2_score_minutes_deterministic"] = np.nan
+        out["gtv2_score_active_deterministic"] = np.nan
+        out["gtv2_score_active_prob_proxy"] = np.nan
+        return out, {"rows": int(len(out)), "matched_rows": 0, "missing_rows": int(len(out))}
+
+    keys = ["game_id", "team_id", "player_id"]
+    score_cols = [
+        "minutes_deterministic",
+        "active_deterministic",
+        "active_prob_proxy",
+    ]
+    scored = scores_df.copy()
+    for col in keys:
+        if col not in scored.columns:
+            raise ValueError(f"scores_df missing key column: {col}")
+        scored[col] = pd.to_numeric(scored[col], errors="coerce").astype("Int64")
+    for col in score_cols:
+        if col not in scored.columns:
+            scored[col] = np.nan
+    keep_cols = keys + score_cols
+    scored = scored[keep_cols].drop_duplicates(subset=keys, keep="last")
+    scored = scored.rename(
+        columns={
+            "minutes_deterministic": "gtv2_score_minutes_deterministic",
+            "active_deterministic": "gtv2_score_active_deterministic",
+            "active_prob_proxy": "gtv2_score_active_prob_proxy",
+        }
+    )
+
+    base = out.copy()
+    for col in keys:
+        if col not in base.columns:
+            raise ValueError(f"features_df missing key column: {col}")
+        base[col] = pd.to_numeric(base[col], errors="coerce").astype("Int64")
+    out = base.merge(scored, on=keys, how="left")
+    matched = int(out["gtv2_score_minutes_deterministic"].notna().sum()) if "gtv2_score_minutes_deterministic" in out.columns else 0
+    return out, {
+        "rows": int(len(out)),
+        "matched_rows": matched,
+        "missing_rows": int(len(out) - matched),
+    }
+
+
 def _selected_props_source_from_checklist(checklist: dict[str, Any]) -> str | None:
     checks = checklist.get("checks")
     if not isinstance(checks, list):
@@ -1817,6 +1872,8 @@ def _build_rerun_plan(
     current_minutes_selector_path: Path,
     current_rates_selector_path: Path,
     current_ownership_selector_path: Path,
+    current_gtv2_inference_config_path: Path | None = None,
+    current_gtv2_inference_config_hash: str | None = None,
     manual_target_game_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     current_games = dict((current_source_freshness or {}).get("per_game", {}))
@@ -1885,6 +1942,47 @@ def _build_rerun_plan(
             "target_game_ids": current_game_ids,
             "ignored_changes": [],
         }
+    if current_gtv2_inference_config_path is not None:
+        previous_gtv2_inference_config_path_raw = str(
+            previous_manifest_payload.get("gtv2_inference_current_path", "")
+        ).strip()
+        previous_gtv2_inference_config_hash = str(
+            previous_manifest_payload.get("v3", {}).get(
+                "gtv2_inference_current_hash", ""
+            )
+            or ""
+        )
+        resolved_previous_gtv2_inference_config_path = (
+            Path(previous_gtv2_inference_config_path_raw).resolve()
+            if previous_gtv2_inference_config_path_raw
+            else None
+        )
+        if (
+            resolved_previous_gtv2_inference_config_path is None
+            or resolved_previous_gtv2_inference_config_path
+            != current_gtv2_inference_config_path.resolve()
+        ):
+            return {
+                "policy_version": 1,
+                "game_date": game_date,
+                "mode": "full_slate",
+                "reason": "gtv2_inference_config_path_changed",
+                "target_game_ids": current_game_ids,
+                "ignored_changes": [],
+            }
+        if (
+            not previous_gtv2_inference_config_hash
+            or previous_gtv2_inference_config_hash
+            != str(current_gtv2_inference_config_hash or "")
+        ):
+            return {
+                "policy_version": 1,
+                "game_date": game_date,
+                "mode": "full_slate",
+                "reason": "gtv2_inference_config_changed",
+                "target_game_ids": current_game_ids,
+                "ignored_changes": [],
+            }
 
     if input_change_set.get("new_game_ids") or input_change_set.get("removed_game_ids"):
         return {
@@ -5620,6 +5718,8 @@ def freeze_run_inputs_task(
     bundle_dir: Path,
     data_root: Path,
     ownership_selector_path: Path,
+    gtv2_inference_current_path: Path | None = None,
+    gtv2_inference_current_hash: str | None = None,
     source_freshness: dict[str, Any] | None = None,
     freshness_gates: dict[str, Any] | None = None,
     bounded_wait: dict[str, Any] | None = None,
@@ -5650,6 +5750,11 @@ def freeze_run_inputs_task(
     control_plane.atomic_update_json(
         manifest_path,
         {
+            "gtv2_inference_current_path": (
+                str(gtv2_inference_current_path)
+                if gtv2_inference_current_path is not None
+                else ""
+            ),
             "source_freshness": source_freshness or {},
             "freshness_gates": freshness_gates or {},
             "bounded_wait": bounded_wait or {},
@@ -5657,6 +5762,9 @@ def freeze_run_inputs_task(
             "v3": {
                 "bundle_dir": str(bundle_dir),
                 "bundle_hash": bundle_hash,
+                "gtv2_inference_current_hash": str(
+                    gtv2_inference_current_hash or ""
+                ),
                 "parity_manifest_path": str(resolve_parity_manifest_path(bundle_dir)),
             },
         },
@@ -6360,6 +6468,12 @@ def generate_worlds_gtv2_live_task(
             logger.warning("Production runs should use the trained default (2.0).")
             logger.warning("=" * 80)
         features_df_raw = pd.read_parquet(features_path)
+        scores_df = pd.read_parquet(scores_path)
+        features_df_raw, score_surface_diag = _attach_gtv2_score_surface(
+            features_df_raw,
+            scores_df=scores_df,
+        )
+        logger.info("Attached persisted GTv2 score surface: %s", score_surface_diag)
         features_df, force_active_diag = _attach_gtv2_force_active_worlds(
             features_df_raw,
             game_date=game_date,
@@ -7878,6 +7992,8 @@ def nba_live_pipeline_v3_flow(
         project_root=PROJECT_ROOT,
     )
     gtv2_current_cfg = _load_gtv2_inference_current_config()
+    gtv2_inference_current_path = PROJECT_ROOT / "config" / "gtv2_inference_current.json"
+    gtv2_inference_current_hash = _stable_digest(gtv2_current_cfg)
     bundle_dir = _resolve_bundle_dir(
         data_root=data_root,
         gtv2_bundle_dir=gtv2_bundle_dir,
@@ -8184,6 +8300,8 @@ def nba_live_pipeline_v3_flow(
             current_minutes_selector_path=minutes_selector_path,
             current_rates_selector_path=rates_selector_path,
             current_ownership_selector_path=ownership_selector_path,
+            current_gtv2_inference_config_path=gtv2_inference_current_path,
+            current_gtv2_inference_config_hash=gtv2_inference_current_hash,
             manual_target_game_ids=manual_target_game_ids,
         )
         target_game_ids = _normalize_game_ids(rerun_plan.get("target_game_ids"))
@@ -8195,6 +8313,8 @@ def nba_live_pipeline_v3_flow(
             bundle_dir=bundle_dir,
             data_root=data_root,
             ownership_selector_path=ownership_selector_path,
+            gtv2_inference_current_path=gtv2_inference_current_path,
+            gtv2_inference_current_hash=gtv2_inference_current_hash,
             source_freshness=dict(frozen_checklist.get("source_freshness", {})),
             freshness_gates=dict(frozen_checklist.get("freshness_gates", {})),
             bounded_wait=bounded_wait_report,

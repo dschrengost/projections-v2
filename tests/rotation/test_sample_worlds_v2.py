@@ -1558,6 +1558,91 @@ def test_sample_worlds_for_batch_oracle_rotation_state_overrides_minutes_context
     assert float(displaced_rows["minutes"].max()) <= 1e-6
 
 
+def test_sample_worlds_for_batch_score_surface_overrides_model_minutes() -> None:
+    cols = list(FLOW_TARGET_COLUMNS_V1)
+
+    class _FlowHead:
+        def sample(self, z: torch.Tensor, **_: object) -> torch.Tensor:
+            return torch.ones_like(z, dtype=torch.float32)
+
+    class _Out:
+        def __init__(self, valid_flat: torch.Tensor, active_flat: torch.Tensor, minutes_flat: torch.Tensor, team_idx: torch.Tensor):
+            self.player_states = torch.zeros((valid_flat.shape[0], 30, 4), dtype=torch.float32)
+            self.team_states = torch.zeros((valid_flat.shape[0], 2, 4), dtype=torch.float32)
+            self.game_state = torch.zeros((valid_flat.shape[0], 4), dtype=torch.float32)
+            self.player_valid_mask = valid_flat
+            self.player_team_index = team_idx
+            self.active = type("Active", (), {"active_mask": active_flat})()
+            self.minutes = type("Minutes", (), {"minutes": minutes_flat, "sigma": None})()
+            self.flow = None
+            self.backbone = None
+            self.usage_share = None
+            self.efficiency = None
+
+    class _Model:
+        def __init__(self) -> None:
+            self.flow_head = _FlowHead()
+            self.flow_target_columns = cols
+            self.enable_possession_backbone = False
+
+        def __call__(self, pf: torch.Tensor, pvm: torch.Tensor, **_: object) -> _Out:
+            bsz = int(pf.shape[0])
+            valid_flat = pvm.reshape(bsz, -1).to(dtype=torch.bool)
+            active_flat = torch.zeros_like(valid_flat, dtype=torch.bool)
+            minutes_flat = torch.zeros((bsz, 30), dtype=torch.float32)
+            active_flat[:, 1:6] = True
+            active_flat[:, 15:20] = True
+            minutes_flat[:, 1:6] = 48.0
+            minutes_flat[:, 15:20] = 48.0
+            return _Out(valid_flat=valid_flat, active_flat=active_flat, minutes_flat=minutes_flat, team_idx=_team_index(bsz))
+
+    player_ids = torch.arange(1001, 1031, dtype=torch.long).reshape(1, 2, 15)
+    player_valid_mask = torch.zeros((1, 2, 15), dtype=torch.bool)
+    player_valid_mask[:, 0, :6] = True
+    player_valid_mask[:, 1, :5] = True
+
+    score_minutes = torch.zeros((1, 2, 15), dtype=torch.float32)
+    score_active = torch.full((1, 2, 15), float("nan"), dtype=torch.float32)
+    score_minutes[:, 0, 0:5] = 48.0
+    score_minutes[:, 1, 0:5] = 48.0
+    score_active[:, 0, 0:5] = 1.0
+    score_active[:, 0, 5] = 0.0
+    score_active[:, 1, 0:5] = 1.0
+
+    batch: dict[str, torch.Tensor | list[str]] = {
+        "player_features": torch.zeros((1, 2, 15, 2), dtype=torch.float32),
+        "player_valid_mask": player_valid_mask,
+        "score_minutes_deterministic": score_minutes,
+        "score_active_deterministic": score_active,
+        "game_features": torch.zeros((1, 0), dtype=torch.float32),
+        "team_features": torch.zeros((1, 2, 0), dtype=torch.float32),
+        "player_ids": player_ids,
+        "team_ids": torch.tensor([[10, 20]], dtype=torch.long),
+        "game_id_norm": ["1001"],
+        "game_date": ["2026-01-18"],
+    }
+
+    worlds_df, checks = sample_worlds_for_batch(
+        _Model(),
+        batch,
+        device=torch.device("cpu"),
+        num_worlds=2,
+        chunk_size=2,
+        active_temperature=1.0,
+        strict_contracts=True,
+    )
+    assert checks["total_violations"] == 0
+
+    promoted_rows = worlds_df.loc[worlds_df["player_id"] == 1001]
+    displaced_rows = worlds_df.loc[worlds_df["player_id"] == 1006]
+    assert len(promoted_rows) == 2
+    assert int(promoted_rows["active"].min()) == 1
+    assert float(promoted_rows["minutes"].min()) >= 47.99
+    assert len(displaced_rows) == 2
+    assert int(displaced_rows["active"].max()) == 0
+    assert float(displaced_rows["minutes"].max()) <= 1e-6
+
+
 def test_sample_worlds_for_batch_zero_minute_forced_active_rows_remain_inactive() -> None:
     cols = list(FLOW_TARGET_COLUMNS_V1)
 

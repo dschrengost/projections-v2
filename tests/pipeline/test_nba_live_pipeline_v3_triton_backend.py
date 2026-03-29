@@ -622,6 +622,9 @@ def test_generate_worlds_gtv2_live_task_triton_backend_full_slate_runs_per_game_
     def _fake_infer(*, cfg, request_payload):
         captured_payloads.append(dict(request_payload))
         game_features = pd.read_parquet(Path(str(request_payload["features_path"])))
+        assert "gtv2_score_minutes_deterministic" in game_features.columns
+        assert "gtv2_score_active_deterministic" in game_features.columns
+        assert float(game_features["gtv2_score_minutes_deterministic"].iloc[0]) in {31.2, 29.1}
         out_path = Path(str(request_payload["out_path"]))
         out_path.parent.mkdir(parents=True, exist_ok=True)
         worlds = game_features[["game_date", "game_id", "team_id", "player_id"]].copy()

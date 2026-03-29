@@ -957,6 +957,47 @@ def test_rerun_plan_forces_full_slate_when_ownership_selector_changes(
     assert plan["reason"] == "ownership_selector_changed"
 
 
+def test_rerun_plan_forces_full_slate_when_gtv2_inference_config_changes(
+    tmp_path: Path,
+) -> None:
+    current = {
+        "summary": {"slate_game_count": 2},
+        "per_game": {
+            "1": {"game_id": 1, "minutes_to_tip": 45.0, "is_live_game": True, "sources": {}},
+            "2": {"game_id": 2, "minutes_to_tip": 120.0, "is_live_game": True, "sources": {}},
+        },
+    }
+    selector = tmp_path / "selector.json"
+    selector.write_text("{}", encoding="utf-8")
+    gtv2_cfg = tmp_path / "gtv2_inference_current.json"
+    gtv2_cfg.write_text('{"tree_rate_blend_alpha":0.75}', encoding="utf-8")
+    previous_manifest = {
+        "run_id": "prev_run",
+        "minutes_current_run_path": str(selector),
+        "rates_current_run_path": str(selector),
+        "ownership_current_run_path": str(selector),
+        "gtv2_inference_current_path": str(gtv2_cfg),
+        "v3": {
+            "bundle_hash": "bundle123",
+            "gtv2_inference_current_hash": "old_hash",
+        },
+    }
+    plan = _build_rerun_plan(
+        game_date="2026-02-24",
+        input_change_set={"changed_games": [], "new_game_ids": [], "removed_game_ids": []},
+        current_source_freshness=current,
+        previous_manifest_payload=previous_manifest,
+        current_bundle_hash="bundle123",
+        current_minutes_selector_path=selector,
+        current_rates_selector_path=selector,
+        current_ownership_selector_path=selector,
+        current_gtv2_inference_config_path=gtv2_cfg,
+        current_gtv2_inference_config_hash="new_hash",
+    )
+    assert plan["mode"] == "full_slate"
+    assert plan["reason"] == "gtv2_inference_config_changed"
+
+
 def test_publish_superseded_report_flags_newer_current_pointer(tmp_path: Path) -> None:
     manifest_path = tmp_path / "artifacts" / "runs" / "nba_live" / "game_date=2026-02-24" / "run=candidate" / "manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)

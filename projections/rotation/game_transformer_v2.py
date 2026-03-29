@@ -740,6 +740,8 @@ class GameLevelExample:
     player_valid_mask: np.ndarray  # (2,15)
     player_ids: np.ndarray  # (2,15)
     team_ids: np.ndarray  # (2,)
+    score_minutes_deterministic: np.ndarray  # (2,15)
+    score_active_deterministic: np.ndarray  # (2,15)
     force_active_worlds: np.ndarray  # (2,15) hard guardrail mask for sampled worlds
     starter_force_active_worlds: np.ndarray  # (2,15) starter-only force-active mask
     force_active_minutes_anchor: np.ndarray  # (2,15) props-implied minutes anchor
@@ -1024,6 +1026,16 @@ def build_game_level_examples(
         minutes_label_col = fallback
 
     y_minutes = pd.to_numeric(df[minutes_label_col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+    score_minutes_by_idx = (
+        pd.to_numeric(df["gtv2_score_minutes_deterministic"], errors="coerce").to_numpy(dtype=np.float32)
+        if "gtv2_score_minutes_deterministic" in df.columns
+        else np.full(len(df), np.nan, dtype=np.float32)
+    )
+    score_active_by_idx = (
+        pd.to_numeric(df["gtv2_score_active_deterministic"], errors="coerce").to_numpy(dtype=np.float32)
+        if "gtv2_score_active_deterministic" in df.columns
+        else np.full(len(df), np.nan, dtype=np.float32)
+    )
     starter_signal = np.zeros(len(df), dtype=bool)
     for starter_col in ("lineup_starter_announced", "is_projected_starter", "is_confirmed_starter"):
         if starter_col in df.columns:
@@ -1116,6 +1128,8 @@ def build_game_level_examples(
         player_valid = np.zeros((2, max_players_per_team), dtype=bool)
         player_ids = np.zeros((2, max_players_per_team), dtype=np.int64)
         team_ids = np.zeros((2,), dtype=np.int64)
+        score_minutes_arr = np.full((2, max_players_per_team), np.nan, dtype=np.float32)
+        score_active_arr = np.full((2, max_players_per_team), np.nan, dtype=np.float32)
         force_active_arr = np.zeros((2, max_players_per_team), dtype=bool)
         starter_force_active_arr = np.zeros((2, max_players_per_team), dtype=bool)
         force_active_minutes_anchor_arr = np.zeros((2, max_players_per_team), dtype=np.float32)
@@ -1150,6 +1164,8 @@ def build_game_level_examples(
             player_ids[side_idx, :n] = (
                 pd.to_numeric(team_rows["player_id"], errors="coerce").fillna(0).astype("int64").to_numpy(dtype=np.int64)
             )
+            score_minutes_arr[side_idx, :n] = score_minutes_by_idx[local_idx]
+            score_active_arr[side_idx, :n] = score_active_by_idx[local_idx]
             force_active_arr[side_idx, :n] = force_active_by_idx[local_idx]
             starter_force_active_arr[side_idx, :n] = starter_force_active_by_idx[local_idx]
             force_active_minutes_anchor_arr[side_idx, :n] = force_active_minutes_anchor_by_idx[local_idx]
@@ -1197,6 +1213,8 @@ def build_game_level_examples(
                 player_valid_mask=player_valid,
                 player_ids=player_ids,
                 team_ids=team_ids,
+                score_minutes_deterministic=score_minutes_arr,
+                score_active_deterministic=score_active_arr,
                 force_active_worlds=force_active_arr,
                 starter_force_active_worlds=starter_force_active_arr,
                 force_active_minutes_anchor=force_active_minutes_anchor_arr,
@@ -1232,6 +1250,8 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
     player_valid_mask = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.bool)
     player_ids = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.long)
     team_ids = torch.zeros((bsz, 2), dtype=torch.long)
+    score_minutes_deterministic = torch.full((bsz, 2, MAX_PLAYERS_PER_TEAM), float("nan"), dtype=torch.float32)
+    score_active_deterministic = torch.full((bsz, 2, MAX_PLAYERS_PER_TEAM), float("nan"), dtype=torch.float32)
     force_active_worlds = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.bool)
     starter_force_active_worlds = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.bool)
     force_active_minutes_anchor = torch.zeros((bsz, 2, MAX_PLAYERS_PER_TEAM), dtype=torch.float32)
@@ -1254,6 +1274,12 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
         player_valid_mask[i] = torch.from_numpy(ex.player_valid_mask.astype(bool, copy=False))
         player_ids[i] = torch.from_numpy(ex.player_ids.astype(np.int64, copy=False))
         team_ids[i] = torch.from_numpy(ex.team_ids.astype(np.int64, copy=False))
+        score_minutes_deterministic[i] = torch.from_numpy(
+            ex.score_minutes_deterministic.astype(np.float32, copy=False)
+        )
+        score_active_deterministic[i] = torch.from_numpy(
+            ex.score_active_deterministic.astype(np.float32, copy=False)
+        )
         force_active_worlds[i] = torch.from_numpy(ex.force_active_worlds.astype(bool, copy=False))
         starter_force_active_worlds[i] = torch.from_numpy(ex.starter_force_active_worlds.astype(bool, copy=False))
         force_active_minutes_anchor[i] = torch.from_numpy(ex.force_active_minutes_anchor.astype(np.float32, copy=False))
@@ -1275,6 +1301,8 @@ def collate_game_level_examples(batch: list[GameLevelExample]) -> dict[str, torc
         "player_valid_mask": player_valid_mask,
         "player_ids": player_ids,
         "team_ids": team_ids,
+        "score_minutes_deterministic": score_minutes_deterministic,
+        "score_active_deterministic": score_active_deterministic,
         "force_active_worlds": force_active_worlds,
         "starter_force_active_worlds": starter_force_active_worlds,
         "force_active_minutes_anchor": force_active_minutes_anchor,

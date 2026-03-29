@@ -2217,6 +2217,16 @@ def sample_worlds_for_batch(
         forced_active_minutes_anchor = forced_active_minutes_anchor.to(device=device, dtype=torch.float32)
     else:
         forced_active_minutes_anchor = torch.zeros_like(player_valid_mask, dtype=torch.float32, device=device)
+    score_minutes_deterministic = batch.get("score_minutes_deterministic")
+    if isinstance(score_minutes_deterministic, torch.Tensor):
+        score_minutes_deterministic = score_minutes_deterministic.to(device=device, dtype=torch.float32)
+    else:
+        score_minutes_deterministic = None
+    score_active_deterministic = batch.get("score_active_deterministic")
+    if isinstance(score_active_deterministic, torch.Tensor):
+        score_active_deterministic = score_active_deterministic.to(device=device, dtype=torch.float32)
+    else:
+        score_active_deterministic = None
     game_features = batch["game_features"].to(device=device)  # type: ignore[index]
     team_features = batch["team_features"].to(device=device)  # type: ignore[index]
     oracle_minutes = batch.get("y_minutes")
@@ -2241,6 +2251,16 @@ def sample_worlds_for_batch(
         rep_forced_active_worlds = forced_active_worlds.repeat_interleave(n_worlds_chunk, dim=0)
         rep_starter_force_active_worlds = starter_force_active_worlds.repeat_interleave(n_worlds_chunk, dim=0)
         rep_forced_active_minutes_anchor = forced_active_minutes_anchor.repeat_interleave(n_worlds_chunk, dim=0)
+        rep_score_minutes_deterministic = (
+            score_minutes_deterministic.repeat_interleave(n_worlds_chunk, dim=0)
+            if isinstance(score_minutes_deterministic, torch.Tensor)
+            else None
+        )
+        rep_score_active_deterministic = (
+            score_active_deterministic.repeat_interleave(n_worlds_chunk, dim=0)
+            if isinstance(score_active_deterministic, torch.Tensor)
+            else None
+        )
         rep_game_features = game_features.repeat_interleave(n_worlds_chunk, dim=0)
         rep_team_features = team_features.repeat_interleave(n_worlds_chunk, dim=0)
         rep_oracle_minutes = (
@@ -2314,6 +2334,27 @@ def sample_worlds_for_batch(
                 raise RuntimeError("label leakage guard failed: sampler forward returned flow outputs")
             active_mask_for_sampling = out.active.active_mask
             minutes_for_sampling = out.minutes.minutes
+            if isinstance(rep_score_minutes_deterministic, torch.Tensor):
+                score_minutes_flat = rep_score_minutes_deterministic.reshape(
+                    rep_score_minutes_deterministic.shape[0], -1
+                ).clamp(min=0.0)
+                if isinstance(rep_score_active_deterministic, torch.Tensor):
+                    score_active_flat = rep_score_active_deterministic.reshape(
+                        rep_score_active_deterministic.shape[0], -1
+                    )
+                    score_active_flat = torch.isfinite(score_active_flat) & score_active_flat.ge(0.5)
+                else:
+                    score_active_flat = score_minutes_flat.gt(float(DEFAULT_ACTIVE_MINUTES_TOL))
+                score_active_flat = score_active_flat & out.player_valid_mask.to(dtype=torch.bool)
+                score_minutes_flat = score_minutes_flat * score_active_flat.to(dtype=score_minutes_flat.dtype)
+                minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
+                    score_minutes_flat,
+                    score_active_flat,
+                    out.player_valid_mask,
+                    out.player_team_index,
+                    total_minutes_per_team=240.0,
+                    max_minutes_per_player=48.0,
+                )
             if (
                 promotion_expert_model is not None
                 and promotion_hybrid_config is not None

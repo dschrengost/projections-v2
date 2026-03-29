@@ -5035,3 +5035,50 @@ Current read:
 - this is no longer just a historical CSV artifact trick
 - `tree_bundle_a075` is the current leader and a legitimate live promotion
   candidate, subject to one final live shadow / promotion decision
+
+### Live minutes parity note
+
+Post-promotion inspection clarified an important production-path distinction:
+
+- published `minutes_mean` in the live GTv2 artifact is **not** taken directly from
+  `config/minutes_current_run.json`
+- final live minutes come from the GTv2 score/world path:
+  - `artifacts/gtv2_scores/.../scores.parquet`
+  - then `artifacts/gtv2_worlds/.../worlds.parquet`
+  - then published `artifacts/projections/.../projections.parquet`
+- the standalone minutes selector still matters indirectly because
+  `features_gtv2_v1` is built from the upstream `features_minutes_v1` artifact
+
+Operational implication:
+
+- when debugging live minutes behavior, the correct parity chain is:
+  1. `features_minutes_v1`
+  2. `features_gtv2_v1`
+  3. GTv2 `scores.parquet` (`minutes_deterministic`, `active_deterministic`)
+  4. GTv2 worlds / published `minutes_mean`
+- do **not** assume that promoting a new standalone minutes bundle automatically
+  means published GTv2 minutes changed
+- sparse next-man-up overlays are selective inference-time modifications on top of
+  GTv2 minutes/active behavior, not a broad replacement for core-minute calibration
+
+Important implementation detail discovered during live debugging:
+
+- the current worlds task does **not** consume the persisted `scores.parquet`
+  surface when generating live worlds
+- instead, both local and Triton worlds generation re-run GTv2 directly from
+  `features_gtv2_v1` and sample worlds independently, then summarize those worlds
+  into published `minutes_mean`
+- this means score-stage minutes/active outputs and published world means can
+  diverge materially for the same player on the same run
+- example failure mode observed on `20260329T173136Z`: players such as Jayson
+  Tatum, Chet Holmgren, and Dejounte Murray had `minutes_deterministic = 0` in
+  `scores.parquet` while still publishing nonzero `minutes_mean` from worlds
+
+Current implication:
+
+- `scores.parquet` is useful as a diagnostic surface, but it is **not** currently
+  the operative upstream source for published live GTv2 minutes
+- true feature/prior parity work now requires either:
+  1. making worlds generation consume the persisted score surface, or
+  2. explicitly accepting score/world independence and debugging both outputs as
+     separate model surfaces
