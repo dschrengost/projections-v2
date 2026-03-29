@@ -87,7 +87,11 @@ class MinutesUncertaintyConfig:
     preserve_top_k_per_team: int = 3
     full_sigma_at_minutes_or_below: float = 24.0
     zero_sigma_at_minutes_or_above: float = 32.0
+    apply_minutes_taper: bool = True
     dirichlet_base_concentration: float = 24.0
+    empirical_minutes_bin_edges: tuple[float, ...] = ()
+    empirical_sigma_by_bin: tuple[float, ...] = ()
+    empirical_blend_alpha: float = 1.0
     prior_std_columns: tuple[str, ...] = (
         "minutes_from_stints_std_prior_20",
         "minutes_from_stints_std_prior_10",
@@ -263,6 +267,28 @@ def _estimate_minutes_sigma(
             sigma_source = torch.stack(decoded_cols, dim=0).amax(dim=0)
     if sigma_source is not None:
         sigma = sigma_source
+    if (
+        len(tuple(uncertainty_config.empirical_minutes_bin_edges)) >= 2
+        and len(tuple(uncertainty_config.empirical_sigma_by_bin))
+        == len(tuple(uncertainty_config.empirical_minutes_bin_edges)) - 1
+    ):
+        edges = torch.tensor(
+            tuple(float(x) for x in uncertainty_config.empirical_minutes_bin_edges),
+            device=minutes_base.device,
+            dtype=torch.float32,
+        )
+        sigma_values = torch.tensor(
+            tuple(float(x) for x in uncertainty_config.empirical_sigma_by_bin),
+            device=minutes_base.device,
+            dtype=torch.float32,
+        )
+        bucket_idx = torch.bucketize(minutes_base.to(dtype=torch.float32), boundaries=edges[1:-1], right=False)
+        empirical_sigma = sigma_values[bucket_idx.clamp(min=0, max=int(sigma_values.numel()) - 1)]
+        blend_alpha = float(uncertainty_config.empirical_blend_alpha)
+        if blend_alpha >= 1.0:
+            sigma = empirical_sigma
+        elif blend_alpha > 0.0:
+            sigma = (1.0 - blend_alpha) * sigma + blend_alpha * empirical_sigma
     sigma = sigma * float(uncertainty_config.gaussian_scale)
     sigma = sigma.clamp(min=float(uncertainty_config.min_sigma), max=float(uncertainty_config.max_sigma))
     return sigma * valid_mask.to(dtype=sigma.dtype)
@@ -283,13 +309,14 @@ def _sample_minutes_with_uncertainty(
     if not bool(active.any()):
         return minutes_base
     sigma_eff = sigma.to(dtype=torch.float32).clone()
-    lo = float(uncertainty_config.full_sigma_at_minutes_or_below)
-    hi = float(uncertainty_config.zero_sigma_at_minutes_or_above)
-    if hi <= lo:
-        taper = minutes_base.new_ones(minutes_base.shape, dtype=torch.float32)
-    else:
-        taper = ((float(hi) - minutes_base.to(dtype=torch.float32)) / float(hi - lo)).clamp(min=0.0, max=1.0)
-    sigma_eff = sigma_eff * taper
+    if bool(uncertainty_config.apply_minutes_taper):
+        lo = float(uncertainty_config.full_sigma_at_minutes_or_below)
+        hi = float(uncertainty_config.zero_sigma_at_minutes_or_above)
+        if hi <= lo:
+            taper = minutes_base.new_ones(minutes_base.shape, dtype=torch.float32)
+        else:
+            taper = ((float(hi) - minutes_base.to(dtype=torch.float32)) / float(hi - lo)).clamp(min=0.0, max=1.0)
+        sigma_eff = sigma_eff * taper
     top_k = max(0, int(uncertainty_config.preserve_top_k_per_team))
     protected_mask = torch.zeros_like(active, dtype=torch.bool)
     if top_k > 0:
@@ -3133,7 +3160,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--minutes-uncertainty-preserve-top-k-per-team", type=int, default=3)
     parser.add_argument("--minutes-uncertainty-full-sigma-at-minutes-or-below", type=float, default=24.0)
     parser.add_argument("--minutes-uncertainty-zero-sigma-at-minutes-or-above", type=float, default=32.0)
+    parser.add_argument("--minutes-uncertainty-apply-minutes-taper", type=int, default=1, choices=[0, 1])
     parser.add_argument("--minutes-uncertainty-dirichlet-base-concentration", type=float, default=24.0)
+    parser.add_argument("--minutes-uncertainty-empirical-bin-edges-json", type=str, default="")
+    parser.add_argument("--minutes-uncertainty-empirical-sigma-json", type=str, default="")
+    parser.add_argument("--minutes-uncertainty-empirical-blend-alpha", type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -3263,7 +3294,15 @@ def main() -> None:
         preserve_top_k_per_team=int(args.minutes_uncertainty_preserve_top_k_per_team),
         full_sigma_at_minutes_or_below=float(args.minutes_uncertainty_full_sigma_at_minutes_or_below),
         zero_sigma_at_minutes_or_above=float(args.minutes_uncertainty_zero_sigma_at_minutes_or_above),
+        apply_minutes_taper=bool(int(args.minutes_uncertainty_apply_minutes_taper)),
         dirichlet_base_concentration=float(args.minutes_uncertainty_dirichlet_base_concentration),
+        empirical_minutes_bin_edges=tuple(
+            float(x) for x in (json.loads(args.minutes_uncertainty_empirical_bin_edges_json) if args.minutes_uncertainty_empirical_bin_edges_json else [])
+        ),
+        empirical_sigma_by_bin=tuple(
+            float(x) for x in (json.loads(args.minutes_uncertainty_empirical_sigma_json) if args.minutes_uncertainty_empirical_sigma_json else [])
+        ),
+        empirical_blend_alpha=float(args.minutes_uncertainty_empirical_blend_alpha),
     )
 
     features_df = _coerce_join_keys(pd.read_parquet(dataset_dir / "features.parquet"), name="features")
@@ -3395,7 +3434,11 @@ def main() -> None:
             "preserve_top_k_per_team": int(minutes_uncertainty_config.preserve_top_k_per_team),
             "full_sigma_at_minutes_or_below": float(minutes_uncertainty_config.full_sigma_at_minutes_or_below),
             "zero_sigma_at_minutes_or_above": float(minutes_uncertainty_config.zero_sigma_at_minutes_or_above),
+            "apply_minutes_taper": bool(minutes_uncertainty_config.apply_minutes_taper),
             "dirichlet_base_concentration": float(minutes_uncertainty_config.dirichlet_base_concentration),
+            "empirical_minutes_bin_edges": list(minutes_uncertainty_config.empirical_minutes_bin_edges),
+            "empirical_sigma_by_bin": list(minutes_uncertainty_config.empirical_sigma_by_bin),
+            "empirical_blend_alpha": float(minutes_uncertainty_config.empirical_blend_alpha),
             "prior_std_columns": list(minutes_uncertainty_config.prior_std_columns),
         },
         "make_model": {

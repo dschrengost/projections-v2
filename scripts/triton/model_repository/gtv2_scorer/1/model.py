@@ -86,6 +86,7 @@ class TritonPythonModel:
         )
         from projections.rotation.sample_worlds_v2 import (
             MakeModelConfig,
+            MinutesUncertaintyConfig,
             sample_worlds_for_batch,
         )
 
@@ -97,6 +98,7 @@ class TritonPythonModel:
         self._GameLevelDataset = GameLevelDataset
         self._collate_game_level_examples = collate_game_level_examples
         self._MakeModelConfig = MakeModelConfig
+        self._MinutesUncertaintyConfig = MinutesUncertaintyConfig
         self._sample_worlds_for_batch = sample_worlds_for_batch
 
         self._default_bundle_dir = Path(
@@ -249,6 +251,64 @@ class TritonPythonModel:
             payload.get("make_model_use_learned_efficiency"),
             default=True,
         )
+        minutes_uncertainty_config = self._MinutesUncertaintyConfig(
+            enabled=_parse_bool(payload.get("minutes_uncertainty_enabled"), default=False),
+            mode=str(payload.get("minutes_uncertainty_mode") or "gaussian"),
+            gaussian_scale=_parse_float(
+                payload.get("minutes_uncertainty_gaussian_scale"),
+                default=1.0,
+            ),
+            min_sigma=_parse_float(
+                payload.get("minutes_uncertainty_min_sigma"),
+                default=0.75,
+            ),
+            max_sigma=_parse_float(
+                payload.get("minutes_uncertainty_max_sigma"),
+                default=6.0,
+            ),
+            fallback_sigma=_parse_float(
+                payload.get("minutes_uncertainty_fallback_sigma"),
+                default=1.5,
+            ),
+            use_hurdle_sigma=_parse_bool(
+                payload.get("minutes_uncertainty_use_hurdle_sigma"),
+                default=True,
+            ),
+            use_prior_std=_parse_bool(
+                payload.get("minutes_uncertainty_use_prior_std"),
+                default=True,
+            ),
+            preserve_top_k_per_team=_parse_int(
+                payload.get("minutes_uncertainty_preserve_top_k_per_team"),
+                default=3,
+            ),
+            full_sigma_at_minutes_or_below=_parse_float(
+                payload.get("minutes_uncertainty_full_sigma_at_minutes_or_below"),
+                default=24.0,
+            ),
+            zero_sigma_at_minutes_or_above=_parse_float(
+                payload.get("minutes_uncertainty_zero_sigma_at_minutes_or_above"),
+                default=32.0,
+            ),
+            apply_minutes_taper=_parse_bool(
+                payload.get("minutes_uncertainty_apply_minutes_taper"),
+                default=True,
+            ),
+            dirichlet_base_concentration=_parse_float(
+                payload.get("minutes_uncertainty_dirichlet_base_concentration"),
+                default=24.0,
+            ),
+            empirical_minutes_bin_edges=tuple(
+                float(x) for x in list(payload.get("minutes_uncertainty_empirical_bin_edges") or [])
+            ),
+            empirical_sigma_by_bin=tuple(
+                float(x) for x in list(payload.get("minutes_uncertainty_empirical_sigma_by_bin") or [])
+            ),
+            empirical_blend_alpha=_parse_float(
+                payload.get("minutes_uncertainty_empirical_blend_alpha"),
+                default=1.0,
+            ),
+        )
 
         self._set_inference_seed(random_seed)
         config, model, device = self._ensure_model(
@@ -288,6 +348,7 @@ class TritonPythonModel:
                 active_temperature=float(active_temperature),
                 strict_contracts=bool(strict_world_contracts),
                 make_model_config=make_model_cfg,
+                minutes_uncertainty_config=minutes_uncertainty_config,
             )
             world_frames.append(df_batch)
             contract_counter.update(checks)

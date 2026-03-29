@@ -2028,6 +2028,95 @@ def test_sample_worlds_for_batch_minutes_uncertainty_adds_same_signature_varianc
     assert float(protected_rows["minutes"].std(ddof=0)) <= 1e-5
 
 
+def test_sample_worlds_for_batch_empirical_minutes_uncertainty_can_widen_core_players() -> None:
+    cols = list(FLOW_TARGET_COLUMNS_V1)
+
+    class _FlowHead:
+        def sample(self, z: torch.Tensor, **_: object) -> torch.Tensor:
+            return torch.ones_like(z, dtype=torch.float32)
+
+    class _Out:
+        def __init__(
+            self,
+            valid_flat: torch.Tensor,
+            active_flat: torch.Tensor,
+            minutes_flat: torch.Tensor,
+            team_idx: torch.Tensor,
+        ):
+            self.player_states = torch.zeros((valid_flat.shape[0], 30, 4), dtype=torch.float32)
+            self.team_states = torch.zeros((valid_flat.shape[0], 2, 4), dtype=torch.float32)
+            self.game_state = torch.zeros((valid_flat.shape[0], 4), dtype=torch.float32)
+            self.player_valid_mask = valid_flat
+            self.player_team_index = team_idx
+            self.active = type("Active", (), {"active_mask": active_flat})()
+            self.minutes = type("Minutes", (), {"minutes": minutes_flat, "sigma": None})()
+            self.flow = None
+            self.backbone = None
+            self.usage_share = None
+            self.efficiency = None
+
+    class _Model:
+        def __init__(self) -> None:
+            self.flow_head = _FlowHead()
+            self.flow_target_columns = cols
+            self.enable_possession_backbone = False
+
+        def __call__(self, pf: torch.Tensor, pvm: torch.Tensor, **_: object) -> _Out:
+            bsz = int(pf.shape[0])
+            valid_flat = pvm.reshape(bsz, -1).to(dtype=torch.bool)
+            active_flat = torch.zeros_like(valid_flat, dtype=torch.bool)
+            active_flat[:, :8] = True
+            active_flat[:, 15:23] = True
+            minutes_flat = torch.zeros((bsz, 30), dtype=torch.float32)
+            minutes_flat[:, :5] = 34.0
+            minutes_flat[:, 5:8] = 18.0
+            minutes_flat[:, 15:20] = 34.0
+            minutes_flat[:, 20:23] = 18.0
+            return _Out(valid_flat=valid_flat, active_flat=active_flat, minutes_flat=minutes_flat, team_idx=_team_index(bsz))
+
+    player_ids = torch.arange(1001, 1031, dtype=torch.long).reshape(1, 2, 15)
+    player_valid_mask = torch.zeros((1, 2, 15), dtype=torch.bool)
+    player_valid_mask[:, 0, :8] = True
+    player_valid_mask[:, 1, :8] = True
+    player_features = torch.zeros((1, 2, 15, 1), dtype=torch.float32)
+
+    batch: dict[str, torch.Tensor | list[str]] = {
+        "player_features": player_features,
+        "player_valid_mask": player_valid_mask,
+        "game_features": torch.zeros((1, 0), dtype=torch.float32),
+        "team_features": torch.zeros((1, 2, 0), dtype=torch.float32),
+        "player_ids": player_ids,
+        "team_ids": torch.tensor([[10, 20]], dtype=torch.long),
+        "game_id_norm": ["1001"],
+        "game_date": ["2026-01-18"],
+    }
+
+    worlds_df, checks = sample_worlds_for_batch(
+        _Model(),
+        batch,
+        device=torch.device("cpu"),
+        num_worlds=12,
+        chunk_size=12,
+        active_temperature=1.0,
+        strict_contracts=True,
+        minutes_uncertainty_config=MinutesUncertaintyConfig(
+            enabled=True,
+            gaussian_scale=0.5,
+            preserve_top_k_per_team=0,
+            use_hurdle_sigma=False,
+            use_prior_std=False,
+            apply_minutes_taper=False,
+            empirical_minutes_bin_edges=(0.0, 24.0, 32.0, 40.0),
+            empirical_sigma_by_bin=(6.0, 5.0, 4.0),
+            empirical_blend_alpha=1.0,
+        ),
+    )
+    assert checks["total_violations"] == 0
+    core_rows = worlds_df.loc[worlds_df["player_id"] == 1001].sort_values("world_idx")
+    assert len(core_rows) == 12
+    assert float(core_rows["minutes"].std(ddof=0)) > 0.5
+
+
 def test_sample_worlds_for_batch_hard_masks_out_players() -> None:
     cols = list(FLOW_TARGET_COLUMNS_V1)
 

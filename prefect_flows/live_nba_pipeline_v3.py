@@ -316,6 +316,21 @@ def _load_gtv2_inference_current_config() -> dict[str, Any]:
         "tree_rate_predictions_csv": None,
         "tree_rate_blend_alpha": 0.0,
         "tree_rate_oreb_share_override_enabled": False,
+        "minutes_uncertainty_enabled": False,
+        "minutes_uncertainty_mode": "gaussian",
+        "minutes_uncertainty_gaussian_scale": 1.0,
+        "minutes_uncertainty_min_sigma": 0.75,
+        "minutes_uncertainty_max_sigma": 6.0,
+        "minutes_uncertainty_fallback_sigma": 1.5,
+        "minutes_uncertainty_use_hurdle_sigma": True,
+        "minutes_uncertainty_use_prior_std": True,
+        "minutes_uncertainty_preserve_top_k_per_team": 3,
+        "minutes_uncertainty_full_sigma_at_minutes_or_below": 24.0,
+        "minutes_uncertainty_zero_sigma_at_minutes_or_above": 32.0,
+        "minutes_uncertainty_apply_minutes_taper": True,
+        "minutes_uncertainty_dirichlet_base_concentration": 24.0,
+        "minutes_uncertainty_lookup_artifact": None,
+        "minutes_uncertainty_empirical_blend_alpha": 1.0,
     }
     if config_path.exists():
         payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -1035,6 +1050,31 @@ def _attach_gtv2_score_surface(
         "rows": int(len(out)),
         "matched_rows": matched,
         "missing_rows": int(len(out) - matched),
+    }
+
+
+def _load_minutes_uncertainty_lookup_artifact(path: str | None) -> dict[str, Any]:
+    resolved = str(path or "").strip()
+    if not resolved:
+        return {"applied": False, "reason": "disabled", "bin_edges": [], "sigma_by_bin": []}
+    artifact_path = Path(resolved).expanduser().resolve()
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"invalid minutes uncertainty artifact payload: {artifact_path}")
+    bin_edges = [float(x) for x in payload.get("bin_edges", [])]
+    sigma_by_bin = [float(x) for x in payload.get("sigma_by_bin", [])]
+    if len(bin_edges) < 2 or len(sigma_by_bin) != len(bin_edges) - 1:
+        raise RuntimeError(
+            f"invalid minutes uncertainty artifact bins: path={artifact_path} "
+            f"len(bin_edges)={len(bin_edges)} len(sigma_by_bin)={len(sigma_by_bin)}"
+        )
+    return {
+        "applied": True,
+        "artifact_path": str(artifact_path),
+        "sigma_source": payload.get("sigma_source"),
+        "row_count": int(payload.get("row_count", 0)),
+        "bin_edges": bin_edges,
+        "sigma_by_bin": sigma_by_bin,
     }
 
 
@@ -6363,6 +6403,21 @@ def generate_worlds_gtv2_live_task(
     tree_rate_predictions_csv: str | None = None,
     tree_rate_blend_alpha: float = 0.0,
     tree_rate_oreb_share_override_enabled: bool = False,
+    minutes_uncertainty_enabled: bool = False,
+    minutes_uncertainty_mode: str = "gaussian",
+    minutes_uncertainty_gaussian_scale: float = 1.0,
+    minutes_uncertainty_min_sigma: float = 0.75,
+    minutes_uncertainty_max_sigma: float = 6.0,
+    minutes_uncertainty_fallback_sigma: float = 1.5,
+    minutes_uncertainty_use_hurdle_sigma: bool = True,
+    minutes_uncertainty_use_prior_std: bool = True,
+    minutes_uncertainty_preserve_top_k_per_team: int = 3,
+    minutes_uncertainty_full_sigma_at_minutes_or_below: float = 24.0,
+    minutes_uncertainty_zero_sigma_at_minutes_or_above: float = 32.0,
+    minutes_uncertainty_apply_minutes_taper: bool = True,
+    minutes_uncertainty_dirichlet_base_concentration: float = 24.0,
+    minutes_uncertainty_lookup_artifact: str | None = None,
+    minutes_uncertainty_empirical_blend_alpha: float = 1.0,
 ) -> dict[str, str]:
     run_dir = (
         data_root
@@ -6452,6 +6507,9 @@ def generate_worlds_gtv2_live_task(
         device = _resolve_torch_device(gtv2_device)
         device_for_summary = str(device)
         worlds_runtime = _gtv2_worlds_runtime()
+        minutes_uncertainty_lookup = _load_minutes_uncertainty_lookup_artifact(
+            minutes_uncertainty_lookup_artifact
+        )
         make_model_cfg = worlds_runtime.MakeModelConfig(
             mode=str(make_model_mode),
             use_learned_efficiency=bool(make_model_use_learned_efficiency),
@@ -6581,6 +6639,34 @@ def generate_worlds_gtv2_live_task(
                     ),
                     "allocation_top_usage_top2_scale": float(
                         allocation_top_usage_top2_scale
+                    ),
+                    "minutes_uncertainty_enabled": bool(minutes_uncertainty_enabled),
+                    "minutes_uncertainty_mode": str(minutes_uncertainty_mode),
+                    "minutes_uncertainty_gaussian_scale": float(minutes_uncertainty_gaussian_scale),
+                    "minutes_uncertainty_min_sigma": float(minutes_uncertainty_min_sigma),
+                    "minutes_uncertainty_max_sigma": float(minutes_uncertainty_max_sigma),
+                    "minutes_uncertainty_fallback_sigma": float(minutes_uncertainty_fallback_sigma),
+                    "minutes_uncertainty_use_hurdle_sigma": bool(minutes_uncertainty_use_hurdle_sigma),
+                    "minutes_uncertainty_use_prior_std": bool(minutes_uncertainty_use_prior_std),
+                    "minutes_uncertainty_preserve_top_k_per_team": int(minutes_uncertainty_preserve_top_k_per_team),
+                    "minutes_uncertainty_full_sigma_at_minutes_or_below": float(
+                        minutes_uncertainty_full_sigma_at_minutes_or_below
+                    ),
+                    "minutes_uncertainty_zero_sigma_at_minutes_or_above": float(
+                        minutes_uncertainty_zero_sigma_at_minutes_or_above
+                    ),
+                    "minutes_uncertainty_apply_minutes_taper": bool(minutes_uncertainty_apply_minutes_taper),
+                    "minutes_uncertainty_dirichlet_base_concentration": float(
+                        minutes_uncertainty_dirichlet_base_concentration
+                    ),
+                    "minutes_uncertainty_empirical_bin_edges": list(
+                        minutes_uncertainty_lookup.get("bin_edges", [])
+                    ),
+                    "minutes_uncertainty_empirical_sigma_by_bin": list(
+                        minutes_uncertainty_lookup.get("sigma_by_bin", [])
+                    ),
+                    "minutes_uncertainty_empirical_blend_alpha": float(
+                        minutes_uncertainty_empirical_blend_alpha
                     ),
                 }
                 response: dict[str, Any] | None = None
@@ -6738,6 +6824,34 @@ def generate_worlds_gtv2_live_task(
                 num_workers=0,
                 collate_fn=collate_game_level_examples,
             )
+            minutes_uncertainty_config = worlds_runtime.MinutesUncertaintyConfig(
+                enabled=bool(minutes_uncertainty_enabled),
+                mode=str(minutes_uncertainty_mode),
+                gaussian_scale=float(minutes_uncertainty_gaussian_scale),
+                min_sigma=float(minutes_uncertainty_min_sigma),
+                max_sigma=float(minutes_uncertainty_max_sigma),
+                fallback_sigma=float(minutes_uncertainty_fallback_sigma),
+                use_hurdle_sigma=bool(minutes_uncertainty_use_hurdle_sigma),
+                use_prior_std=bool(minutes_uncertainty_use_prior_std),
+                preserve_top_k_per_team=int(minutes_uncertainty_preserve_top_k_per_team),
+                full_sigma_at_minutes_or_below=float(
+                    minutes_uncertainty_full_sigma_at_minutes_or_below
+                ),
+                zero_sigma_at_minutes_or_above=float(
+                    minutes_uncertainty_zero_sigma_at_minutes_or_above
+                ),
+                apply_minutes_taper=bool(minutes_uncertainty_apply_minutes_taper),
+                dirichlet_base_concentration=float(
+                    minutes_uncertainty_dirichlet_base_concentration
+                ),
+                empirical_minutes_bin_edges=tuple(
+                    float(x) for x in minutes_uncertainty_lookup.get("bin_edges", [])
+                ),
+                empirical_sigma_by_bin=tuple(
+                    float(x) for x in minutes_uncertainty_lookup.get("sigma_by_bin", [])
+                ),
+                empirical_blend_alpha=float(minutes_uncertainty_empirical_blend_alpha),
+            )
             world_frames: list[pd.DataFrame] = []
             contract_counter: Counter[str] = Counter()
             for batch in loader:
@@ -6761,6 +6875,7 @@ def generate_worlds_gtv2_live_task(
                     sparse_expert_model=sparse_expert_model,
                     sparse_hybrid_config=sparse_hybrid_config,
                     sparse_gate_config=sparse_gate_config,
+                    minutes_uncertainty_config=minutes_uncertainty_config,
                 )
                 world_frames.append(df_batch)
                 contract_counter.update(checks)
@@ -8568,6 +8683,52 @@ def nba_live_pipeline_v3_flow(
             ),
             tree_rate_oreb_share_override_enabled=bool(
                 gtv2_current_cfg.get("tree_rate_oreb_share_override_enabled", False)
+            ),
+            minutes_uncertainty_enabled=bool(
+                gtv2_current_cfg.get("minutes_uncertainty_enabled", False)
+            ),
+            minutes_uncertainty_mode=str(
+                gtv2_current_cfg.get("minutes_uncertainty_mode", "gaussian")
+            ),
+            minutes_uncertainty_gaussian_scale=float(
+                gtv2_current_cfg.get("minutes_uncertainty_gaussian_scale", 1.0)
+            ),
+            minutes_uncertainty_min_sigma=float(
+                gtv2_current_cfg.get("minutes_uncertainty_min_sigma", 0.75)
+            ),
+            minutes_uncertainty_max_sigma=float(
+                gtv2_current_cfg.get("minutes_uncertainty_max_sigma", 6.0)
+            ),
+            minutes_uncertainty_fallback_sigma=float(
+                gtv2_current_cfg.get("minutes_uncertainty_fallback_sigma", 1.5)
+            ),
+            minutes_uncertainty_use_hurdle_sigma=bool(
+                gtv2_current_cfg.get("minutes_uncertainty_use_hurdle_sigma", True)
+            ),
+            minutes_uncertainty_use_prior_std=bool(
+                gtv2_current_cfg.get("minutes_uncertainty_use_prior_std", True)
+            ),
+            minutes_uncertainty_preserve_top_k_per_team=int(
+                gtv2_current_cfg.get("minutes_uncertainty_preserve_top_k_per_team", 3)
+            ),
+            minutes_uncertainty_full_sigma_at_minutes_or_below=float(
+                gtv2_current_cfg.get("minutes_uncertainty_full_sigma_at_minutes_or_below", 24.0)
+            ),
+            minutes_uncertainty_zero_sigma_at_minutes_or_above=float(
+                gtv2_current_cfg.get("minutes_uncertainty_zero_sigma_at_minutes_or_above", 32.0)
+            ),
+            minutes_uncertainty_apply_minutes_taper=bool(
+                gtv2_current_cfg.get("minutes_uncertainty_apply_minutes_taper", True)
+            ),
+            minutes_uncertainty_dirichlet_base_concentration=float(
+                gtv2_current_cfg.get("minutes_uncertainty_dirichlet_base_concentration", 24.0)
+            ),
+            minutes_uncertainty_lookup_artifact=(
+                str(gtv2_current_cfg.get("minutes_uncertainty_lookup_artifact") or "").strip()
+                or None
+            ),
+            minutes_uncertainty_empirical_blend_alpha=float(
+                gtv2_current_cfg.get("minutes_uncertainty_empirical_blend_alpha", 1.0)
             ),
         )
 

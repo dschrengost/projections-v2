@@ -5061,6 +5061,82 @@ Operational implication:
 - sparse next-man-up overlays are selective inference-time modifications on top of
   GTv2 minutes/active behavior, not a broad replacement for core-minute calibration
 
+### Empirical minutes-uncertainty lookup (2026-03-29)
+
+The prior minutes-uncertainty experiments (Diagnostic 3, first experiment, selective
+and Dirichlet variants) showed that inference-only uncertainty injection is a real
+lever, but naive approaches all trade away mean quality. The learned
+minutes-distribution branch (`minutesdist_mtfanneal`) fixed the structural defect —
+minutes are no longer deterministic conditional on active signature — but the
+inference-side taper still kills residual variance for core/starter players:
+
+- `full_sigma_at_minutes_or_below = 24.0`, `zero_sigma_at_minutes_or_above = 32.0`
+- `preserve_top_k_per_team = 3`
+
+These two gates drive the effective sigma to exactly zero for any player above ~32
+predicted minutes and for the top 3 minute players on each team. The result is that
+even with the learned distribution and trained sigma, the sampler produces no
+within-signature minute variance for starters.
+
+The fix is to replace the hand-tuned taper with an empirical residual-width lookup
+built from historical score-to-actual residuals.
+
+**Lookup artifact built from 60-day eval (`eval_player_preds_60d.parquet`):**
+
+Source: `gtv2_flow_v2_minutesdist_mtfanneal_20260327T050033Z`
+Method: IQR-based sigma estimation per predicted-minutes bucket (7,705 active rows)
+
+| Bucket | n | Bias | MAE | Empirical σ |
+|--------|-----|------|-----|-------------|
+| [0, 8) | 16 | −3.68 | 6.19 | 4.26 |
+| [8, 12) | 301 | −2.99 | 5.96 | 7.61 |
+| [12, 16) | 852 | −1.58 | 6.30 | 8.07 |
+| [16, 20) | 1142 | −1.06 | 5.54 | 6.05 |
+| [20, 24) | 1186 | −0.64 | 5.21 | 5.80 |
+| [24, 28) | 1285 | −1.10 | 4.90 | 5.38 |
+| [28, 32) | 1339 | −1.55 | 4.61 | 5.07 |
+| [32, 36) | 1238 | −1.24 | 3.90 | 4.25 |
+| [36, 40) | 335 | −1.53 | 3.67 | 4.05 |
+| [40, 60) | 11 | −4.76 | 5.23 | 2.81 |
+
+Key observation: the data says a 34-minute starter has ~4.25 σ of real residual
+width. A 28-minute role player has ~5.07 σ. The old taper was forcing both to
+near-zero. The shape is sensible — bench players have the widest uncertainty
+(~8 σ at 12-16 min), tapering monotonically down to ~4 σ for heavy starters.
+
+**Implementation:**
+
+- `scripts/rotation/build_minutes_uncertainty_lookup.py`: offline script that reads
+  an eval CSV or parquet and produces a JSON lookup artifact with `bin_edges` and
+  `sigma_by_bin`
+- `MinutesUncertaintyConfig` extended with:
+  - `apply_minutes_taper` (bool): disables the old linear taper
+  - `empirical_minutes_bin_edges` / `empirical_sigma_by_bin`: the lookup tables
+  - `empirical_blend_alpha`: blend weight vs model-derived sigma
+- `_estimate_minutes_sigma()` blends empirical sigma when the lookup is provided
+- `_sample_minutes_with_uncertainty()` taper is now conditional
+- full pipeline plumbing: config loaded from `minutes_uncertainty_lookup_artifact`
+  in the GTv2 inference config, forwarded through both local and Triton worlds paths
+
+**Activation config** (conservative starting point):
+
+```json
+{
+  "minutes_uncertainty_enabled": true,
+  "minutes_uncertainty_lookup_artifact": "<path to lookup JSON>",
+  "minutes_uncertainty_apply_minutes_taper": false,
+  "minutes_uncertainty_preserve_top_k_per_team": 0,
+  "minutes_uncertainty_gaussian_scale": 0.5
+}
+```
+
+With `gaussian_scale=0.5`, a 34-min starter gets effective σ ≈ 2.1, yielding a
+p10–p90 spread of roughly ±2.7 minutes — small but real tails, not the current
+zero. The scale knob allows dialing up from there without retraining.
+
+Artifact:
+- `/home/daniel/projections-data/training/runs/gtv2_flow_v2_minutesdist_mtfanneal_20260327T050033Z/minutes_uncertainty_lookup/lookup_iqr_20260329T212921Z.json`
+
 Important implementation detail discovered during live debugging:
 
 - the current worlds task does **not** consume the persisted `scores.parquet`
