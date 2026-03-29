@@ -5158,3 +5158,56 @@ Current implication:
   1. making worlds generation consume the persisted score surface, or
   2. explicitly accepting score/world independence and debugging both outputs as
      separate model surfaces
+
+### High-confidence starter force-active bypass (2026-03-29)
+
+The sticky-inactives commit (`25e19838`) introduced a `score_active_allow_flat` gate
+that prevents force-active from firing when the persisted score surface has
+`active_deterministic = 0`. This interacted badly with active-head instability:
+
+**Root cause identified:** The GTv2 active head is sensitive to near-tip feature
+shifts — specifically teammate OUT status changes (which spike `vacated_minutes_*`
+and shift `team_n_not_out`, `depth_same_pos_not_out`) and sportsbook line closures
+(which swing `an_*_line_std` and `an_*_books` by multiple normalized standard
+deviations). These shifts are large enough to flip the active prediction for stars
+who should be unconditionally active.
+
+**Observed on 2026-03-29:** Jayson Tatum (1628369) flickered between
+`active_deterministic = 1` (30+ minutes) and `active_deterministic = 0` across
+runs throughout the day. Two distinct triggers:
+
+1. Jaylen Brown going Q → OUT at ~16:45Z caused `vacated_minutes_prior_20_same_pos`
+   to spike from 0 → 35, `depth_same_pos_not_out` from 3 → 2 (normalized Δ ≈ −0.6
+   to −0.9)
+2. Sportsbook line closures near tip caused `an_3pm_line_std` to swing by −6.4
+   normalized σ, `an_ast_line_std` by −4.4 σ
+
+Tatum's own features were unambiguous throughout: `prior_play_prob = 0.97`,
+`lineup_starter_announced = 1`, `is_out = 0`, `an_implied_minutes ≈ 35–39`.
+
+**Fix:** Players with `prior_play_prob >= 0.85` AND starter force-active now bypass
+the `score_active_allow_flat` gate. When bypassed with zero model minutes, the
+sampler seeds `minutes_for_sampling` from the props-implied anchor (`an_implied_minutes`)
+and runs it through the normal simplex projection, so the result is
+team-budget-consistent.
+
+**Verified locally on the Boston game (22501085):** with the score surface still
+showing Tatum at `active_deterministic = 0`:
+
+- Before fix: Tatum gets 0 minutes across all worlds
+- After fix: Tatum gets 34.8 min mean, σ = 2.1, range 28.5–41.5, 100% active
+
+The 0.85 threshold is conservative — it catches confirmed starters and high-
+probability rotation players without overriding the active head for genuinely
+uncertain fringe cases.
+
+**Remaining concern:** This is a guardrail, not a root-cause fix. The active head
+should not be this sensitive to teammate/props feature shifts for high-confidence
+starters. Longer-term options:
+
+1. Feature engineering: clip or smooth the props book-count and line-std features
+   near game time to reduce input-space volatility
+2. Training: add a regularization term that penalizes large active-probability
+   swings for high-prior-play-prob players
+3. Architecture: condition the active head on a stabilized prior signal so it
+   cannot override strong contextual evidence
