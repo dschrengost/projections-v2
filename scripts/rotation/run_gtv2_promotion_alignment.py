@@ -30,6 +30,8 @@ from projections.rotation.game_transformer_v2 import (
 from projections.rotation.gtv2_promotion_hybrid import (
     BenchRiserHybridConfig,
     PromotionHybridConfig,
+    SparseEmergencyGateConfig,
+    SparseEmergencyHybridConfig,
     assert_promotion_hybrid_compatible,
 )
 from projections.rotation.sample_worlds_v2 import (
@@ -70,6 +72,14 @@ class VariantSpec:
     promotion_hist_start_rate_max: float = 0.20
     promotion_blend_mode: str = "uplift_only"
     promotion_force_active_candidates: bool = False
+    sparse_expert_run_dir: str | None = None
+    sparse_prior_minutes_max: float = 12.0
+    sparse_prior_play_prob_max: float = 0.50
+    sparse_blend_mode: str = "uplift_only"
+    sparse_force_active_candidates: bool = False
+    sparse_blend_alpha: float = 1.0
+    sparse_require_no_props: bool = False
+    sparse_gate_artifact: str | None = None
     bench_expert_run_dir: str | None = None
     bench_prior_minutes_min: float = 12.0
     bench_prior_play_prob_min: float = 0.80
@@ -77,6 +87,7 @@ class VariantSpec:
     bench_hist_start_rate_max: float = 0.35
     bench_blend_mode: str = "uplift_only"
     bench_force_active_candidates: bool = False
+    bench_blend_alpha: float = 1.0
     make_model: str = "beta_binomial_all"
     allocation_source: str = "emergent"
     allocation_blend_alpha: float = 0.5
@@ -273,6 +284,34 @@ def _generate_raw_worlds(
             uplift_only=(str(spec.promotion_blend_mode).strip().lower() == "uplift_only"),
             force_active_candidates=bool(spec.promotion_force_active_candidates),
         )
+    sparse_expert_model: torch.nn.Module | None = None
+    sparse_hybrid_config: SparseEmergencyHybridConfig | None = None
+    sparse_gate_config: SparseEmergencyGateConfig | None = None
+    sparse_expert_run_dir: Path | None = None
+    if spec.sparse_expert_run_dir:
+        sparse_expert_run_dir = _resolve_run_dir(str(spec.sparse_expert_run_dir))
+        sparse_expert_cfg = GameTransformerV2Config.load(sparse_expert_run_dir / "config.json")
+        assert_promotion_hybrid_compatible(config, sparse_expert_cfg)
+        sparse_expert_model = build_game_transformer_v2(sparse_expert_cfg)
+        setattr(sparse_expert_model, "gtv2_config", sparse_expert_cfg)
+        expert_state = torch.load(sparse_expert_run_dir / "model.pt", map_location="cpu")
+        sparse_expert_model.load_state_dict(expert_state)
+        sparse_expert_model = sparse_expert_model.to(device=device)
+        sparse_expert_model.eval()
+        sparse_hybrid_config = SparseEmergencyHybridConfig.from_model_config(
+            config,
+            prior_minutes_max=float(spec.sparse_prior_minutes_max),
+            prior_play_prob_max=float(spec.sparse_prior_play_prob_max),
+            uplift_only=(str(spec.sparse_blend_mode).strip().lower() == "uplift_only"),
+            force_active_candidates=bool(spec.sparse_force_active_candidates),
+            blend_alpha=float(spec.sparse_blend_alpha),
+            require_no_props=bool(spec.sparse_require_no_props),
+        )
+    if spec.sparse_gate_artifact:
+        sparse_gate_config = SparseEmergencyGateConfig.from_artifact(
+            config,
+            str(spec.sparse_gate_artifact),
+        )
     bench_expert_model: torch.nn.Module | None = None
     bench_hybrid_config: BenchRiserHybridConfig | None = None
     bench_expert_run_dir: Path | None = None
@@ -299,6 +338,7 @@ def _generate_raw_worlds(
             hist_start_rate_max=float(spec.bench_hist_start_rate_max),
             uplift_only=(str(spec.bench_blend_mode).strip().lower() == "uplift_only"),
             force_active_candidates=bool(spec.bench_force_active_candidates),
+            blend_alpha=float(spec.bench_blend_alpha),
         )
 
     examples = build_game_level_examples(
@@ -359,6 +399,9 @@ def _generate_raw_worlds(
             minutes_uncertainty_config=minutes_uncertainty_config,
             promotion_expert_model=promotion_expert_model,
             promotion_hybrid_config=promotion_hybrid_config,
+            sparse_expert_model=sparse_expert_model,
+            sparse_hybrid_config=sparse_hybrid_config,
+            sparse_gate_config=sparse_gate_config,
             bench_expert_model=bench_expert_model,
             bench_hybrid_config=bench_hybrid_config,
         )
@@ -371,6 +414,8 @@ def _generate_raw_worlds(
     del model
     if promotion_expert_model is not None:
         del promotion_expert_model
+    if sparse_expert_model is not None:
+        del sparse_expert_model
     if bench_expert_model is not None:
         del bench_expert_model
     gc.collect()
@@ -380,6 +425,7 @@ def _generate_raw_worlds(
     return raw_worlds, {
         "run_dir": str(run_dir),
         "promotion_expert_run_dir": str(promotion_expert_run_dir) if promotion_expert_run_dir is not None else None,
+        "sparse_expert_run_dir": str(sparse_expert_run_dir) if sparse_expert_run_dir is not None else None,
         "bench_expert_run_dir": str(bench_expert_run_dir) if bench_expert_run_dir is not None else None,
         "promotion_hybrid": (
             {
@@ -390,6 +436,18 @@ def _generate_raw_worlds(
             if promotion_hybrid_config is not None
             else None
         ),
+        "sparse_hybrid": (
+            {
+                "prior_minutes_max": float(sparse_hybrid_config.prior_minutes_max),
+                "prior_play_prob_max": float(sparse_hybrid_config.prior_play_prob_max),
+                "blend_mode": str(spec.sparse_blend_mode),
+                "blend_alpha": float(spec.sparse_blend_alpha),
+                "require_no_props": bool(spec.sparse_require_no_props),
+                "gate_artifact": str(spec.sparse_gate_artifact) if spec.sparse_gate_artifact else None,
+            }
+            if sparse_hybrid_config is not None
+            else None
+        ),
         "bench_hybrid": (
             {
                 "prior_minutes_min": float(bench_hybrid_config.prior_minutes_min),
@@ -397,6 +455,7 @@ def _generate_raw_worlds(
                 "implied_minutes_min": float(bench_hybrid_config.implied_minutes_min),
                 "hist_start_rate_max": float(bench_hybrid_config.hist_start_rate_max),
                 "blend_mode": str(spec.bench_blend_mode),
+                "blend_alpha": float(spec.bench_blend_alpha),
             }
             if bench_hybrid_config is not None
             else None

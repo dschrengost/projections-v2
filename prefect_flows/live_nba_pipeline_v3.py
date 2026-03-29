@@ -62,6 +62,8 @@ from projections.pipeline.v3_preflight import run_preflight_gate
 from projections.ops.manual_availability import list_manual_overrides, manual_override_report
 from projections.rotation.gtv2_promotion_hybrid import (
     PromotionHybridConfig,
+    SparseEmergencyGateConfig,
+    SparseEmergencyHybridConfig,
     assert_promotion_hybrid_compatible,
 )
 from projections.runtime_stamp import (
@@ -298,6 +300,14 @@ def _load_gtv2_inference_current_config() -> dict[str, Any]:
         "promotion_hist_start_rate_max": 0.20,
         "promotion_blend_mode": "uplift_only",
         "promotion_force_active_candidates": False,
+        "sparse_hybrid_enabled": False,
+        "sparse_expert_run_dir": None,
+        "sparse_prior_minutes_max": 12.0,
+        "sparse_prior_play_prob_max": 0.50,
+        "sparse_blend_mode": "uplift_only",
+        "sparse_blend_alpha": 1.0,
+        "sparse_require_no_props": False,
+        "sparse_gate_artifact": None,
     }
     if config_path.exists():
         payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -6011,6 +6021,14 @@ def generate_worlds_gtv2_live_task(
     promotion_hist_start_rate_max: float = 0.20,
     promotion_blend_mode: str = "uplift_only",
     promotion_force_active_candidates: bool = False,
+    sparse_hybrid_enabled: bool = False,
+    sparse_expert_run_dir: str | None = None,
+    sparse_prior_minutes_max: float = 12.0,
+    sparse_prior_play_prob_max: float = 0.50,
+    sparse_blend_mode: str = "uplift_only",
+    sparse_blend_alpha: float = 1.0,
+    sparse_require_no_props: bool = False,
+    sparse_gate_artifact: str | None = None,
 ) -> dict[str, str]:
     run_dir = (
         data_root
@@ -6090,6 +6108,10 @@ def generate_worlds_gtv2_live_task(
         if bool(promotion_hybrid_enabled) and backend != "local":
             raise RuntimeError(
                 "promotion hybrid currently supports only local GTv2 worlds inference"
+            )
+        if bool(sparse_hybrid_enabled) and backend != "local":
+            raise RuntimeError(
+                "sparse hybrid currently supports only local GTv2 worlds inference"
             )
         logger = get_run_logger()
         _set_inference_seed(int(random_seed))
@@ -6277,6 +6299,9 @@ def generate_worlds_gtv2_live_task(
             )
             promotion_expert_model = None
             promotion_hybrid_config: PromotionHybridConfig | None = None
+            sparse_expert_model = None
+            sparse_hybrid_config: SparseEmergencyHybridConfig | None = None
+            sparse_gate_config: SparseEmergencyGateConfig | None = None
             if bool(promotion_hybrid_enabled):
                 if not promotion_expert_run_dir:
                     raise RuntimeError(
@@ -6303,6 +6328,37 @@ def generate_worlds_gtv2_live_task(
                     uplift_only=(blend_mode == "uplift_only"),
                     force_active_candidates=bool(promotion_force_active_candidates),
                 )
+            if bool(sparse_hybrid_enabled):
+                if not sparse_expert_run_dir:
+                    raise RuntimeError(
+                        "sparse_hybrid_enabled requires sparse_expert_run_dir"
+                    )
+                sparse_expert_path = Path(sparse_expert_run_dir).expanduser().resolve()
+                sparse_expert_cfg, sparse_expert_model = _load_gtv2_model(
+                    sparse_expert_path,
+                    device=device,
+                    flow_scale_clip_override=flow_scale_clip_override,
+                )
+                assert_promotion_hybrid_compatible(config, sparse_expert_cfg)
+                sparse_mode = str(sparse_blend_mode).strip().lower()
+                if sparse_mode not in {"uplift_only", "replace"}:
+                    raise RuntimeError(
+                        "sparse_blend_mode must be one of: uplift_only, replace"
+                    )
+                sparse_hybrid_config = SparseEmergencyHybridConfig.from_model_config(
+                    config,
+                    prior_minutes_max=float(sparse_prior_minutes_max),
+                    prior_play_prob_max=float(sparse_prior_play_prob_max),
+                    uplift_only=(sparse_mode == "uplift_only"),
+                    force_active_candidates=False,
+                    blend_alpha=float(sparse_blend_alpha),
+                    require_no_props=bool(sparse_require_no_props),
+                )
+                if sparse_gate_artifact:
+                    sparse_gate_config = SparseEmergencyGateConfig.from_artifact(
+                        config,
+                        str(sparse_gate_artifact),
+                    )
             examples = _build_gtv2_inference_examples(
                 features_df=features_df,
                 game_date=game_date,
@@ -6335,6 +6391,9 @@ def generate_worlds_gtv2_live_task(
                     ),
                     promotion_expert_model=promotion_expert_model,
                     promotion_hybrid_config=promotion_hybrid_config,
+                    sparse_expert_model=sparse_expert_model,
+                    sparse_hybrid_config=sparse_hybrid_config,
+                    sparse_gate_config=sparse_gate_config,
                 )
                 world_frames.append(df_batch)
                 contract_counter.update(checks)
@@ -6552,6 +6611,34 @@ def generate_worlds_gtv2_live_task(
                 "force_active_candidates": (
                     bool(promotion_force_active_candidates)
                     if bool(promotion_hybrid_enabled)
+                    else None
+                ),
+            },
+            "sparse_hybrid": {
+                "enabled": bool(sparse_hybrid_enabled),
+                "expert_run_dir": (
+                    str(Path(sparse_expert_run_dir).expanduser().resolve())
+                    if sparse_expert_run_dir
+                    else None
+                ),
+                "prior_minutes_max": (
+                    float(sparse_prior_minutes_max) if bool(sparse_hybrid_enabled) else None
+                ),
+                "prior_play_prob_max": (
+                    float(sparse_prior_play_prob_max) if bool(sparse_hybrid_enabled) else None
+                ),
+                "blend_mode": (
+                    str(sparse_blend_mode) if bool(sparse_hybrid_enabled) else None
+                ),
+                "blend_alpha": (
+                    float(sparse_blend_alpha) if bool(sparse_hybrid_enabled) else None
+                ),
+                "require_no_props": (
+                    bool(sparse_require_no_props) if bool(sparse_hybrid_enabled) else None
+                ),
+                "gate_artifact": (
+                    str(Path(sparse_gate_artifact).expanduser().resolve())
+                    if sparse_gate_artifact
                     else None
                 ),
             },
@@ -7965,6 +8052,11 @@ def nba_live_pipeline_v3_flow(
             random_seed=int(gtv2_seed),
         )
 
+        worlds_inference_backend = (
+            "local"
+            if bool(gtv2_current_cfg.get("sparse_hybrid_enabled", False))
+            else str(resolved_inference_backend)
+        )
         worlds_outputs = generate_worlds_gtv2_live_task(
             game_date=resolved_game_date,
             run_id=run_id,
@@ -7975,7 +8067,7 @@ def nba_live_pipeline_v3_flow(
             data_root=data_root,
             sim_worlds=int(sim_worlds),
             placeholder_mode=bool(placeholder_mode),
-            inference_backend=str(resolved_inference_backend),
+            inference_backend=str(worlds_inference_backend),
             triton_endpoint=str(resolved_triton_cfg.endpoint),
             triton_model_name=str(resolved_triton_cfg.model_name),
             triton_model_version=resolved_triton_cfg.model_version,
@@ -8049,6 +8141,32 @@ def nba_live_pipeline_v3_flow(
             ),
             promotion_force_active_candidates=bool(
                 gtv2_current_cfg.get("promotion_force_active_candidates", False)
+            ),
+            sparse_hybrid_enabled=bool(
+                gtv2_current_cfg.get("sparse_hybrid_enabled", False)
+            ),
+            sparse_expert_run_dir=(
+                str(gtv2_current_cfg.get("sparse_expert_run_dir") or "").strip()
+                or None
+            ),
+            sparse_prior_minutes_max=float(
+                gtv2_current_cfg.get("sparse_prior_minutes_max", 12.0)
+            ),
+            sparse_prior_play_prob_max=float(
+                gtv2_current_cfg.get("sparse_prior_play_prob_max", 0.50)
+            ),
+            sparse_blend_mode=str(
+                gtv2_current_cfg.get("sparse_blend_mode", "uplift_only")
+            ),
+            sparse_blend_alpha=float(
+                gtv2_current_cfg.get("sparse_blend_alpha", 1.0)
+            ),
+            sparse_require_no_props=bool(
+                gtv2_current_cfg.get("sparse_require_no_props", False)
+            ),
+            sparse_gate_artifact=(
+                str(gtv2_current_cfg.get("sparse_gate_artifact") or "").strip()
+                or None
             ),
         )
 

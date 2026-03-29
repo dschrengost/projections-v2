@@ -35,10 +35,14 @@ from projections.rotation.game_transformer_v2 import (
 from projections.rotation.gtv2_promotion_hybrid import (
     BenchRiserHybridConfig,
     PromotionHybridConfig,
+    SparseEmergencyGateConfig,
+    SparseEmergencyHybridConfig,
     assert_promotion_hybrid_compatible,
     blend_expert_predictions,
     blend_promotion_predictions,
     compute_bench_riser_candidate_mask,
+    compute_sparse_emergency_gate_probability,
+    compute_sparse_emergency_candidate_mask,
     compute_starter_promotion_candidate_mask,
 )
 from projections.rotation.joint_minutes import project_minutes_capped_simplex
@@ -2160,6 +2164,9 @@ def sample_worlds_for_batch(
     starter_low_minutes_trigger: float = DEFAULT_STARTER_LOW_MINUTES_TRIGGER,
     promotion_expert_model: torch.nn.Module | None = None,
     promotion_hybrid_config: PromotionHybridConfig | None = None,
+    sparse_expert_model: torch.nn.Module | None = None,
+    sparse_hybrid_config: SparseEmergencyHybridConfig | None = None,
+    sparse_gate_config: SparseEmergencyGateConfig | None = None,
     bench_expert_model: torch.nn.Module | None = None,
     bench_hybrid_config: BenchRiserHybridConfig | None = None,
     oracle_rotation_state: bool = False,
@@ -2170,6 +2177,10 @@ def sample_worlds_for_batch(
     if (promotion_expert_model is None) != (promotion_hybrid_config is None):
         raise ValueError(
             "promotion_expert_model and promotion_hybrid_config must be provided together",
+        )
+    if (sparse_expert_model is None) != (sparse_hybrid_config is None):
+        raise ValueError(
+            "sparse_expert_model and sparse_hybrid_config must be provided together",
         )
     if (bench_expert_model is None) != (bench_hybrid_config is None):
         raise ValueError(
@@ -2236,6 +2247,7 @@ def sample_worlds_for_batch(
             oracle_minutes.repeat_interleave(n_worlds_chunk, dim=0) if isinstance(oracle_minutes, torch.Tensor) else None
         )
         starter_promotion_candidate_worlds: torch.Tensor | None = None
+        sparse_emergency_candidate_worlds: torch.Tensor | None = None
         bench_riser_candidate_worlds: torch.Tensor | None = None
         if promotion_hybrid_config is not None:
             starter_promotion_candidate_worlds = compute_starter_promotion_candidate_mask(
@@ -2244,6 +2256,26 @@ def sample_worlds_for_batch(
                 starter_hint_mask=rep_starter_force_active_worlds,
                 config=promotion_hybrid_config,
             )
+        if sparse_hybrid_config is not None:
+            sparse_emergency_candidate_worlds = compute_sparse_emergency_candidate_mask(
+                player_features=rep_player_features,
+                player_valid_mask=rep_player_valid_mask,
+                config=sparse_hybrid_config,
+            )
+            if sparse_gate_config is not None:
+                sparse_gate_prob_worlds = compute_sparse_emergency_gate_probability(
+                    player_features=rep_player_features,
+                    config=sparse_gate_config,
+                )
+                sparse_emergency_candidate_worlds = (
+                    sparse_emergency_candidate_worlds
+                    & sparse_gate_prob_worlds.ge(float(sparse_gate_config.prob_threshold))
+                )
+            if starter_promotion_candidate_worlds is not None:
+                sparse_emergency_candidate_worlds = (
+                    sparse_emergency_candidate_worlds
+                    & (~starter_promotion_candidate_worlds.to(dtype=torch.bool))
+                )
         if bench_hybrid_config is not None:
             bench_riser_candidate_worlds = compute_bench_riser_candidate_mask(
                 player_features=rep_player_features,
@@ -2321,6 +2353,51 @@ def sample_worlds_for_batch(
                     max_minutes_per_player=48.0,
                 )
             if (
+                sparse_expert_model is not None
+                and sparse_hybrid_config is not None
+                and sparse_emergency_candidate_worlds is not None
+                and bool(sparse_emergency_candidate_worlds.any())
+            ):
+                sparse_expert_cfg = getattr(sparse_expert_model, "gtv2_config", None)
+                if sparse_expert_cfg is not None and not isinstance(sparse_expert_cfg, GameTransformerV2Config):
+                    sparse_expert_cfg = None
+                sparse_player_features = _renormalize_player_features_for_model(
+                    rep_player_features,
+                    source_config=model_config,
+                    target_config=sparse_expert_cfg,
+                )
+                expert_forward_kwargs = dict(forward_kwargs)
+                expert_forward_kwargs["sample_backbone"] = bool(
+                    getattr(sparse_expert_model, "enable_possession_backbone", False)
+                )
+                sparse_expert_out = sparse_expert_model(
+                    sparse_player_features,
+                    rep_player_valid_mask,
+                    **expert_forward_kwargs,
+                )
+                sparse_candidate_flat = sparse_emergency_candidate_worlds.reshape(
+                    sparse_emergency_candidate_worlds.shape[0],
+                    -1,
+                )
+                blended_minutes, blended_active_mask = blend_expert_predictions(
+                    baseline_minutes=minutes_for_sampling,
+                    baseline_active_mask=active_mask_for_sampling,
+                    expert_minutes=sparse_expert_out.minutes.minutes,
+                    expert_active_mask=sparse_expert_out.active.active_mask,
+                    candidate_mask=sparse_candidate_flat,
+                    uplift_only=bool(sparse_hybrid_config.uplift_only),
+                    force_active_candidates=bool(sparse_hybrid_config.force_active_candidates),
+                    blend_alpha=float(sparse_hybrid_config.blend_alpha),
+                )
+                minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
+                    blended_minutes,
+                    blended_active_mask,
+                    out.player_valid_mask,
+                    out.player_team_index,
+                    total_minutes_per_team=240.0,
+                    max_minutes_per_player=48.0,
+                )
+            if (
                 bench_expert_model is not None
                 and bench_hybrid_config is not None
                 and bench_riser_candidate_worlds is not None
@@ -2355,6 +2432,7 @@ def sample_worlds_for_batch(
                     candidate_mask=bench_candidate_flat,
                     uplift_only=bool(bench_hybrid_config.uplift_only),
                     force_active_candidates=bool(bench_hybrid_config.force_active_candidates),
+                    blend_alpha=float(bench_hybrid_config.blend_alpha),
                 )
                 minutes_for_sampling, active_mask_for_sampling = project_minutes_capped_simplex(
                     blended_minutes,
@@ -2829,6 +2907,23 @@ def parse_args() -> argparse.Namespace:
         choices=[0, 1],
         help="When enabled, promotion candidates are forced active after hybrid blending.",
     )
+    parser.add_argument("--sparse-expert-run-dir", type=str, default=None)
+    parser.add_argument("--sparse-prior-minutes-max", type=float, default=12.0)
+    parser.add_argument("--sparse-prior-play-prob-max", type=float, default=0.50)
+    parser.add_argument(
+        "--sparse-blend-mode",
+        type=str,
+        default="uplift_only",
+        choices=["uplift_only", "replace"],
+        help="How to blend the sparse-emergency expert into the primary minutes/active outputs.",
+    )
+    parser.add_argument(
+        "--sparse-force-active-candidates",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="When enabled, sparse-emergency candidates are forced active after hybrid blending.",
+    )
     parser.add_argument("--bench-expert-run-dir", type=str, default=None)
     parser.add_argument("--bench-prior-minutes-min", type=float, default=12.0)
     parser.add_argument("--bench-prior-play-prob-min", type=float, default=0.80)
@@ -3016,6 +3111,24 @@ def main() -> None:
             uplift_only=(str(args.promotion_blend_mode).strip().lower() == "uplift_only"),
             force_active_candidates=bool(int(args.promotion_force_active_candidates)),
         )
+    sparse_expert_model: torch.nn.Module | None = None
+    sparse_hybrid_config: SparseEmergencyHybridConfig | None = None
+    sparse_expert_run_dir: Path | None = None
+    if args.sparse_expert_run_dir:
+        sparse_expert_run_dir = _resolve_run_dir(args.sparse_expert_run_dir)
+        sparse_expert_cfg = GameTransformerV2Config.load(sparse_expert_run_dir / "config.json")
+        assert_promotion_hybrid_compatible(config, sparse_expert_cfg)
+        sparse_expert_model = build_game_transformer_v2(sparse_expert_cfg)
+        setattr(sparse_expert_model, "gtv2_config", sparse_expert_cfg)
+        sparse_expert_state = torch.load(sparse_expert_run_dir / "model.pt", map_location="cpu")
+        sparse_expert_model.load_state_dict(sparse_expert_state)
+        sparse_hybrid_config = SparseEmergencyHybridConfig.from_model_config(
+            config,
+            prior_minutes_max=float(args.sparse_prior_minutes_max),
+            prior_play_prob_max=float(args.sparse_prior_play_prob_max),
+            uplift_only=(str(args.sparse_blend_mode).strip().lower() == "uplift_only"),
+            force_active_candidates=bool(int(args.sparse_force_active_candidates)),
+        )
     bench_expert_model: torch.nn.Module | None = None
     bench_hybrid_config: BenchRiserHybridConfig | None = None
     bench_expert_run_dir: Path | None = None
@@ -3059,6 +3172,9 @@ def main() -> None:
     if promotion_expert_model is not None:
         promotion_expert_model = promotion_expert_model.to(device=device)
         promotion_expert_model.eval()
+    if sparse_expert_model is not None:
+        sparse_expert_model = sparse_expert_model.to(device=device)
+        sparse_expert_model.eval()
     if bench_expert_model is not None:
         bench_expert_model = bench_expert_model.to(device=device)
         bench_expert_model.eval()
@@ -3161,6 +3277,8 @@ def main() -> None:
             allocation_top_usage_top2_scale=float(args.allocation_top_usage_top2_scale),
             promotion_expert_model=promotion_expert_model,
             promotion_hybrid_config=promotion_hybrid_config,
+            sparse_expert_model=sparse_expert_model,
+            sparse_hybrid_config=sparse_hybrid_config,
             bench_expert_model=bench_expert_model,
             bench_hybrid_config=bench_hybrid_config,
             oracle_rotation_state=bool(args.oracle_rotation_state),
@@ -3247,6 +3365,18 @@ def main() -> None:
             ),
             "blend_mode": str(args.promotion_blend_mode),
             "force_active_candidates": bool(int(args.promotion_force_active_candidates)),
+        },
+        "sparse_hybrid": {
+            "enabled": bool(sparse_expert_model is not None),
+            "expert_run_dir": str(sparse_expert_run_dir) if sparse_expert_run_dir is not None else None,
+            "prior_minutes_max": (
+                float(sparse_hybrid_config.prior_minutes_max) if sparse_hybrid_config is not None else None
+            ),
+            "prior_play_prob_max": (
+                float(sparse_hybrid_config.prior_play_prob_max) if sparse_hybrid_config is not None else None
+            ),
+            "blend_mode": str(args.sparse_blend_mode),
+            "force_active_candidates": bool(int(args.sparse_force_active_candidates)),
         },
         "bench_hybrid": {
             "enabled": bool(bench_expert_model is not None),

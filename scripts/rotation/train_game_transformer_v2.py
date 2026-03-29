@@ -152,6 +152,7 @@ class EpochMetrics:
     train_role_loss: float
     train_role_acc: float
     train_sparse_starter_underpred_loss: float
+    train_sparse_emergency_underpred_loss: float
     train_bench_riser_underpred_loss: float
     train_starter_promotion_loss: float
     train_flow_nll: float
@@ -203,6 +204,7 @@ class EpochMetrics:
     val_role_loss: float = 0.0
     val_role_acc: float = 0.0
     val_sparse_starter_underpred_loss: float = 0.0
+    val_sparse_emergency_underpred_loss: float = 0.0
     val_bench_riser_underpred_loss: float = 0.0
     val_starter_promotion_loss: float = 0.0
     val_flow_nll: float = 0.0
@@ -676,6 +678,121 @@ def _build_sparse_candidate_example_sampling_weights(
             & (prior_minutes <= float(prior_minutes_max))
             & (hist_rate <= float(hist_start_rate_max))
         )
+        valid_count = int(valid.sum())
+        candidate_count = int(candidate_mask.sum())
+        if candidate_count > 0:
+            candidate_present[idx] = 1.0
+            candidate_fraction[idx] = float(candidate_count) / float(max(1, valid_count))
+
+    sample_weights = 1.0 + (target_weight - 1.0) * candidate_present
+    meta = {
+        "sparse_candidate_weight_target": target_weight,
+        "candidate_game_rate": float(candidate_present.mean()),
+        "candidate_player_fraction_mean": float(candidate_fraction.mean()),
+        "candidate_player_fraction_min": float(candidate_fraction.min()),
+        "candidate_player_fraction_max": float(candidate_fraction.max()),
+        "sample_weight_mean": float(sample_weights.mean()),
+        "sample_weight_min": float(sample_weights.min()),
+        "sample_weight_max": float(sample_weights.max()),
+    }
+    return torch.as_tensor(sample_weights, dtype=torch.double), meta
+
+
+def _build_sparse_emergency_example_sampling_weights(
+    examples: list[Any],
+    *,
+    feature_columns: list[str],
+    feature_mean: np.ndarray,
+    feature_std: np.ndarray,
+    sparse_candidate_weight: float,
+    prior_minutes_max: float,
+    prior_play_prob_max: float,
+    require_no_props: bool = False,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Build per-example train sampling weights for broad sparse-emergency candidate games."""
+    if not examples:
+        return (
+            torch.ones((0,), dtype=torch.double),
+            {
+                "sparse_candidate_weight_target": float(max(1.0, float(sparse_candidate_weight))),
+                "candidate_game_rate": 0.0,
+                "candidate_player_fraction_mean": 0.0,
+                "candidate_player_fraction_min": 0.0,
+                "candidate_player_fraction_max": 0.0,
+                "sample_weight_mean": 1.0,
+                "sample_weight_min": 1.0,
+                "sample_weight_max": 1.0,
+            },
+        )
+
+    target_weight = float(max(1.0, float(sparse_candidate_weight)))
+    if target_weight <= 1.0:
+        ones = torch.ones((len(examples),), dtype=torch.double)
+        return (
+            ones,
+            {
+                "sparse_candidate_weight_target": target_weight,
+                "candidate_game_rate": 0.0,
+                "candidate_player_fraction_mean": 0.0,
+                "candidate_player_fraction_min": 0.0,
+                "candidate_player_fraction_max": 0.0,
+                "sample_weight_mean": 1.0,
+                "sample_weight_min": 1.0,
+                "sample_weight_max": 1.0,
+            },
+        )
+
+    idx_by_name = {name: idx for idx, name in enumerate(feature_columns)}
+    prior_minutes_idx = idx_by_name.get("minutes_from_stints_prior_20", -1)
+    prior_play_prob_idx = idx_by_name.get("prior_play_prob", -1)
+    has_any_props_idx = idx_by_name.get("an_has_any_props", -1)
+    if prior_minutes_idx < 0 or prior_play_prob_idx < 0:
+        raise ValueError(
+            "sparse emergency candidate sampler requires minutes_from_stints_prior_20 and prior_play_prob"
+        )
+    if bool(require_no_props) and has_any_props_idx < 0:
+        raise ValueError("sparse emergency candidate sampler with require_no_props needs an_has_any_props")
+
+    prior_minutes_mean = float(feature_mean[int(prior_minutes_idx)])
+    prior_minutes_std = (
+        float(feature_std[int(prior_minutes_idx)]) if abs(float(feature_std[int(prior_minutes_idx)])) > 1e-6 else 1.0
+    )
+    prior_play_prob_mean = float(feature_mean[int(prior_play_prob_idx)])
+    prior_play_prob_std = (
+        float(feature_std[int(prior_play_prob_idx)])
+        if abs(float(feature_std[int(prior_play_prob_idx)])) > 1e-6
+        else 1.0
+    )
+    has_any_props_mean = float(feature_mean[int(has_any_props_idx)]) if has_any_props_idx >= 0 else 0.0
+    has_any_props_std = (
+        float(feature_std[int(has_any_props_idx)])
+        if has_any_props_idx >= 0 and abs(float(feature_std[int(has_any_props_idx)])) > 1e-6
+        else 1.0
+    )
+
+    candidate_present = np.zeros((len(examples),), dtype=np.float64)
+    candidate_fraction = np.zeros((len(examples),), dtype=np.float64)
+
+    for idx, ex in enumerate(examples):
+        valid = np.asarray(ex.player_valid_mask, dtype=bool)
+        features = np.asarray(ex.player_features, dtype=np.float32)
+        if valid.size == 0 or features.ndim != 3:
+            continue
+        if valid.shape != features.shape[:2]:
+            raise ValueError("example masks/features must align for sparse emergency candidate sampler")
+
+        prior_minutes = features[..., int(prior_minutes_idx)].astype(np.float64) * prior_minutes_std + prior_minutes_mean
+        prior_play_prob = (
+            features[..., int(prior_play_prob_idx)].astype(np.float64) * prior_play_prob_std + prior_play_prob_mean
+        )
+        candidate_mask = valid & (
+            (prior_minutes <= float(prior_minutes_max)) | (prior_play_prob <= float(prior_play_prob_max))
+        )
+        if bool(require_no_props):
+            has_any_props = (
+                features[..., int(has_any_props_idx)].astype(np.float64) * has_any_props_std + has_any_props_mean
+            )
+            candidate_mask = candidate_mask & (has_any_props < 0.5)
         valid_count = int(valid.sum())
         candidate_count = int(candidate_mask.sum())
         if candidate_count > 0:
@@ -2849,6 +2966,7 @@ def _run_epoch(
     w_role_loss: float,
     w_starter_promotion_loss: float,
     w_sparse_starter_underpred_loss: float,
+    w_sparse_emergency_underpred_loss: float,
     w_bench_riser_underpred_loss: float,
     minutes_role_target_scheme: str,
     w_count: float,
@@ -2959,6 +3077,7 @@ def _run_epoch(
     an_reb_books_idx: int = -1,
     an_ast_books_idx: int = -1,
     an_props_market_count_idx: int = -1,
+    an_has_any_props_idx: int = -1,
     prior_play_prob_idx: int = -1,
     lineup_starter_announced_idx: int = -1,
     recent_start_pct_10_idx: int = -1,
@@ -2983,6 +3102,10 @@ def _run_epoch(
     sparse_starter_loss_prior_minutes_max: float = 6.0,
     sparse_starter_loss_hist_start_rate_max: float = 0.20,
     sparse_starter_loss_actual_min_threshold: float = 20.0,
+    sparse_emergency_loss_prior_play_prob_max: float = 0.50,
+    sparse_emergency_loss_prior_minutes_max: float = 12.0,
+    sparse_emergency_loss_actual_min_threshold: float = 20.0,
+    sparse_emergency_require_no_props: bool = False,
     bench_riser_loss_prior_minutes_min: float = 0.0,
     bench_riser_loss_prior_play_prob_min: float = 0.0,
     bench_riser_loss_hist_start_rate_max: float = 0.50,
@@ -3043,6 +3166,7 @@ def _run_epoch(
         "role_acc": 0.0,
         "starter_promotion_loss": 0.0,
         "sparse_starter_underpred_loss": 0.0,
+        "sparse_emergency_underpred_loss": 0.0,
         "bench_riser_underpred_loss": 0.0,
         "flow_nll": 0.0,
         "crps_fpts": 0.0,
@@ -3142,6 +3266,12 @@ def _run_epoch(
         raw_prior_play_prob = _raw_feature_from_normalized(
             player_features_flat,
             feature_idx=int(prior_play_prob_idx),
+            feature_mean=feature_mean_arr,
+            feature_std=feature_std_arr,
+        )
+        raw_has_any_props = _raw_feature_from_normalized(
+            player_features_flat,
+            feature_idx=int(an_has_any_props_idx),
             feature_mean=feature_mean_arr,
             feature_std=feature_std_arr,
         )
@@ -3342,6 +3472,35 @@ def _run_epoch(
                     underpred = torch.relu(y_flat - out.minutes.minutes)
                     sparse_mask_f = sparse_mask.to(dtype=underpred.dtype)
                     sparse_starter_underpred_loss = (underpred * sparse_mask_f).sum() / sparse_mask_f.sum().clamp(min=1.0)
+            sparse_emergency_underpred_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
+            if float(w_sparse_emergency_underpred_loss) > 0.0:
+                sparse_emergency_mask = out.player_valid_mask.to(dtype=torch.bool)
+                sparse_components: list[torch.Tensor] = []
+                if raw_prior_play_prob is not None and float(sparse_emergency_loss_prior_play_prob_max) < 1.0:
+                    sparse_components.append(raw_prior_play_prob <= float(sparse_emergency_loss_prior_play_prob_max))
+                if raw_prior_minutes is not None:
+                    sparse_components.append(raw_prior_minutes <= float(sparse_emergency_loss_prior_minutes_max))
+                if sparse_components:
+                    sparse_signal = sparse_components[0].to(dtype=torch.bool)
+                    for comp in sparse_components[1:]:
+                        sparse_signal = sparse_signal | comp.to(dtype=torch.bool)
+                    sparse_emergency_mask = sparse_emergency_mask & sparse_signal
+                else:
+                    sparse_emergency_mask = sparse_emergency_mask & torch.zeros_like(sparse_emergency_mask)
+                if bool(sparse_emergency_require_no_props):
+                    if raw_has_any_props is not None:
+                        sparse_emergency_mask = sparse_emergency_mask & (raw_has_any_props < 0.5)
+                    else:
+                        sparse_emergency_mask = sparse_emergency_mask & torch.zeros_like(sparse_emergency_mask)
+                sparse_emergency_mask = sparse_emergency_mask & (
+                    y_flat >= float(sparse_emergency_loss_actual_min_threshold)
+                )
+                if bool(sparse_emergency_mask.any()):
+                    emergency_underpred = torch.relu(y_flat - out.minutes.minutes)
+                    sparse_emergency_mask_f = sparse_emergency_mask.to(dtype=emergency_underpred.dtype)
+                    sparse_emergency_underpred_loss = (
+                        emergency_underpred * sparse_emergency_mask_f
+                    ).sum() / sparse_emergency_mask_f.sum().clamp(min=1.0)
             bench_riser_underpred_loss = torch.zeros((), dtype=minutes_mae.dtype, device=minutes_mae.device)
             if float(w_bench_riser_underpred_loss) > 0.0:
                 bench_mask = out.player_valid_mask.to(dtype=torch.bool) & (~starter_hint_flat)
@@ -4755,6 +4914,7 @@ def _run_epoch(
                 + float(w_role_loss) * role_loss
                 + float(w_starter_promotion_loss) * starter_promotion_loss
                 + float(w_sparse_starter_underpred_loss) * sparse_starter_underpred_loss
+                + float(w_sparse_emergency_underpred_loss) * sparse_emergency_underpred_loss
                 + float(w_bench_riser_underpred_loss) * bench_riser_underpred_loss
                 + float(w_flow_nll) * flow_nll
                 + float(w_crps_fpts) * crps_fpts
@@ -4900,6 +5060,7 @@ def _run_epoch(
             totals["role_acc"] += float(role_acc.item())
             totals["starter_promotion_loss"] += float(starter_promotion_loss.item())
             totals["sparse_starter_underpred_loss"] += float(sparse_starter_underpred_loss.item())
+            totals["sparse_emergency_underpred_loss"] += float(sparse_emergency_underpred_loss.item())
             totals["bench_riser_underpred_loss"] += float(bench_riser_underpred_loss.item())
             totals["flow_nll"] += float(flow_nll.item())
             totals["crps_fpts"] += float(crps_fpts.item())
@@ -4958,6 +5119,7 @@ def _run_epoch(
         "role_acc": totals["role_acc"] / denom,
         "starter_promotion_loss": totals["starter_promotion_loss"] / denom,
         "sparse_starter_underpred_loss": totals["sparse_starter_underpred_loss"] / denom,
+        "sparse_emergency_underpred_loss": totals["sparse_emergency_underpred_loss"] / denom,
         "bench_riser_underpred_loss": totals["bench_riser_underpred_loss"] / denom,
         "flow_nll": totals["flow_nll"] / denom,
         "crps_fpts": totals["crps_fpts"] / denom,
@@ -5175,6 +5337,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sparse-starter-loss-prior-minutes-max", type=float, default=6.0)
     parser.add_argument("--sparse-starter-loss-hist-start-rate-max", type=float, default=0.20)
     parser.add_argument("--sparse-starter-loss-actual-min-threshold", type=float, default=20.0)
+    parser.add_argument("--w-sparse-emergency-underpred-loss", type=float, default=0.0)
+    parser.add_argument("--sparse-emergency-loss-prior-play-prob-max", type=float, default=0.50)
+    parser.add_argument("--sparse-emergency-loss-prior-minutes-max", type=float, default=12.0)
+    parser.add_argument("--sparse-emergency-loss-actual-min-threshold", type=float, default=20.0)
+    parser.add_argument("--sparse-emergency-require-no-props", action="store_true")
     parser.add_argument("--w-bench-riser-underpred-loss", type=float, default=0.0)
     parser.add_argument("--bench-riser-loss-prior-minutes-min", type=float, default=8.0)
     parser.add_argument("--bench-riser-loss-prior-play-prob-min", type=float, default=0.80)
@@ -5201,6 +5368,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--sparse-candidate-sample-prior-minutes-max", type=float, default=14.0)
     parser.add_argument("--sparse-candidate-sample-hist-start-rate-max", type=float, default=0.25)
+    parser.add_argument("--sparse-emergency-candidate-sample-weight", type=float, default=1.0)
+    parser.add_argument("--sparse-emergency-candidate-sample-prior-play-prob-max", type=float, default=0.50)
+    parser.add_argument("--sparse-emergency-candidate-sample-prior-minutes-max", type=float, default=12.0)
     parser.add_argument("--bench-candidate-sample-weight", type=float, default=1.0)
     parser.add_argument("--bench-candidate-sample-prior-minutes-min", type=float, default=8.0)
     parser.add_argument("--bench-candidate-sample-prior-play-prob-min", type=float, default=0.80)
@@ -6259,6 +6429,14 @@ def main() -> None:
         raise ValueError("--sparse-starter-loss-hist-start-rate-max must be in [0, 1]")
     if float(args.sparse_starter_loss_actual_min_threshold) < 0.0:
         raise ValueError("--sparse-starter-loss-actual-min-threshold must be >= 0")
+    if float(args.w_sparse_emergency_underpred_loss) < 0.0:
+        raise ValueError("--w-sparse-emergency-underpred-loss must be >= 0")
+    if not (0.0 <= float(args.sparse_emergency_loss_prior_play_prob_max) <= 1.0):
+        raise ValueError("--sparse-emergency-loss-prior-play-prob-max must be in [0, 1]")
+    if float(args.sparse_emergency_loss_prior_minutes_max) < 0.0:
+        raise ValueError("--sparse-emergency-loss-prior-minutes-max must be >= 0")
+    if float(args.sparse_emergency_loss_actual_min_threshold) < 0.0:
+        raise ValueError("--sparse-emergency-loss-actual-min-threshold must be >= 0")
     if float(args.w_bench_riser_underpred_loss) < 0.0:
         raise ValueError("--w-bench-riser-underpred-loss must be >= 0")
     if float(args.bench_riser_loss_prior_minutes_min) < 0.0:
@@ -6363,6 +6541,12 @@ def main() -> None:
         raise ValueError("--sparse-candidate-sample-prior-minutes-max must be >= 0")
     if not (0.0 <= float(args.sparse_candidate_sample_hist_start_rate_max) <= 1.0):
         raise ValueError("--sparse-candidate-sample-hist-start-rate-max must be in [0, 1]")
+    if float(args.sparse_emergency_candidate_sample_weight) < 1.0:
+        raise ValueError("--sparse-emergency-candidate-sample-weight must be >= 1.0")
+    if not (0.0 <= float(args.sparse_emergency_candidate_sample_prior_play_prob_max) <= 1.0):
+        raise ValueError("--sparse-emergency-candidate-sample-prior-play-prob-max must be in [0, 1]")
+    if float(args.sparse_emergency_candidate_sample_prior_minutes_max) < 0.0:
+        raise ValueError("--sparse-emergency-candidate-sample-prior-minutes-max must be >= 0")
     if bool(args.flow_use_minutes_conditioning) and not bool(args.enable_phase2_flow):
         raise ValueError("--flow-use-minutes-conditioning requires --enable-phase2-flow")
     if float(args.flow_minutes_teacher_forcing_prob_start) < 0.0 or float(args.flow_minutes_teacher_forcing_prob_start) > 1.0:
@@ -6773,6 +6957,7 @@ def main() -> None:
     an_reb_books_idx = int(feature_index.get("an_reb_books", -1))
     an_ast_books_idx = int(feature_index.get("an_ast_books", -1))
     an_props_market_count_idx = int(feature_index.get("an_props_market_count", -1))
+    an_has_any_props_idx = int(feature_index.get("an_has_any_props", -1))
     prior_play_prob_idx = int(feature_index.get("prior_play_prob", -1))
     lineup_starter_announced_idx = int(feature_index.get("lineup_starter_announced", -1))
     recent_start_pct_10_idx = int(feature_index.get("recent_start_pct_10", -1))
@@ -6980,6 +7165,32 @@ def main() -> None:
                 f"candidate_game_rate={sparse_sampling_meta['candidate_game_rate']:.3f} "
                 f"sample_weight_range=[{sparse_sampling_meta['sample_weight_min']:.3f}, "
                 f"{sparse_sampling_meta['sample_weight_max']:.3f}]"
+            ),
+            flush=True,
+        )
+    if float(args.sparse_emergency_candidate_sample_weight) > 1.0:
+        sparse_emergency_sample_weights, sparse_emergency_sampling_meta = _build_sparse_emergency_example_sampling_weights(
+            train_examples,
+            feature_columns=feature_cols,
+            feature_mean=feature_mean,
+            feature_std=feature_std,
+            sparse_candidate_weight=float(args.sparse_emergency_candidate_sample_weight),
+            prior_minutes_max=float(args.sparse_emergency_candidate_sample_prior_minutes_max),
+            prior_play_prob_max=float(args.sparse_emergency_candidate_sample_prior_play_prob_max),
+            require_no_props=bool(args.sparse_emergency_require_no_props),
+        )
+        combined_sample_weights = (
+            sparse_emergency_sample_weights
+            if combined_sample_weights is None
+            else (combined_sample_weights * sparse_emergency_sample_weights)
+        )
+        print(
+            (
+                "[train_gtv2] sparse emergency sampler enabled: "
+                f"target_weight={sparse_emergency_sampling_meta['sparse_candidate_weight_target']:.3f} "
+                f"candidate_game_rate={sparse_emergency_sampling_meta['candidate_game_rate']:.3f} "
+                f"sample_weight_range=[{sparse_emergency_sampling_meta['sample_weight_min']:.3f}, "
+                f"{sparse_emergency_sampling_meta['sample_weight_max']:.3f}]"
             ),
             flush=True,
         )
@@ -7439,6 +7650,7 @@ def main() -> None:
             w_role_loss=float(args.w_role_loss),
             w_starter_promotion_loss=float(args.w_starter_promotion_loss),
             w_sparse_starter_underpred_loss=float(args.w_sparse_starter_underpred_loss),
+            w_sparse_emergency_underpred_loss=float(args.w_sparse_emergency_underpred_loss),
             w_bench_riser_underpred_loss=float(args.w_bench_riser_underpred_loss),
             minutes_role_target_scheme=str(args.minutes_role_target_scheme),
             w_count=float(phase2_weights.w_count),
@@ -7547,6 +7759,7 @@ def main() -> None:
             an_reb_books_idx=int(an_reb_books_idx),
             an_ast_books_idx=int(an_ast_books_idx),
             an_props_market_count_idx=int(an_props_market_count_idx),
+            an_has_any_props_idx=int(an_has_any_props_idx),
             prior_play_prob_idx=int(prior_play_prob_idx),
             lineup_starter_announced_idx=int(lineup_starter_announced_idx),
             recent_start_pct_10_idx=int(recent_start_pct_10_idx),
@@ -7573,6 +7786,10 @@ def main() -> None:
             sparse_starter_loss_prior_minutes_max=float(args.sparse_starter_loss_prior_minutes_max),
             sparse_starter_loss_hist_start_rate_max=float(args.sparse_starter_loss_hist_start_rate_max),
             sparse_starter_loss_actual_min_threshold=float(args.sparse_starter_loss_actual_min_threshold),
+            sparse_emergency_loss_prior_play_prob_max=float(args.sparse_emergency_loss_prior_play_prob_max),
+            sparse_emergency_loss_prior_minutes_max=float(args.sparse_emergency_loss_prior_minutes_max),
+            sparse_emergency_loss_actual_min_threshold=float(args.sparse_emergency_loss_actual_min_threshold),
+            sparse_emergency_require_no_props=bool(args.sparse_emergency_require_no_props),
             bench_riser_loss_prior_minutes_min=float(args.bench_riser_loss_prior_minutes_min),
             bench_riser_loss_prior_play_prob_min=float(args.bench_riser_loss_prior_play_prob_min),
             bench_riser_loss_hist_start_rate_max=float(args.bench_riser_loss_hist_start_rate_max),
@@ -7597,6 +7814,7 @@ def main() -> None:
                 "role_acc": float("nan"),
                 "starter_promotion_loss": float("nan"),
                 "sparse_starter_underpred_loss": float("nan"),
+                "sparse_emergency_underpred_loss": float("nan"),
                 "flow_nll": float("nan"),
                 "crps_fpts": float("nan"),
                 "team_energy": float("nan"),
@@ -7656,6 +7874,7 @@ def main() -> None:
                 w_role_loss=float(args.w_role_loss),
                 w_starter_promotion_loss=float(args.w_starter_promotion_loss),
                 w_sparse_starter_underpred_loss=float(args.w_sparse_starter_underpred_loss),
+                w_sparse_emergency_underpred_loss=float(args.w_sparse_emergency_underpred_loss),
                 w_bench_riser_underpred_loss=float(args.w_bench_riser_underpred_loss),
                 minutes_role_target_scheme=str(args.minutes_role_target_scheme),
                 w_count=float(phase2_weights.w_count),
@@ -7764,6 +7983,7 @@ def main() -> None:
                 an_reb_books_idx=int(an_reb_books_idx),
                 an_ast_books_idx=int(an_ast_books_idx),
                 an_props_market_count_idx=int(an_props_market_count_idx),
+                an_has_any_props_idx=int(an_has_any_props_idx),
                 prior_play_prob_idx=int(prior_play_prob_idx),
                 lineup_starter_announced_idx=int(lineup_starter_announced_idx),
                 recent_start_pct_10_idx=int(recent_start_pct_10_idx),
@@ -7788,6 +8008,10 @@ def main() -> None:
                 sparse_starter_loss_prior_minutes_max=float(args.sparse_starter_loss_prior_minutes_max),
                 sparse_starter_loss_hist_start_rate_max=float(args.sparse_starter_loss_hist_start_rate_max),
                 sparse_starter_loss_actual_min_threshold=float(args.sparse_starter_loss_actual_min_threshold),
+                sparse_emergency_loss_prior_play_prob_max=float(args.sparse_emergency_loss_prior_play_prob_max),
+                sparse_emergency_loss_prior_minutes_max=float(args.sparse_emergency_loss_prior_minutes_max),
+                sparse_emergency_loss_actual_min_threshold=float(args.sparse_emergency_loss_actual_min_threshold),
+                sparse_emergency_require_no_props=bool(args.sparse_emergency_require_no_props),
                 bench_riser_loss_prior_minutes_min=float(args.bench_riser_loss_prior_minutes_min),
                 bench_riser_loss_prior_play_prob_min=float(args.bench_riser_loss_prior_play_prob_min),
                 bench_riser_loss_hist_start_rate_max=float(args.bench_riser_loss_hist_start_rate_max),
@@ -7821,6 +8045,7 @@ def main() -> None:
             train_role_loss=train_stats.get("role_loss", 0.0),
             train_role_acc=train_stats.get("role_acc", 0.0),
             train_sparse_starter_underpred_loss=train_stats.get("sparse_starter_underpred_loss", 0.0),
+            train_sparse_emergency_underpred_loss=train_stats.get("sparse_emergency_underpred_loss", 0.0),
             train_bench_riser_underpred_loss=train_stats.get("bench_riser_underpred_loss", 0.0),
             train_starter_promotion_loss=train_stats.get("starter_promotion_loss", 0.0),
             train_flow_nll=train_stats["flow_nll"],
@@ -7873,6 +8098,7 @@ def main() -> None:
             val_role_loss=val_stats.get("role_loss", 0.0),
             val_role_acc=val_stats.get("role_acc", 0.0),
             val_sparse_starter_underpred_loss=val_stats.get("sparse_starter_underpred_loss", 0.0),
+            val_sparse_emergency_underpred_loss=val_stats.get("sparse_emergency_underpred_loss", 0.0),
             val_bench_riser_underpred_loss=val_stats.get("bench_riser_underpred_loss", 0.0),
             val_starter_promotion_loss=val_stats.get("starter_promotion_loss", 0.0),
             val_flow_nll=val_stats["flow_nll"],
@@ -7943,6 +8169,8 @@ def main() -> None:
             msg = f"{msg} val_role_loss={metrics.val_role_loss:.4f} val_role_acc={metrics.val_role_acc:.4f}"
         if float(args.w_sparse_starter_underpred_loss) > 0.0:
             msg = f"{msg} val_sparse_starter_underpred_loss={metrics.val_sparse_starter_underpred_loss:.4f}"
+        if float(args.w_sparse_emergency_underpred_loss) > 0.0:
+            msg = f"{msg} val_sparse_emergency_underpred_loss={metrics.val_sparse_emergency_underpred_loss:.4f}"
         if float(args.w_bench_riser_underpred_loss) > 0.0:
             msg = f"{msg} val_bench_riser_underpred_loss={metrics.val_bench_riser_underpred_loss:.4f}"
         if float(args.w_starter_promotion_loss) > 0.0:
@@ -8269,6 +8497,13 @@ def main() -> None:
             "prior_minutes_max": float(args.sparse_starter_loss_prior_minutes_max),
             "hist_start_rate_max": float(args.sparse_starter_loss_hist_start_rate_max),
             "actual_minutes_threshold": float(args.sparse_starter_loss_actual_min_threshold),
+        },
+        "sparse_emergency_underpred": {
+            "weight": float(args.w_sparse_emergency_underpred_loss),
+            "prior_play_prob_max": float(args.sparse_emergency_loss_prior_play_prob_max),
+            "prior_minutes_max": float(args.sparse_emergency_loss_prior_minutes_max),
+            "actual_minutes_threshold": float(args.sparse_emergency_loss_actual_min_threshold),
+            "require_no_props": bool(args.sparse_emergency_require_no_props),
         },
         "bench_riser_underpred": {
             "weight": float(args.w_bench_riser_underpred_loss),

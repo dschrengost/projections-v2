@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -17,6 +19,7 @@ HIST_START_RATE_FEATURE_NAMES = (
     "started_proxy_rate_prior_10",
     "started_proxy_rate_prior_20",
 )
+HAS_ANY_PROPS_FEATURE_NAME = "an_has_any_props"
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,7 @@ class BenchRiserHybridConfig:
     hist_start_rate_max: float = 0.35
     uplift_only: bool = True
     force_active_candidates: bool = False
+    blend_alpha: float = 1.0
 
     @classmethod
     def from_model_config(
@@ -100,6 +104,7 @@ class BenchRiserHybridConfig:
         hist_start_rate_max: float = 0.35,
         uplift_only: bool = True,
         force_active_candidates: bool = False,
+        blend_alpha: float = 1.0,
     ) -> "BenchRiserHybridConfig":
         _, feature_mean, feature_std, idx_by_name = _feature_arrays(config)
 
@@ -137,6 +142,123 @@ class BenchRiserHybridConfig:
             hist_start_rate_max=float(hist_start_rate_max),
             uplift_only=bool(uplift_only),
             force_active_candidates=bool(force_active_candidates),
+            blend_alpha=float(blend_alpha),
+        )
+
+
+@dataclass(frozen=True)
+class SparseEmergencyHybridConfig:
+    prior_minutes_idx: int
+    prior_minutes_mean: float
+    prior_minutes_std: float
+    prior_play_prob_idx: int
+    prior_play_prob_mean: float
+    prior_play_prob_std: float
+    has_any_props_idx: int | None = None
+    has_any_props_mean: float = 0.0
+    has_any_props_std: float = 1.0
+    prior_minutes_max: float = 12.0
+    prior_play_prob_max: float = 0.50
+    uplift_only: bool = True
+    force_active_candidates: bool = False
+    blend_alpha: float = 1.0
+    require_no_props: bool = False
+
+    @classmethod
+    def from_model_config(
+        cls,
+        config: GameTransformerV2Config,
+        *,
+        prior_minutes_max: float = 12.0,
+        prior_play_prob_max: float = 0.50,
+        uplift_only: bool = True,
+        force_active_candidates: bool = False,
+        blend_alpha: float = 1.0,
+        require_no_props: bool = False,
+    ) -> "SparseEmergencyHybridConfig":
+        _, feature_mean, feature_std, idx_by_name = _feature_arrays(config)
+
+        prior_minutes_idx = idx_by_name.get(PRIOR_MINUTES_FEATURE_NAME)
+        if prior_minutes_idx is None:
+            raise ValueError(f"Missing required sparse-emergency feature: {PRIOR_MINUTES_FEATURE_NAME}")
+        prior_play_prob_idx = idx_by_name.get(PRIOR_PLAY_PROB_FEATURE_NAME)
+        if prior_play_prob_idx is None:
+            raise ValueError(f"Missing required sparse-emergency feature: {PRIOR_PLAY_PROB_FEATURE_NAME}")
+        has_any_props_idx = idx_by_name.get(HAS_ANY_PROPS_FEATURE_NAME)
+        if require_no_props and has_any_props_idx is None:
+            raise ValueError(f"Missing required sparse-emergency feature: {HAS_ANY_PROPS_FEATURE_NAME}")
+        return cls(
+            prior_minutes_idx=int(prior_minutes_idx),
+            prior_minutes_mean=float(feature_mean[int(prior_minutes_idx)]),
+            prior_minutes_std=float(feature_std[int(prior_minutes_idx)]),
+            prior_play_prob_idx=int(prior_play_prob_idx),
+            prior_play_prob_mean=float(feature_mean[int(prior_play_prob_idx)]),
+            prior_play_prob_std=float(feature_std[int(prior_play_prob_idx)]),
+            has_any_props_idx=int(has_any_props_idx) if has_any_props_idx is not None else None,
+            has_any_props_mean=float(feature_mean[int(has_any_props_idx)]) if has_any_props_idx is not None else 0.0,
+            has_any_props_std=float(feature_std[int(has_any_props_idx)]) if has_any_props_idx is not None else 1.0,
+            prior_minutes_max=float(prior_minutes_max),
+            prior_play_prob_max=float(prior_play_prob_max),
+            uplift_only=bool(uplift_only),
+            force_active_candidates=bool(force_active_candidates),
+            blend_alpha=float(blend_alpha),
+            require_no_props=bool(require_no_props),
+        )
+
+
+@dataclass(frozen=True)
+class SparseEmergencyGateConfig:
+    feature_indices: tuple[int, ...]
+    decode_means: tuple[float, ...]
+    decode_stds: tuple[float, ...]
+    feature_names: tuple[str, ...]
+    feature_means: tuple[float, ...]
+    feature_stds: tuple[float, ...]
+    coefficients: tuple[float, ...]
+    intercept: float
+    prob_threshold: float
+
+    @classmethod
+    def from_artifact(
+        cls,
+        config: GameTransformerV2Config,
+        artifact_path: str | Path,
+    ) -> "SparseEmergencyGateConfig":
+        payload = json.loads(Path(artifact_path).expanduser().read_text(encoding="utf-8"))
+        feature_names = tuple(str(x) for x in payload["feature_names"])
+        feature_columns, feature_mean, feature_std, idx_by_name = _feature_arrays(config)
+        del feature_columns
+        feature_indices: list[int] = []
+        decode_means: list[float] = []
+        decode_stds: list[float] = []
+        for name in feature_names:
+            idx = idx_by_name.get(name)
+            if idx is None:
+                raise ValueError(f"Missing sparse gate feature in model config: {name}")
+            feature_indices.append(int(idx))
+            decode_means.append(float(feature_mean[int(idx)]))
+            decode_stds.append(float(feature_std[int(idx)]))
+        feature_means = tuple(float(x) for x in payload["feature_means"])
+        feature_stds = tuple(float(x) for x in payload["feature_stds"])
+        coefficients = tuple(float(x) for x in payload["coefficients"])
+        if not (
+            len(feature_names)
+            == len(feature_means)
+            == len(feature_stds)
+            == len(coefficients)
+            == len(feature_indices)
+        ):
+            raise ValueError("Sparse gate artifact dimensions do not match")
+        return cls(
+            feature_indices=tuple(feature_indices),
+            decode_means=tuple(decode_means),
+            decode_stds=tuple(decode_stds),
+            feature_names=feature_names,
+            feature_means=feature_means,
+            feature_stds=feature_stds,
+            coefficients=coefficients,
+            intercept=float(payload["intercept"]),
+            prob_threshold=float(payload.get("prob_threshold", 0.5)),
         )
 
 
@@ -187,10 +309,10 @@ def assert_promotion_hybrid_compatible(
     expert_mean = np.asarray(expert_config.feature_mean, dtype=np.float32)
     primary_std = np.asarray(primary_config.feature_std, dtype=np.float32)
     expert_std = np.asarray(expert_config.feature_std, dtype=np.float32)
-    if primary_mean.shape != expert_mean.shape or not np.allclose(primary_mean, expert_mean, atol=1e-6):
-        raise ValueError("Promotion expert feature_mean must exactly match primary model feature_mean")
-    if primary_std.shape != expert_std.shape or not np.allclose(primary_std, expert_std, atol=1e-6):
-        raise ValueError("Promotion expert feature_std must exactly match primary model feature_std")
+    if primary_mean.shape != expert_mean.shape:
+        raise ValueError("Promotion expert feature_mean shape must match primary model feature_mean shape")
+    if primary_std.shape != expert_std.shape:
+        raise ValueError("Promotion expert feature_std shape must match primary model feature_std shape")
 
 
 def _decode_feature(
@@ -301,6 +423,75 @@ def compute_bench_riser_candidate_mask(
     )
 
 
+def compute_sparse_emergency_candidate_mask(
+    *,
+    player_features: torch.Tensor,
+    player_valid_mask: torch.Tensor,
+    config: SparseEmergencyHybridConfig,
+) -> torch.Tensor:
+    if player_features.ndim != 4:
+        raise ValueError("player_features must have shape (B,2,15,F)")
+    if player_valid_mask.shape != player_features.shape[:3]:
+        raise ValueError("player_valid_mask must have shape (B,2,15)")
+
+    prior_minutes = _decode_feature(
+        player_features,
+        idx=int(config.prior_minutes_idx),
+        mean=float(config.prior_minutes_mean),
+        std=float(config.prior_minutes_std),
+    )
+    prior_play_prob = _decode_feature(
+        player_features,
+        idx=int(config.prior_play_prob_idx),
+        mean=float(config.prior_play_prob_mean),
+        std=float(config.prior_play_prob_std),
+    )
+    sparse_signal = prior_minutes.le(float(config.prior_minutes_max)) | prior_play_prob.le(
+        float(config.prior_play_prob_max)
+    )
+    if bool(config.require_no_props) and config.has_any_props_idx is not None:
+        has_any_props = _decode_feature(
+            player_features,
+            idx=int(config.has_any_props_idx),
+            mean=float(config.has_any_props_mean),
+            std=float(config.has_any_props_std),
+        )
+        sparse_signal = sparse_signal & has_any_props.lt(0.5)
+    return player_valid_mask.to(dtype=torch.bool) & sparse_signal
+
+
+def compute_sparse_emergency_gate_probability(
+    *,
+    player_features: torch.Tensor,
+    config: SparseEmergencyGateConfig,
+) -> torch.Tensor:
+    if player_features.ndim != 4:
+        raise ValueError("player_features must have shape (B,2,15,F)")
+    cols: list[torch.Tensor] = []
+    for idx, decode_mean, decode_std, feat_mean, feat_std in zip(
+        config.feature_indices,
+        config.decode_means,
+        config.decode_stds,
+        config.feature_means,
+        config.feature_stds,
+        strict=True,
+    ):
+        raw = _decode_feature(
+            player_features,
+            idx=int(idx),
+            mean=float(decode_mean),
+            std=float(decode_std),
+        )
+        scale = float(feat_std)
+        if abs(scale) < 1e-8:
+            scale = 1.0
+        cols.append((raw - float(feat_mean)) / scale)
+    x = torch.stack(cols, dim=-1)
+    coef = torch.as_tensor(config.coefficients, dtype=x.dtype, device=x.device)
+    logits = (x * coef).sum(dim=-1) + float(config.intercept)
+    return torch.sigmoid(logits)
+
+
 def blend_expert_predictions(
     *,
     baseline_minutes: torch.Tensor,
@@ -310,6 +501,7 @@ def blend_expert_predictions(
     candidate_mask: torch.Tensor,
     uplift_only: bool,
     force_active_candidates: bool = False,
+    blend_alpha: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if baseline_minutes.shape != expert_minutes.shape:
         raise ValueError("baseline_minutes and expert_minutes must have matching shapes")
@@ -324,10 +516,16 @@ def blend_expert_predictions(
     blended_active = torch.where(candidate, baseline_active | expert_active, baseline_active)
     if force_active_candidates:
         blended_active = blended_active | candidate
+    alpha = float(blend_alpha)
+    if alpha < 0.0 or alpha > 1.0:
+        raise ValueError("blend_alpha must be in [0, 1]")
     if bool(uplift_only):
-        blended_minutes = torch.where(candidate, torch.maximum(baseline_minutes, expert_minutes), baseline_minutes)
+        uplift = (expert_minutes - baseline_minutes).clamp(min=0.0)
+        target_minutes = baseline_minutes + alpha * uplift
+        blended_minutes = torch.where(candidate, target_minutes, baseline_minutes)
     else:
-        blended_minutes = torch.where(candidate, expert_minutes, baseline_minutes)
+        target_minutes = baseline_minutes + alpha * (expert_minutes - baseline_minutes)
+        blended_minutes = torch.where(candidate, target_minutes, baseline_minutes)
     return blended_minutes, blended_active
 
 
@@ -340,6 +538,7 @@ def blend_promotion_predictions(
     promotion_candidate_mask: torch.Tensor,
     uplift_only: bool,
     force_active_candidates: bool = False,
+    blend_alpha: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return blend_expert_predictions(
         baseline_minutes=baseline_minutes,
@@ -349,4 +548,5 @@ def blend_promotion_predictions(
         candidate_mask=promotion_candidate_mask,
         uplift_only=uplift_only,
         force_active_candidates=force_active_candidates,
+        blend_alpha=blend_alpha,
     )

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -7,10 +10,14 @@ from projections.rotation.game_transformer_v2 import FLOW_TARGET_COLUMNS_V1, Gam
 from projections.rotation.gtv2_promotion_hybrid import (
     BenchRiserHybridConfig,
     PromotionHybridConfig,
+    SparseEmergencyGateConfig,
+    SparseEmergencyHybridConfig,
     assert_promotion_hybrid_compatible,
     blend_expert_predictions,
     blend_promotion_predictions,
     compute_bench_riser_candidate_mask,
+    compute_sparse_emergency_gate_probability,
+    compute_sparse_emergency_candidate_mask,
     compute_starter_promotion_candidate_mask,
 )
 from projections.rotation.sample_worlds_v2 import sample_worlds_for_batch
@@ -163,6 +170,135 @@ def test_compute_bench_riser_candidate_mask_uses_decoded_raw_thresholds() -> Non
     assert bool(mask[0, 0, 3]) is False
 
 
+def test_compute_sparse_emergency_candidate_mask_uses_or_of_prior_minutes_and_play_prob() -> None:
+    cfg = GameTransformerV2Config(
+        feature_columns=[
+            "minutes_from_stints_prior_20",
+            "prior_play_prob",
+        ],
+        feature_mean=[10.0, 0.70],
+        feature_std=[2.0, 0.10],
+        game_feature_columns=[],
+        team_feature_columns=[],
+    )
+    hybrid_cfg = SparseEmergencyHybridConfig.from_model_config(
+        cfg,
+        prior_minutes_max=12.0,
+        prior_play_prob_max=0.50,
+    )
+
+    player_features = torch.zeros((1, 2, 15, 2), dtype=torch.float32)
+    player_valid_mask = torch.zeros((1, 2, 15), dtype=torch.bool)
+    player_valid_mask[:, 0, :4] = True
+
+    # Candidate 0 qualifies on prior minutes only: 11 min, 0.80 play-prob.
+    player_features[0, 0, 0, 0] = 0.5
+    player_features[0, 0, 0, 1] = 1.0
+    # Candidate 1 qualifies on play-prob only: 14 min, 0.45 play-prob.
+    player_features[0, 0, 1, 0] = 2.0
+    player_features[0, 0, 1, 1] = -2.5
+    # Candidate 2 qualifies on neither.
+    player_features[0, 0, 2, 0] = 2.0
+    player_features[0, 0, 2, 1] = 1.0
+    # Candidate 3 is invalid even though it qualifies.
+    player_features[0, 0, 3, 0] = 0.0
+    player_features[0, 0, 3, 1] = -3.0
+    player_valid_mask[0, 0, 3] = False
+
+    mask = compute_sparse_emergency_candidate_mask(
+        player_features=player_features,
+        player_valid_mask=player_valid_mask,
+        config=hybrid_cfg,
+    )
+    assert bool(mask[0, 0, 0]) is True
+    assert bool(mask[0, 0, 1]) is True
+    assert bool(mask[0, 0, 2]) is False
+    assert bool(mask[0, 0, 3]) is False
+
+
+def test_compute_sparse_emergency_candidate_mask_can_require_no_props() -> None:
+    cfg = GameTransformerV2Config(
+        feature_columns=[
+            "minutes_from_stints_prior_20",
+            "prior_play_prob",
+            "an_has_any_props",
+        ],
+        feature_mean=[10.0, 0.70, 0.0],
+        feature_std=[2.0, 0.10, 1.0],
+        game_feature_columns=[],
+        team_feature_columns=[],
+    )
+    hybrid_cfg = SparseEmergencyHybridConfig.from_model_config(
+        cfg,
+        prior_minutes_max=12.0,
+        prior_play_prob_max=0.50,
+        require_no_props=True,
+    )
+
+    player_features = torch.zeros((1, 2, 15, 3), dtype=torch.float32)
+    player_valid_mask = torch.zeros((1, 2, 15), dtype=torch.bool)
+    player_valid_mask[:, 0, :2] = True
+
+    # Candidate 0 qualifies and is propless.
+    player_features[0, 0, 0, 0] = 0.5
+    player_features[0, 0, 0, 1] = 1.0
+    player_features[0, 0, 0, 2] = 0.0
+    # Candidate 1 qualifies on minutes but has props.
+    player_features[0, 0, 1, 0] = 0.5
+    player_features[0, 0, 1, 1] = 1.0
+    player_features[0, 0, 1, 2] = 1.0
+
+    mask = compute_sparse_emergency_candidate_mask(
+        player_features=player_features,
+        player_valid_mask=player_valid_mask,
+        config=hybrid_cfg,
+    )
+    assert bool(mask[0, 0, 0]) is True
+    assert bool(mask[0, 0, 1]) is False
+
+
+def test_sparse_emergency_gate_probability_decodes_model_features(tmp_path: Path) -> None:
+    cfg = GameTransformerV2Config(
+        feature_columns=[
+            "prior_play_prob",
+            "minutes_from_stints_prior_20",
+            "lineup_starter_announced",
+        ],
+        feature_mean=[0.70, 10.0, 0.0],
+        feature_std=[0.10, 2.0, 1.0],
+        game_feature_columns=[],
+        team_feature_columns=[],
+    )
+    artifact = {
+        "feature_names": ["prior_play_prob", "minutes_from_stints_prior_20", "lineup_starter_announced"],
+        "feature_means": [0.50, 8.0, 0.0],
+        "feature_stds": [0.10, 4.0, 1.0],
+        "coefficients": [-2.0, -1.0, 1.5],
+        "intercept": 0.25,
+        "prob_threshold": 0.6,
+    }
+    gate_path = tmp_path / "gate.json"
+    gate_path.write_text(json.dumps(artifact), encoding="utf-8")
+    gate_cfg = SparseEmergencyGateConfig.from_artifact(cfg, gate_path)
+
+    player_features = torch.zeros((1, 2, 15, 3), dtype=torch.float32)
+    # Row 0: low play prob, low minutes, announced starter -> high probability.
+    player_features[0, 0, 0, 0] = -3.0  # raw 0.4
+    player_features[0, 0, 0, 1] = -1.0  # raw 8.0
+    player_features[0, 0, 0, 2] = 1.0
+    # Row 1: high play prob, high minutes, not announced -> low probability.
+    player_features[0, 0, 1, 0] = 2.0   # raw 0.9
+    player_features[0, 0, 1, 1] = 4.0   # raw 18.0
+    player_features[0, 0, 1, 2] = 0.0
+
+    probs = compute_sparse_emergency_gate_probability(
+        player_features=player_features,
+        config=gate_cfg,
+    )
+    assert float(probs[0, 0, 0]) > float(gate_cfg.prob_threshold)
+    assert float(probs[0, 0, 1]) < float(gate_cfg.prob_threshold)
+
+
 def test_blend_expert_predictions_uplift_only() -> None:
     blended_minutes, blended_active = blend_expert_predictions(
         baseline_minutes=torch.tensor([[10.0, 18.0]], dtype=torch.float32),
@@ -173,6 +309,20 @@ def test_blend_expert_predictions_uplift_only() -> None:
         uplift_only=True,
     )
     assert torch.allclose(blended_minutes, torch.tensor([[22.0, 18.0]], dtype=torch.float32))
+    assert torch.equal(blended_active, torch.tensor([[True, True]]))
+
+
+def test_blend_expert_predictions_uplift_only_partial_alpha() -> None:
+    blended_minutes, blended_active = blend_expert_predictions(
+        baseline_minutes=torch.tensor([[10.0, 18.0]], dtype=torch.float32),
+        baseline_active_mask=torch.tensor([[True, True]]),
+        expert_minutes=torch.tensor([[22.0, 8.0]], dtype=torch.float32),
+        expert_active_mask=torch.tensor([[True, False]]),
+        candidate_mask=torch.tensor([[True, False]]),
+        uplift_only=True,
+        blend_alpha=0.5,
+    )
+    assert torch.allclose(blended_minutes, torch.tensor([[16.0, 18.0]], dtype=torch.float32))
     assert torch.equal(blended_active, torch.tensor([[True, True]]))
 
 
@@ -193,6 +343,25 @@ def test_assert_promotion_hybrid_compatible_rejects_feature_mismatch() -> None:
     )
     with pytest.raises(ValueError, match="feature_columns"):
         assert_promotion_hybrid_compatible(primary, expert)
+
+
+def test_assert_promotion_hybrid_compatible_allows_different_normalization_stats() -> None:
+    primary = GameTransformerV2Config(
+        feature_columns=["minutes_from_stints_prior_20", "recent_start_pct_10"],
+        feature_mean=[0.0, 0.0],
+        feature_std=[1.0, 1.0],
+        game_feature_columns=["vegas_total"],
+        team_feature_columns=["team_pace_szn"],
+    )
+    expert = GameTransformerV2Config(
+        feature_columns=["minutes_from_stints_prior_20", "recent_start_pct_10"],
+        feature_mean=[5.0, 0.25],
+        feature_std=[3.0, 0.5],
+        game_feature_columns=["vegas_total"],
+        team_feature_columns=["team_pace_szn"],
+    )
+
+    assert_promotion_hybrid_compatible(primary, expert)
 
 
 def test_sample_worlds_for_batch_promotion_hybrid_uses_blended_minutes_context() -> None:

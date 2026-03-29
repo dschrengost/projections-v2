@@ -4573,3 +4573,213 @@ Updated next-step boundary:
 - the right next step is promotion-style validation / live shadowing of the
   rate-preserving opportunity reconcile branch, with `alpha` centered around
   `0.50`
+
+### Next-man-up follow-up (2026-03-29)
+
+After the team-opportunity promotion, the remaining high-value minutes weakness
+was re-checked on the same 60-game packet.
+
+Important diagnostic:
+
+- strict production `starter_promotion` / `bench_riser` slices were empty on
+  this packet
+- the broader propless sparse-next-up slice was not empty and was very bad:
+  - `n = 16`
+  - current shipped branch:
+    - predicted minutes mean `11.22`
+    - actual minutes mean `25.15`
+    - minutes bias `-13.93`
+    - minutes MAE `13.98`
+    - DK bias `-13.44`
+    - DK MAE `14.27`
+
+Interpretation:
+
+- this is not just an emergency-starter problem
+- it also includes end-of-bench or low-prior players who are forced into real
+  rotation minutes
+- the existing production replay slices are too narrow to measure that class
+  well
+
+What we tested next:
+
+- a new broad `sparse_emergency` specialist path in the GTv2 hybrid overlay
+- training-side sparse-emergency oversampling and underprediction loss
+- inference-side sparse specialist blending on top of the current shipped
+  `teamopp_ratepres_a050` branch
+
+Useful artifacts:
+
+- specialist probe:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_emergency_probe_20260329T050400Z/summary.json`
+- broad overlay compare:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_overlay_60day_eval_20260329T051300Z/summary.csv`
+- alpha sweep:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_overlay_alpha_eval_20260329T053000Z/summary.csv`
+- propless-only overlay compare:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_overlay_propless_eval_20260329T054200Z/summary.csv`
+
+What worked:
+
+- the specialist mechanism itself is real
+- on the exact bad propless sparse-next-up slice:
+  - full sparse overlay moved minutes bias from `-13.93` to `-11.59`
+  - DK bias from `-13.44` to `-11.36`
+  - under-10-minute rate from `50.0%` to `18.8%`
+
+What did not work:
+
+- broad packet quality got worse at every tested overlay alpha
+- even a lighter `alpha=0.25` overlay worsened:
+  - `dk_fpts_mae`
+  - `minutes_mae`
+  - and some team-level calibration
+- restricting the sparse overlay to propless rows did not materially change the
+  tradeoff
+
+Current read:
+
+- the next-man-up specialist direction is validated
+- the current specialist is too blunt
+- the main problem is now slice definition / data support, not whether the
+  overlay infrastructure can work
+
+Updated plan:
+
+1. build a full-history next-man-up labeling artifact over the entire GTv2
+   dataset
+2. split the phenomenon into at least:
+   - emergency starter
+   - bench rotation entrant
+   - bench core riser
+   - sparse active surprise
+3. retrain the specialist on those relabeled archetypes rather than one broad
+   sparse bucket
+4. add a baseline-distillation constraint so the specialist stays close to the
+   shipped branch off the target slice
+5. only after that consider semi-synthetic augmentation if the full-history
+   counts are still too small
+
+Update after the first full-history-guided retrain:
+
+- the trainer now supports `--sparse-emergency-require-no-props`, so both the
+  sparse-emergency sampler and the sparse underprediction loss can target
+  propless rows directly
+- first retrain kept the prior warm-start / freeze envelope and changed only:
+  - `actual_minutes >= 16`
+  - `an_has_any_props == 0`
+- training artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_emergency_propless16_20260329T053605Z/summary.json`
+- broad replay artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_propless16_eval_20260329T0541Z/summary.csv`
+- targeted slice artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_propless16_eval_20260329T0541Z/propless_sparse_slice_summary.csv`
+
+What changed:
+
+- broad validation is still not promotion-worthy:
+  - retrain `best_val_total = 12.39`
+  - broad replay still worsens at `alpha=0.5` and `alpha=1.0`
+- but the targeted propless sparse slice did improve versus control
+  - for `actual_minutes >= 20`:
+    - control:
+      - predicted minutes mean `11.22`
+      - minutes bias `-13.93`
+      - DK bias `-13.44`
+    - propless16 full overlay:
+      - predicted minutes mean `13.67`
+      - minutes bias `-11.48`
+      - DK bias `-11.28`
+
+Updated read:
+
+- this confirms again that the mechanism is real
+- the failure is not lack of data or lack of signal
+- the failure is still selectivity: the expert helps the right slice, but not
+  selectively enough to preserve the broad packet
+- next branch should use the new archetype labels to learn when to apply the
+  specialist, rather than broadening the same heuristic overlay further
+
+Next iteration: learned sparse gate on top of the specialist
+
+- implemented a lightweight logistic sparse gate trained on the full-history
+  labeled artifact over the propless sparse-candidate universe
+- gate artifact:
+  - `/home/daniel/projections-data/training/runs/sparse_emergency_gate_20260329T061500Z/gate_artifact.json`
+- validation at train time:
+  - ROC AUC `0.870`
+  - average precision `0.313`
+  - threshold selected at `0.825`
+
+Replay with gated specialist:
+
+- replay artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_propless16_gated_eval_20260329T0617Z/summary.csv`
+- slice artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_propless16_gated_eval_20260329T0617Z/propless_sparse_slice_summary.csv`
+
+What improved materially:
+
+- broad packet damage nearly disappeared
+  - control:
+    - `dk_fpts_mae = 5.613`
+    - `minutes_mae = 3.624`
+  - ungated propless16 `alpha=0.5`:
+    - `dk_fpts_mae = 5.708`
+    - `minutes_mae = 3.674`
+  - gated propless16 `alpha=0.5`:
+    - `dk_fpts_mae = 5.614`
+    - `minutes_mae = 3.619`
+
+- targeted propless sparse slice still improved
+  - for `actual_minutes >= 20`
+  - control:
+    - predicted minutes mean `11.22`
+    - minutes bias `-13.93`
+    - DK bias `-13.44`
+  - gated `alpha=0.5`:
+    - predicted minutes mean `11.95`
+    - minutes bias `-13.20`
+    - DK bias `-12.48`
+  - gated `alpha=1.0`:
+    - predicted minutes mean `12.92`
+    - minutes bias `-12.23`
+    - DK bias `-11.87`
+
+Current read:
+
+- this is the first branch that materially improves selectivity
+- the learned gate preserves most of the broad packet while keeping a real
+  fraction of the next-man-up lift
+- the best immediate next step is no longer “new specialist logic”; it is
+  threshold / alpha tuning and then, if needed, replacing the logistic gate
+  with an archetype-aware gate trained on the same full-history labels
+
+Threshold sweep update:
+
+- sweep artifact:
+  - `/home/daniel/projections-data/training/runs/gtv2_sparse_propless16_gate_sweep_20260329T0622Z/summary.csv`
+- best operating point so far is `threshold=0.75`
+
+Best current branch:
+
+- `gate075_a050` is the cleanest “broad-first” point:
+  - `dk_fpts_mae = 5.611` vs control `5.613`
+  - `minutes_mae = 3.626` vs control `3.624`
+  - propless sparse `actual_minutes >= 20`:
+    - predicted minutes mean `12.34` vs control `11.22`
+    - minutes bias `-12.81` vs control `-13.93`
+    - DK bias `-11.89` vs control `-13.44`
+
+- `gate075_a100` is the cleanest “target-slice first” point:
+  - `dk_fpts_mae = 5.641`
+  - `minutes_mae = 3.648`
+  - propless sparse `actual_minutes >= 20`:
+    - predicted minutes mean `13.65`
+    - minutes bias `-11.50`
+    - DK bias `-11.05`
+
+So the gate sweep converted this from a pure research branch into a real
+operating frontier: we now have one setting that is basically broad-neutral and
+another that keeps substantially more of the next-man-up lift for only a modest
+aggregate cost.
