@@ -881,6 +881,388 @@ def _apply_promotion_prior_if_enabled(
     return calibrated
 
 
+def _attach_promotion_signal_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Attach a conservative next-man-up promotion heuristic for downstream allocation.
+
+    This is intentionally lightweight and feature-based. It does not replace the
+    learned promotion prior or GTv2 specialist work; it gives `occupancy_sparse_v0`
+    a bounded signal for sparse/propless candidates who may need a non-fringe role
+    under team injury pressure.
+    """
+
+    if df.empty:
+        return df
+
+    working = df.copy()
+
+    def _numeric_optional_series(col: str, default: float) -> pd.Series:
+        if col in working.columns:
+            return pd.to_numeric(working[col], errors="coerce")
+        return pd.Series(default, index=working.index, dtype=float)
+
+    prior_play_prob = _numeric_optional_series("prior_play_prob", 1.0).fillna(1.0).clip(lower=0.0, upper=1.0)
+    play_prob = _numeric_optional_series("play_prob", 1.0).fillna(1.0).clip(lower=0.0, upper=1.0)
+    recent_start_pct = _numeric_optional_series("recent_start_pct_10", 0.0).fillna(0.0).clip(lower=0.0, upper=1.0)
+    implied_minutes = _numeric_optional_series("an_implied_minutes", 0.0).fillna(0.0)
+    minutes_p50 = _numeric_optional_series("minutes_p50", 0.0).fillna(0.0)
+    minutes_p90 = _numeric_optional_series("minutes_p90", np.nan).fillna(minutes_p50)
+    vac_min_szn = _numeric_optional_series("vac_min_szn", np.nan)
+    vac_min_guard = _numeric_optional_series("vac_min_guard_szn", np.nan)
+    vac_min_wing = _numeric_optional_series("vac_min_wing_szn", np.nan)
+    vac_min_big = _numeric_optional_series("vac_min_big_szn", np.nan)
+    sum_min_7d = _numeric_optional_series("sum_min_7d", np.nan)
+    min_last3 = _numeric_optional_series("min_last3", np.nan)
+
+    has_props = pd.Series(False, index=working.index, dtype=bool)
+    if "an_has_any_props" in working.columns:
+        has_props |= (
+            pd.to_numeric(working["an_has_any_props"], errors="coerce").fillna(0.0).ge(0.5)
+        )
+    if "an_props_market_count" in working.columns:
+        has_props |= (
+            pd.to_numeric(working["an_props_market_count"], errors="coerce").fillna(0.0).ge(1.0)
+        )
+
+    sparse_prior_component = (prior_play_prob.le(0.50) | play_prob.le(0.50)).astype(float)
+    recent_start_component = ((0.25 - recent_start_pct) / 0.25).clip(lower=0.0, upper=1.0)
+    implied_minutes_component = ((implied_minutes - 12.0) / 12.0).clip(lower=0.0, upper=1.0)
+    model_upside_component = ((minutes_p90.clip(lower=minutes_p50) - 16.0) / 14.0).clip(lower=0.0, upper=1.0)
+    propless_component = (~has_props).astype(float)
+    vacancy_proxy = pd.concat(
+        [vac_min_szn, vac_min_guard, vac_min_wing, vac_min_big],
+        axis=1,
+    ).max(axis=1, skipna=True).fillna(0.0)
+    vacancy_component = ((vacancy_proxy - 120.0) / 220.0).clip(lower=0.0, upper=1.0)
+    recency_proxy = sum_min_7d.fillna(min_last3 * 3.0).fillna(0.0)
+    recency_component = ((recency_proxy - 8.0) / 24.0).clip(lower=0.0, upper=1.0)
+
+    promotion_signal_score = (
+        0.24 * sparse_prior_component
+        + 0.12 * recent_start_component
+        + 0.18 * implied_minutes_component
+        + 0.12 * model_upside_component
+        + 0.08 * propless_component
+        + 0.18 * vacancy_component
+        + 0.08 * recency_component
+    ).clip(lower=0.0, upper=1.0)
+
+    primary_gate = (
+        sparse_prior_component.ge(0.5)
+        & (
+            implied_minutes.ge(14.0)
+            | minutes_p90.ge(20.0)
+            | vacancy_component.ge(0.55)
+        )
+        & promotion_signal_score.ge(0.52)
+    )
+    # Experimental fallback: sparse/propless rows can still represent true promotions
+    # when implied/p90 are missing, especially after late availability updates.
+    fallback_gate = (
+        sparse_prior_component.ge(0.5)
+        & propless_component.ge(0.5)
+        & play_prob.le(0.05)
+        & vacancy_component.ge(0.35)
+        & recency_component.ge(0.20)
+        & promotion_signal_score.ge(0.50)
+    )
+    promotion_signal_flag = primary_gate | fallback_gate
+
+    working["promotion_signal_score"] = promotion_signal_score.astype(float)
+    working["promotion_signal_flag"] = promotion_signal_flag.astype("int8")
+    working["promotion_signal_sparse_prior"] = sparse_prior_component.astype("int8")
+    working["promotion_signal_propless"] = (~has_props).astype("int8")
+    return working
+
+
+def _json_float(value: object) -> float | None:
+    try:
+        out = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(out):
+        return None
+    return out
+
+
+def _resolve_actual_minutes_col(df: pd.DataFrame) -> str | None:
+    for candidate in ("actual_minutes", "minutes"):
+        if candidate in df.columns:
+            return candidate
+    return None
+
+
+def _derive_minutes_p95_for_eval(df: pd.DataFrame) -> tuple[pd.Series, str | None]:
+    if "minutes_p95" in df.columns:
+        p95 = pd.to_numeric(df["minutes_p95"], errors="coerce").astype(float)
+        return p95, "minutes_p95"
+    if {"minutes_p90", "minutes_p50"}.issubset(df.columns):
+        p50 = pd.to_numeric(df["minutes_p50"], errors="coerce").fillna(0.0).astype(float)
+        p90 = pd.to_numeric(df["minutes_p90"], errors="coerce").fillna(0.0).astype(float)
+        spread = (p90 - p50).clip(lower=0.0)
+        p95 = (p90 + 0.5 * spread).clip(lower=p90, upper=48.0)
+        return p95.astype(float), "derived_from_p50_p90"
+    if "minutes_p90" in df.columns:
+        p90 = pd.to_numeric(df["minutes_p90"], errors="coerce").astype(float)
+        return p90, "fallback_minutes_p90"
+    return pd.Series(np.nan, index=df.index, dtype=float), None
+
+
+def _play_prob_calibration_payload(
+    play_prob: pd.Series,
+    actual_play: pd.Series,
+) -> dict[str, Any] | None:
+    pred = pd.to_numeric(play_prob, errors="coerce").clip(lower=0.0, upper=1.0)
+    valid = pred.notna() & actual_play.notna()
+    if int(valid.sum()) == 0:
+        return None
+
+    pred_v = pred.loc[valid].astype(float)
+    actual_v = actual_play.loc[valid].astype(float)
+    pred_mean = float(pred_v.mean())
+    actual_rate = float(actual_v.mean())
+    brier = float(np.mean((pred_v.to_numpy(dtype=float) - actual_v.to_numpy(dtype=float)) ** 2))
+
+    cal_table: list[dict[str, Any]] = []
+    bin_edges = np.linspace(0.0, 1.0, 6)
+    buckets = pd.cut(pred_v, bins=bin_edges, include_lowest=True, right=True)
+    for bucket, group in pred_v.groupby(buckets, observed=False):
+        if bucket is None or len(group) == 0:
+            continue
+        idx = group.index
+        cal_table.append(
+            {
+                "bucket": str(bucket),
+                "rows": int(len(group)),
+                "pred_mean": float(group.mean()),
+                "actual_rate": float(actual_v.loc[idx].mean()),
+            }
+        )
+
+    return {
+        "rows": int(valid.sum()),
+        "pred_mean": pred_mean,
+        "actual_play_rate": actual_rate,
+        "abs_error": float(abs(pred_mean - actual_rate)),
+        "brier": brier,
+        "bins": cal_table,
+    }
+
+
+def _slice_replay_eval_metrics(
+    df: pd.DataFrame,
+    *,
+    actual_minutes: pd.Series | None,
+    p95_series: pd.Series,
+) -> dict[str, Any]:
+    rows = int(len(df))
+    out: dict[str, Any] = {
+        "rows": rows,
+        "actual_rows": 0,
+        "minutes_p50_mae": None,
+        "minutes_p50_bias": None,
+        "actual_minutes_ge_20_rate": None,
+        "play_prob_calibration": None,
+        "team_hit_at_k": None,
+        "tail_hit_rates": {
+            "p90_hit_rate": None,
+            "over_p90_rate": None,
+            "p95_hit_rate": None,
+            "over_p95_rate": None,
+        },
+    }
+    if rows == 0 or actual_minutes is None:
+        return out
+
+    actual = pd.to_numeric(actual_minutes, errors="coerce")
+    actual_valid = actual.notna()
+    n_actual = int(actual_valid.sum())
+    out["actual_rows"] = n_actual
+    if n_actual == 0:
+        return out
+
+    actual_v = actual.loc[actual_valid].astype(float)
+    out["actual_minutes_ge_20_rate"] = float((actual_v >= 20.0).mean())
+
+    if "minutes_p50" in df.columns:
+        pred50 = pd.to_numeric(df["minutes_p50"], errors="coerce")
+        valid50 = actual_valid & pred50.notna()
+        if int(valid50.sum()) > 0:
+            err = pred50.loc[valid50].astype(float) - actual.loc[valid50].astype(float)
+            out["minutes_p50_mae"] = float(err.abs().mean())
+            out["minutes_p50_bias"] = float(err.mean())
+
+    if "play_prob" in df.columns:
+        play_actual = (actual > 0.0).astype(float)
+        out["play_prob_calibration"] = _play_prob_calibration_payload(
+            pd.to_numeric(df["play_prob"], errors="coerce"),
+            play_actual,
+        )
+
+    if "minutes_p90" in df.columns:
+        p90 = pd.to_numeric(df["minutes_p90"], errors="coerce")
+        valid90 = actual_valid & p90.notna()
+        if int(valid90.sum()) > 0:
+            hits90 = (actual.loc[valid90].astype(float) <= p90.loc[valid90].astype(float)).astype(float)
+            out["tail_hit_rates"]["p90_hit_rate"] = float(hits90.mean())
+            out["tail_hit_rates"]["over_p90_rate"] = float(1.0 - hits90.mean())
+
+    p95 = pd.to_numeric(p95_series, errors="coerce")
+    valid95 = actual_valid & p95.notna()
+    if int(valid95.sum()) > 0:
+        hits95 = (actual.loc[valid95].astype(float) <= p95.loc[valid95].astype(float)).astype(float)
+        out["tail_hit_rates"]["p95_hit_rate"] = float(hits95.mean())
+        out["tail_hit_rates"]["over_p95_rate"] = float(1.0 - hits95.mean())
+
+    out["team_hit_at_k"] = _team_hit_at_k_payload(df, actual_minutes=actual)
+
+    return out
+
+
+def _team_hit_at_k_payload(
+    df: pd.DataFrame,
+    *,
+    actual_minutes: pd.Series | None,
+    hit_minutes_threshold: float = 20.0,
+) -> dict[str, Any] | None:
+    if df.empty or actual_minutes is None:
+        return None
+    if "game_date" not in df.columns:
+        return None
+
+    team_col = "team_id" if "team_id" in df.columns else ("team" if "team" in df.columns else None)
+    if team_col is None:
+        return None
+
+    score_col = None
+    for candidate in ("promotion_signal_score", "promotion_score", "minutes_p90", "minutes_p50"):
+        if candidate in df.columns:
+            score_col = candidate
+            break
+    if score_col is None:
+        return None
+
+    score = pd.to_numeric(df[score_col], errors="coerce").fillna(-np.inf)
+    actual = pd.to_numeric(actual_minutes, errors="coerce")
+    valid = actual.notna()
+    if int(valid.sum()) == 0:
+        return None
+
+    group_df = pd.DataFrame(
+        {
+            "game_date": df.loc[valid, "game_date"],
+            "team_key": df.loc[valid, team_col],
+            "actual_minutes": actual.loc[valid].astype(float),
+            "rank_score": score.loc[valid].astype(float),
+        }
+    )
+    group_df = group_df[group_df["team_key"].notna()].copy()
+    if group_df.empty:
+        return None
+
+    any_hit_vals: list[float] = []
+    top1_vals: list[float] = []
+    top2_vals: list[float] = []
+    top3_vals: list[float] = []
+
+    for _, grp in group_df.groupby(["game_date", "team_key"], sort=False):
+        hits = grp["actual_minutes"].ge(hit_minutes_threshold)
+        any_hit_vals.append(float(hits.any()))
+        ranked = grp.sort_values("rank_score", ascending=False, kind="mergesort")
+        top1_vals.append(float(ranked.head(1)["actual_minutes"].ge(hit_minutes_threshold).any()))
+        top2_vals.append(float(ranked.head(2)["actual_minutes"].ge(hit_minutes_threshold).any()))
+        top3_vals.append(float(ranked.head(3)["actual_minutes"].ge(hit_minutes_threshold).any()))
+
+    if not any_hit_vals:
+        return None
+
+    return {
+        "group_keys": ["game_date", str(team_col)],
+        "score_col": score_col,
+        "team_dates": int(len(any_hit_vals)),
+        "hit_minutes_threshold": float(hit_minutes_threshold),
+        "any_hit_rate": float(np.mean(any_hit_vals)),
+        "top1_hit_rate": float(np.mean(top1_vals)),
+        "top2_hit_rate": float(np.mean(top2_vals)),
+        "top3_hit_rate": float(np.mean(top3_vals)),
+    }
+
+
+def _build_replay_eval_packet(df: pd.DataFrame) -> dict[str, Any]:
+    """Build per-slate replay/eval diagnostics focused on promotion/propless slices."""
+    if df.empty:
+        return {
+            "actual_minutes_col": None,
+            "p95_source": None,
+            "slices": {},
+        }
+
+    working = df.copy()
+    actual_col = _resolve_actual_minutes_col(working)
+    actual_minutes = (
+        pd.to_numeric(working[actual_col], errors="coerce").astype(float)
+        if actual_col is not None
+        else None
+    )
+    p95_series, p95_source = _derive_minutes_p95_for_eval(working)
+
+    idx = working.index
+    sparse_prior = pd.Series(False, index=idx, dtype=bool)
+    if "promotion_signal_sparse_prior" in working.columns:
+        sparse_prior |= pd.to_numeric(working["promotion_signal_sparse_prior"], errors="coerce").fillna(0.0).ge(0.5)
+    if "prior_play_prob" in working.columns:
+        sparse_prior |= pd.to_numeric(working["prior_play_prob"], errors="coerce").fillna(1.0).le(0.5)
+    if "play_prob" in working.columns:
+        sparse_prior |= pd.to_numeric(working["play_prob"], errors="coerce").fillna(1.0).le(0.5)
+
+    propless = pd.Series(False, index=idx, dtype=bool)
+    if "promotion_signal_propless" in working.columns:
+        propless |= pd.to_numeric(working["promotion_signal_propless"], errors="coerce").fillna(0.0).ge(0.5)
+    if "an_has_any_props" in working.columns:
+        has_props = pd.to_numeric(working["an_has_any_props"], errors="coerce").fillna(0.0).ge(0.5)
+        propless |= ~has_props
+
+    promotion_flag = (
+        pd.to_numeric(working["promotion_signal_flag"], errors="coerce").fillna(0.0).ge(0.5)
+        if "promotion_signal_flag" in working.columns
+        else pd.Series(False, index=idx, dtype=bool)
+    )
+    promotion_occ = (
+        pd.to_numeric(working["promotion_signal"], errors="coerce").fillna(0.0).ge(0.5)
+        if "promotion_signal" in working.columns
+        else pd.Series(False, index=idx, dtype=bool)
+    )
+    actual_ge_20 = (
+        pd.to_numeric(actual_minutes, errors="coerce").fillna(-1.0).ge(20.0)
+        if actual_minutes is not None
+        else pd.Series(False, index=idx, dtype=bool)
+    )
+
+    slice_masks: dict[str, pd.Series] = {
+        "broad_packet": pd.Series(True, index=idx, dtype=bool),
+        "target_sparse_propless": sparse_prior & propless,
+        "promotion_signal_flag": promotion_flag,
+        "promotion_signal": promotion_occ,
+        "propless": propless,
+        "sparse_prior": sparse_prior,
+        "actual_minutes_ge_20": actual_ge_20,
+    }
+
+    slice_payload: dict[str, Any] = {}
+    for name, mask in slice_masks.items():
+        scoped = working.loc[mask].copy()
+        scoped_actual = actual_minutes.loc[scoped.index] if actual_minutes is not None else None
+        scoped_p95 = p95_series.loc[scoped.index]
+        metrics = _slice_replay_eval_metrics(scoped, actual_minutes=scoped_actual, p95_series=scoped_p95)
+        metrics["rows_share"] = _json_float(float(metrics["rows"]) / float(len(working)) if len(working) > 0 else None)
+        slice_payload[name] = metrics
+
+    return {
+        "actual_minutes_col": actual_col,
+        "p95_source": p95_source,
+        "slices": slice_payload,
+    }
+
+
 @lru_cache(maxsize=8)
 def _cached_player_name_map(root: str, seasons_key: tuple[int, ...]) -> dict[int, str]:
     root_path = Path(root)
@@ -1223,6 +1605,7 @@ def _score_rows_share(
 
     # Rotation probability (heuristic for now, could be improved)
     working["rotation_prob"] = _derive_rotation_prob(working)
+    working = _attach_promotion_signal_columns(working)
 
     return working
 
@@ -1334,6 +1717,7 @@ def _score_rows_rotshare(
     working["p10_cond"] = working["minutes_p10"]
     working["p50_cond"] = working["minutes_p50"]
     working["p90_cond"] = working["minutes_p90"]
+    working = _attach_promotion_signal_columns(working)
     working = _attach_unconditional_minutes(working)
     working["rotation_prob"] = working["play_prob"].astype(float)
     working["is_rotation"] = (working["rotation_prob"] >= 0.5).astype("int8")
@@ -1552,6 +1936,7 @@ def _score_rows(
     else:
         working["is_starter"] = 0
         typer.echo("[minutes] warning: is_starter not found in features; defaulting to 0", err=True)
+    working = _attach_promotion_signal_columns(working)
     working = _attach_unconditional_minutes(working)
     return working
 
@@ -1805,6 +2190,7 @@ def _write_daily_outputs(
     run_as_of_ts: datetime | None,
     minutes_output: MinutesOutputMode,
     extra_summary: dict[str, Any] | None = None,
+    replay_eval: dict[str, Any] | None = None,
 ) -> None:
     run_dir = _resolve_run_dir(out_root, day, run_id, write_mode=True)
     parquet_path = run_dir / OUTPUT_FILENAME
@@ -1858,6 +2244,8 @@ def _write_daily_outputs(
     }
     if extra_summary:
         summary["allocation"] = extra_summary
+    if replay_eval:
+        summary["replay_eval"] = replay_eval
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     if run_id:
         _write_latest_pointer(run_dir.parent, run_id=run_id, run_as_of_ts=run_as_of_ts)
@@ -2139,6 +2527,13 @@ def score_minutes_range_to_parquet(
         scored["eligible_flag"] = (
             pd.to_numeric(occ_scored["eligible_flag_occ"], errors="coerce").fillna(0).astype(int)
         )
+        for occ_col, out_col in (
+            ("promotion_signal_occ", "promotion_signal"),
+            ("promotion_score_occ", "promotion_score"),
+            ("promotion_seed_minutes_occ", "promotion_seed_minutes"),
+        ):
+            if occ_col in occ_scored.columns:
+                scored[out_col] = pd.to_numeric(occ_scored[occ_col], errors="coerce").fillna(0.0)
         scored["minutes_alloc_mode"] = "occupancy_sparse_v0"
 
     if should_debug and "minutes_p50" in scored.columns:
@@ -2146,12 +2541,16 @@ def score_minutes_range_to_parquet(
             day_slice = scored.loc[scored["game_date"] == day]
             typer.echo(f"[minutes_debug] {day} reconciled minutes_p50 describe():")
             typer.echo(day_slice["minutes_p50"].describe().to_string())
+    # Recompute promotion/propless diagnostics after final allocation so replay slices
+    # are aligned with post-allocation play_prob/minutes.
+    scored = _attach_promotion_signal_columns(scored)
     scored = _attach_unconditional_minutes(scored)
 
     for day in _iter_days(start_day, end_day):
         if target_dates is not None and day not in target_dates:
             continue
         day_df = scored.loc[scored["game_date"] == day].copy()
+        replay_eval = _build_replay_eval_packet(day_df)
         _write_daily_outputs(
             day,
             day_df,
@@ -2162,6 +2561,7 @@ def score_minutes_range_to_parquet(
             run_id=None,
             run_as_of_ts=None,
             minutes_output=minutes_output,
+            replay_eval=replay_eval,
         )
 
     return scored
@@ -3205,6 +3605,13 @@ def main(
             scored["eligible_flag"] = (
                 pd.to_numeric(occ_scored["eligible_flag_occ"], errors="coerce").fillna(0).astype(int)
             )
+            for occ_col, out_col in (
+                ("promotion_signal_occ", "promotion_signal"),
+                ("promotion_score_occ", "promotion_score"),
+                ("promotion_seed_minutes_occ", "promotion_seed_minutes"),
+            ):
+                if occ_col in occ_scored.columns:
+                    scored[out_col] = pd.to_numeric(occ_scored[occ_col], errors="coerce").fillna(0.0)
             scored["minutes_alloc_mode"] = "occupancy_sparse_v0"
             for alias, src in {
                 "p10_cond": "minutes_p10",
@@ -3341,6 +3748,9 @@ def main(
     ):
         alloc_summary.setdefault("realism_metrics", _compute_alloc_realism_metrics(scored, "minutes_mean"))
 
+    # Recompute promotion/propless diagnostics after final allocation so replay slices
+    # are aligned with post-allocation play_prob/minutes.
+    scored = _attach_promotion_signal_columns(scored)
     scored = _attach_unconditional_minutes(scored)
 
     # Log predictions (Phase 3 Hardening)
@@ -3355,6 +3765,7 @@ def main(
 
     for day in _iter_days(start_day, final_day):
         day_df = scored.loc[scored["game_date"] == day].copy()
+        replay_eval = _build_replay_eval_packet(day_df)
         columns_to_keep = [
             "game_date",
             "tip_ts",
@@ -3388,6 +3799,13 @@ def main(
             "minutes_mean",
             "minutes_alloc_mode",
             "eligible_flag",
+            "promotion_signal",
+            "promotion_score",
+            "promotion_seed_minutes",
+            "promotion_signal_score",
+            "promotion_signal_flag",
+            "promotion_signal_sparse_prior",
+            "promotion_signal_propless",
             "p_rot",
             "mu_cond",
             "team_minutes_sum",
@@ -3414,6 +3832,7 @@ def main(
             run_as_of_ts=run_as_of_datetime,
             minutes_output=minutes_output,
             extra_summary=alloc_summary,
+            replay_eval=replay_eval,
         )
 
 
