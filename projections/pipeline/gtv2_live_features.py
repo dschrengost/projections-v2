@@ -23,6 +23,7 @@ from scripts.rotation.build_joint_rotation_rates_dataset_v1 import (
     DEFAULT_EST_POSSESSIONS_CLIP_MIN,
     DEFAULT_EST_POSSESSIONS_PACE_WEIGHT,
     DEFAULT_LEAGUE_PPP,
+    TRACKING_CONTEXT_COLS,
     _apply_game_context_feature_contract,
     _apply_lineup_feature_contract,
 )
@@ -76,6 +77,84 @@ def _dedupe_columns(frame: pd.DataFrame) -> pd.DataFrame:
     if not frame.columns.duplicated().any():
         return frame
     return frame.loc[:, ~frame.columns.duplicated()].copy()
+
+
+def _join_tracking_roles(
+    features: pd.DataFrame,
+    *,
+    data_root: Path,
+    season: int,
+    day: pd.Timestamp,
+) -> dict[str, Any]:
+    """Load the latest tracking roles snapshot and join to features by player_id."""
+    import numpy as np
+
+    tracking_root = data_root / "gold" / "tracking_roles" / f"season={season}"
+    meta: dict[str, Any] = {"enabled": True, "tracking_root": str(tracking_root)}
+
+    if not tracking_root.is_dir():
+        meta["warning"] = "tracking_roles root not found"
+        meta["features"] = features
+        return meta
+
+    # Find the latest partition at or before the game date
+    candidates = sorted(tracking_root.glob("game_date=*/tracking_roles.parquet"))
+    usable = []
+    for p in candidates:
+        date_str = p.parent.name.replace("game_date=", "")
+        try:
+            d = pd.Timestamp(date_str).normalize()
+        except Exception:
+            continue
+        if d <= day:
+            usable.append(p)
+    if not usable:
+        meta["warning"] = "no tracking partitions at or before game date"
+        meta["features"] = features
+        return meta
+
+    latest_path = usable[-1]
+    tracking = pd.read_parquet(latest_path)
+    meta["partition_used"] = str(latest_path)
+    meta["rows_loaded"] = int(len(tracking))
+
+    # Keep only tracking context columns + player_id for join
+    keep_cols = ["player_id"] + [c for c in TRACKING_CONTEXT_COLS if c in tracking.columns]
+    tracking = tracking.loc[:, keep_cols].copy()
+    tracking["player_id"] = pd.to_numeric(tracking["player_id"], errors="coerce").astype("Int64")
+    # Dedupe: keep last row per player
+    tracking = tracking.drop_duplicates(subset=["player_id"], keep="last")
+
+    # Join
+    out = features.copy()
+    out["player_id"] = pd.to_numeric(out["player_id"], errors="coerce").astype("Int64")
+    out = out.merge(tracking, on="player_id", how="left", suffixes=("", "_track"))
+
+    # If upstream already emitted placeholder tracking columns, merge will suffix
+    # newly joined values with _track. Prefer joined tracking values and keep
+    # placeholders only when tracking snapshot has no value.
+    for col in TRACKING_CONTEXT_COLS:
+        track_col = f"{col}_track"
+        if track_col not in out.columns:
+            continue
+        joined = pd.to_numeric(out[track_col], errors="coerce")
+        if col in out.columns:
+            base = pd.to_numeric(out[col], errors="coerce")
+            out[col] = joined.combine_first(base)
+        else:
+            out[col] = joined
+    out = out.loc[:, [c for c in out.columns if not c.endswith("_track")]].copy()
+
+    # Add _missing indicators
+    for col in TRACKING_CONTEXT_COLS:
+        if col not in out.columns:
+            out[col] = np.nan
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+        out[f"{col}_missing"] = out[col].isna().astype("int8")
+
+    meta["features"] = out
+    meta["coverage"] = float(out[[c for c in TRACKING_CONTEXT_COLS if c in out.columns]].notna().any(axis=1).mean())
+    return meta
 
 
 def build_gtv2_live_features(
@@ -180,6 +259,14 @@ def build_gtv2_live_features(
 
     built_ns = built if hasattr(built, "features") else SimpleNamespace(features=built, dropped_extra_columns=[])
     features = _dedupe_columns(built_ns.features.copy())
+
+    # --- Tracking context: load latest tracking roles for the season and join ---
+    tracking_needed = [c for c in TRACKING_CONTEXT_COLS if c in spec.feature_columns]
+    tracking_meta: dict[str, Any] = {"enabled": False}
+    if tracking_needed:
+        tracking_meta = _join_tracking_roles(features, data_root=Path(data_root), season=season, day=day)
+        features = tracking_meta.pop("features", features)
+
     missing_features = [c for c in spec.feature_columns if c not in features.columns]
     if missing_features:
         raise GTV2LiveFeatureBuildError(
@@ -239,6 +326,7 @@ def build_gtv2_live_features(
         "dropped_extra_columns": list(getattr(built_ns, "dropped_extra_columns", [])),
         "priors_used_latest_fallback": bool(getattr(priors_result, "used_latest_fallback", False)),
         "priors_warning_message": getattr(priors_result, "warning_message", None),
+        "tracking_context": {k: v for k, v in tracking_meta.items() if k != "features"},
     }
     return GTV2LiveFeaturesBuildResult(
         features=out,

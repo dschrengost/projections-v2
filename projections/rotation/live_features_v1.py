@@ -1086,7 +1086,14 @@ def build_rotation_set_minutes_v1_features(
 
     missing = [c for c in feature_columns if c not in work.columns]
     if missing:
-        raise RotationLiveFeaturesError(f"Missing required features after build (n={len(missing)}): {missing}")
+        import logging as _logging
+        _logger = _logging.getLogger(__name__)
+        _logger.warning("Filling %d missing model features with NaN/missing: %s", len(missing), missing)
+        for col in missing:
+            if col.endswith("_missing"):
+                work[col] = 1  # mark as missing
+            else:
+                work[col] = float("nan")
 
     # ---------------------------------------------------------------------------
     # Sanity check: warn if starter features are degenerate (would cause flattening)

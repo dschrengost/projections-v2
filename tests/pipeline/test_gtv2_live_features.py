@@ -13,6 +13,7 @@ from projections.pipeline.gtv2_live_features import (
     load_gtv2_feature_spec,
 )
 from projections.rotation.live_features_v1 import load_latest_rotation_priors_by_entity
+from scripts.rotation.build_joint_rotation_rates_dataset_v1 import TRACKING_CONTEXT_COLS
 
 
 def _minutes_df() -> pd.DataFrame:
@@ -206,3 +207,82 @@ def test_load_latest_rotation_priors_by_entity_uses_concat_path_and_latest_rows(
     assert sorted(player_priors["person_id"].dropna().astype(int).tolist()) == [1, 2]
     assert float(player_priors.loc[player_priors["person_id"] == 1, "player_metric"].iloc[0]) == 13.0
     assert float(player_priors.loc[player_priors["person_id"] == 2, "player_metric"].iloc[0]) == 12.0
+
+
+def test_build_gtv2_live_features_joins_tracking_when_placeholders_exist(tmp_path: Path) -> None:
+    minutes = _minutes_df()
+    track_col = TRACKING_CONTEXT_COLS[0]
+    missing_col = f"{track_col}_missing"
+    spec = GTV2FeatureSpec(
+        bundle_dir=tmp_path / "bundle",
+        feature_columns=[
+            "home_team_id",
+            "away_team_id",
+            "home_flag",
+            "opponent_team_id",
+            "lineup_available",
+            "lineup_starter_announced",
+            "vegas_total",
+            "vegas_spread",
+            "estimated_possessions",
+            "team_implied_total",
+            track_col,
+            missing_col,
+        ],
+        game_feature_columns=["vegas_total", "vegas_spread", "estimated_possessions", "team_implied_total"],
+        team_feature_columns=[],
+    )
+
+    tracking_root = tmp_path / "gold" / "tracking_roles" / "season=2025" / "game_date=2026-01-18"
+    tracking_root.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "player_id": [1, 2, 3, 4],
+            track_col: [1.1, 2.2, 3.3, 4.4],
+        }
+    ).to_parquet(tracking_root / "tracking_roles.parquet", index=False)
+
+    def fake_priors_loader(*args, **kwargs):  # noqa: ANN002, ANN003
+        return SimpleNamespace(
+            team_priors=pd.DataFrame({"game_id": ["0000001001"], "team_id": [10]}),
+            player_priors=pd.DataFrame({"game_id": ["0000001001"], "team_id": [10], "person_id": [1]}),
+            used_latest_fallback=False,
+            warning_message=None,
+        )
+
+    def fake_dnp_loader(*args, **kwargs):  # noqa: ANN002, ANN003
+        return pd.DataFrame(columns=["game_date", "team_id", "player_id", "minutes", "is_out"])
+
+    def fake_rotation_builder(
+        minutes_features: pd.DataFrame,
+        *,
+        team_priors: pd.DataFrame,
+        player_priors: pd.DataFrame,
+        feature_columns: list[str],
+        historical_features: pd.DataFrame,
+    ):
+        out = minutes_features[["game_id", "team_id", "player_id"]].copy()
+        for col in feature_columns:
+            if col in minutes_features.columns:
+                out[col] = minutes_features[col]
+            elif col.endswith("_missing"):
+                out[col] = 1
+            else:
+                out[col] = float("nan")
+        return SimpleNamespace(features=out, dropped_extra_columns=[])
+
+    result = build_gtv2_live_features(
+        minutes_features=minutes,
+        spec=spec,
+        data_root=tmp_path,
+        game_date="2026-01-18",
+        priors_loader=fake_priors_loader,
+        rotation_feature_builder=fake_rotation_builder,
+        dnp_history_loader=fake_dnp_loader,
+    )
+
+    out = result.features
+    assert "team_implied_total" in out.columns
+    assert out["team_implied_total"].notna().all()
+    assert out[track_col].notna().all()
+    assert out[missing_col].eq(0).all()

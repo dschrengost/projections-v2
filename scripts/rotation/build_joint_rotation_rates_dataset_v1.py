@@ -832,6 +832,15 @@ def _apply_game_context_feature_contract(
     df["vegas_spread_missing"] = df["vegas_spread"].isna().astype("int8")
     df["estimated_possessions_missing"] = est_missing_mask.astype("int8")
 
+    # Team implied total: player's team projected score from vegas line.
+    # spread_home is from the home perspective (negative = home favored).
+    # home_total = (total - spread) / 2, away_total = (total + spread) / 2.
+    home_flag = pd.to_numeric(df.get("home_flag", pd.Series(dtype="float64")), errors="coerce")
+    sign = 2.0 * home_flag - 1.0  # +1 for home, -1 for away
+    team_implied_total = 0.5 * (vegas_total - vegas_spread * sign)
+    df["team_implied_total"] = team_implied_total.astype("float64")
+    df["team_implied_total_missing"] = df["team_implied_total"].isna().astype("int8")
+
     meta = {
         "league_ppp": float(league_ppp),
         "estimated_possessions_pace_weight": float(pace_weight),
@@ -848,6 +857,7 @@ def _apply_game_context_feature_contract(
             "blended": int(both.sum()),
             "missing": int((poss_from_pace.isna() & poss_from_vegas.isna()).sum()),
         },
+        "team_implied_total_coverage": float(df["team_implied_total"].notna().mean()),
     }
     return df, meta
 
