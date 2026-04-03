@@ -1348,6 +1348,28 @@ def _reweight_top_usage_alloc_weights(
     return _normalize_alloc_weights(base * scales, eligible_mask=eligible_mask)
 
 
+def _stabilize_alloc_weights_across_worlds(
+    weights: torch.Tensor,
+    *,
+    eligible_mask: torch.Tensor,
+    n_worlds_chunk: int,
+    share_stability: float,
+) -> torch.Tensor:
+    """Blend per-world allocation weights toward the game's cross-world mean."""
+    base = _normalize_alloc_weights(weights, eligible_mask=eligible_mask)
+    stability = float(np.clip(float(share_stability), 0.0, 1.0))
+    worlds_per_game = int(n_worlds_chunk)
+    if stability <= 0.0 or worlds_per_game <= 1 or base.shape[0] == 0:
+        return base
+    if base.shape[0] % worlds_per_game != 0:
+        raise ValueError("weights rows must be divisible by n_worlds_chunk for share stabilization")
+
+    weights_by_game = base.reshape(base.shape[0] // worlds_per_game, worlds_per_game, base.shape[1])
+    mean_weights = weights_by_game.mean(dim=1, keepdim=True)
+    blended = (1.0 - stability) * weights_by_game + stability * mean_weights
+    return _normalize_alloc_weights(blended.reshape_as(base), eligible_mask=eligible_mask)
+
+
 def _apply_forced_active_minutes_floor(
     *,
     minutes: torch.Tensor,
@@ -1442,6 +1464,8 @@ def _align_flow_to_backbone_budgets(
     allocation_blend_alpha: float = 0.5,
     allocation_top_usage_top1_scale: float = 1.0,
     allocation_top_usage_top2_scale: float = 1.0,
+    n_worlds_chunk: int = 1,
+    share_stability: float = 0.0,
 ) -> torch.Tensor:
     """Align player-level flow outputs to sampled backbone team event budgets.
 
@@ -1462,6 +1486,7 @@ def _align_flow_to_backbone_budgets(
     if usage_share_logits is not None and usage_share_logits.shape[2] < 3:
         raise ValueError("usage_share_logits must include at least 3 targets: fga/fta/tov")
     blend_alpha = float(np.clip(float(allocation_blend_alpha), 0.0, 1.0))
+    stability = float(np.clip(float(share_stability), 0.0, 1.0))
     use_usage = alloc_source in {"usage_head", "blend"} and usage_share_logits is not None
 
     out = flow_values.clone()
@@ -1597,6 +1622,37 @@ def _align_flow_to_backbone_budgets(
             top2_scale=float(allocation_top_usage_top2_scale),
             rank_weights=usage_rank_weights,
         )
+        if stability > 0.0:
+            w_fga2 = _stabilize_alloc_weights_across_worlds(
+                w_fga2,
+                eligible_mask=elig,
+                n_worlds_chunk=n_worlds_chunk,
+                share_stability=stability,
+            )
+            w_fga3 = _stabilize_alloc_weights_across_worlds(
+                w_fga3,
+                eligible_mask=elig,
+                n_worlds_chunk=n_worlds_chunk,
+                share_stability=stability,
+            )
+            w_fta = _stabilize_alloc_weights_across_worlds(
+                w_fta,
+                eligible_mask=elig,
+                n_worlds_chunk=n_worlds_chunk,
+                share_stability=stability,
+            )
+            w_tov = _stabilize_alloc_weights_across_worlds(
+                w_tov,
+                eligible_mask=elig,
+                n_worlds_chunk=n_worlds_chunk,
+                share_stability=stability,
+            )
+            w_oreb = _stabilize_alloc_weights_across_worlds(
+                w_oreb,
+                eligible_mask=elig,
+                n_worlds_chunk=n_worlds_chunk,
+                share_stability=stability,
+            )
 
         new_fga2 = w_fga2 * budget_fga2.unsqueeze(1)
         new_fga3 = w_fga3 * budget_fga3.unsqueeze(1)
@@ -2782,6 +2838,8 @@ def sample_worlds_for_batch(
                     allocation_blend_alpha=float(allocation_blend_alpha),
                     allocation_top_usage_top1_scale=float(allocation_top_usage_top1_scale),
                     allocation_top_usage_top2_scale=float(allocation_top_usage_top2_scale),
+                    n_worlds_chunk=n_worlds_chunk,
+                    share_stability=float(getattr(model_config, "share_stability", 0.0)),
                 )
                 if bool(getattr(model_config, "assist_share_reconcile_ast_budget", False)):
                     creator_share_alpha = _build_creator_reconcile_alpha(

@@ -1373,6 +1373,69 @@ def test_align_flow_backbone_beta_binomial_ft_only_preserves_fg_legacy_and_contr
     )
 
 
+def test_align_flow_backbone_share_stability_blends_world_allocations_and_preserves_budgets() -> None:
+    cols = list(FLOW_TARGET_COLUMNS_V1)
+    flow = torch.zeros((2, 30, len(cols)), dtype=torch.float32)
+    valid = torch.zeros((2, 30), dtype=torch.bool)
+    active = torch.zeros((2, 30), dtype=torch.bool)
+    valid[:, 0] = True
+    valid[:, 1] = True
+    valid[:, 15] = True
+    valid[:, 16] = True
+    active.copy_(valid)
+    team_index = _team_index(2)
+
+    fga2_idx = cols.index("fga2")
+    fg2m_idx = cols.index("fg2m")
+    flow[0, 0, fga2_idx] = 8.0
+    flow[0, 1, fga2_idx] = 2.0
+    flow[1, 0, fga2_idx] = 2.0
+    flow[1, 1, fga2_idx] = 8.0
+    flow[:, :2, fg2m_idx] = flow[:, :2, fga2_idx] * 0.5
+    flow[:, 15, fga2_idx] = 6.0
+    flow[:, 16, fga2_idx] = 4.0
+    flow[:, 15:17, fg2m_idx] = flow[:, 15:17, fga2_idx] * 0.5
+
+    backbone_fga = torch.full((2, 2), 10.0, dtype=torch.float32)
+    backbone_zero = torch.zeros((2, 2), dtype=torch.float32)
+    backbone_share3 = torch.zeros((2, 2), dtype=torch.float32)
+
+    baseline = _align_flow_to_backbone_budgets(
+        flow_values=flow,
+        valid_mask=valid,
+        team_index=team_index,
+        active_mask=active,
+        flow_target_columns=cols,
+        backbone_fga=backbone_fga,
+        backbone_fta=backbone_zero,
+        backbone_tov=backbone_zero,
+        backbone_oreb=backbone_zero,
+        backbone_three_pa_share=backbone_share3,
+        n_worlds_chunk=2,
+        share_stability=0.0,
+    )
+    stabilized = _align_flow_to_backbone_budgets(
+        flow_values=flow,
+        valid_mask=valid,
+        team_index=team_index,
+        active_mask=active,
+        flow_target_columns=cols,
+        backbone_fga=backbone_fga,
+        backbone_fta=backbone_zero,
+        backbone_tov=backbone_zero,
+        backbone_oreb=backbone_zero,
+        backbone_three_pa_share=backbone_share3,
+        n_worlds_chunk=2,
+        share_stability=1.0,
+    )
+
+    assert torch.allclose(baseline[:, :2, fga2_idx], torch.tensor([[8.0, 2.0], [2.0, 8.0]]), atol=1e-6)
+    assert torch.allclose(stabilized[:, :2, fga2_idx], torch.full((2, 2), 5.0), atol=1e-6)
+    assert torch.allclose(stabilized[:, 15:17, fga2_idx], torch.tensor([[6.0, 4.0], [6.0, 4.0]]), atol=1e-6)
+    assert torch.allclose(stabilized[:, :15, fga2_idx].sum(dim=1), torch.full((2,), 10.0), atol=1e-6)
+    assert torch.allclose(stabilized[:, 15:, fga2_idx].sum(dim=1), torch.full((2,), 10.0), atol=1e-6)
+
+
 def test_reweight_top_usage_alloc_weights_boosts_top_players_and_preserves_simplex() -> None:
     weights = torch.tensor([[0.60, 0.25, 0.10, 0.05]], dtype=torch.float32)
     eligible = torch.tensor([[1, 1, 1, 1]], dtype=torch.bool)

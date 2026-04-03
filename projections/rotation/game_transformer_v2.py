@@ -465,6 +465,7 @@ class GameTransformerV2Config:
     assist_share_reconcile_ast_budget: bool = False
     assist_share_reconcile_alpha: float = 0.75
     assist_share_reconcile_temperature: float = 0.85
+    share_stability: float = 0.0
     rebound_factor_reconcile_oreb_dreb: bool = False
     rebound_factor_reconcile_mode: str = "both"
     rebound_factor_reconcile_alpha: float = 0.50
@@ -696,6 +697,8 @@ class GameTransformerV2Config:
             filtered["assist_share_reconcile_alpha"] = 0.75
         if "assist_share_reconcile_temperature" not in filtered:
             filtered["assist_share_reconcile_temperature"] = 0.85
+        if "share_stability" not in filtered:
+            filtered["share_stability"] = 0.0
         if "rebound_factor_reconcile_oreb_dreb" not in filtered:
             filtered["rebound_factor_reconcile_oreb_dreb"] = False
         if "rebound_factor_reconcile_mode" not in filtered:
