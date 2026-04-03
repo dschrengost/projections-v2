@@ -291,8 +291,14 @@ def _resolve_season_month(game_date: str) -> tuple[int, int]:
     return season, int(ts.month)
 
 
-def _load_gtv2_inference_current_config() -> dict[str, Any]:
-    config_path = PROJECT_ROOT / "config" / "gtv2_inference_current.json"
+def _load_gtv2_inference_current_config(
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    resolved_config_path = (
+        config_path
+        if config_path is not None
+        else PROJECT_ROOT / "config" / "gtv2_inference_current.json"
+    )
     cfg: dict[str, Any] = {
         "bundle_dir": None,
         "model_version": None,
@@ -332,10 +338,12 @@ def _load_gtv2_inference_current_config() -> dict[str, Any]:
         "minutes_uncertainty_lookup_artifact": None,
         "minutes_uncertainty_empirical_blend_alpha": 1.0,
     }
-    if config_path.exists():
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    if resolved_config_path.exists():
+        payload = json.loads(resolved_config_path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
-            raise RuntimeError(f"invalid inference current config payload: {config_path}")
+            raise RuntimeError(
+                f"invalid inference current config payload: {resolved_config_path}"
+            )
         cfg.update(payload)
     return cfg
 
@@ -8112,8 +8120,13 @@ def nba_live_pipeline_v3_flow(
         data_root=data_root,
         project_root=PROJECT_ROOT,
     )
-    gtv2_current_cfg = _load_gtv2_inference_current_config()
-    gtv2_inference_current_path = PROJECT_ROOT / "config" / "gtv2_inference_current.json"
+    gtv2_inference_current_path = model_selectors.active_gtv2_selector_path(
+        data_root=data_root,
+        project_root=PROJECT_ROOT,
+    )
+    gtv2_current_cfg = _load_gtv2_inference_current_config(
+        config_path=gtv2_inference_current_path
+    )
     gtv2_inference_current_hash = _stable_digest(gtv2_current_cfg)
     bundle_dir = _resolve_bundle_dir(
         data_root=data_root,

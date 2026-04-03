@@ -37,3 +37,21 @@ def test_active_rates_selector_falls_back_to_repo(tmp_path) -> None:
         project_root=project_root,
     )
     assert resolved == repo_path
+
+
+def test_active_gtv2_selector_prefers_runtime_when_present(tmp_path) -> None:
+    project_root = tmp_path / "repo"
+    data_root = tmp_path / "data"
+    repo_path = model_selectors.repo_gtv2_selector_path(project_root=project_root)
+    runtime_path = model_selectors.runtime_gtv2_selector_path(data_root=data_root)
+
+    repo_path.parent.mkdir(parents=True, exist_ok=True)
+    repo_path.write_text('{"bundle_hash":"repo"}\n', encoding="utf-8")
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text('{"bundle_hash":"runtime"}\n', encoding="utf-8")
+
+    resolved = model_selectors.active_gtv2_selector_path(
+        data_root=data_root,
+        project_root=project_root,
+    )
+    assert resolved == runtime_path

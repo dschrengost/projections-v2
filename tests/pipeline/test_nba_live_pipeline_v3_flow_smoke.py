@@ -90,6 +90,48 @@ def test_nba_live_pipeline_v3_flow_smoke(
     assert ownership_payload["run_id"] == run_id
 
 
+def test_nba_live_pipeline_v3_flow_fn_uses_runtime_gtv2_selector(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from prefect_flows import live_nba_pipeline_v3
+    from projections import model_selectors, paths
+
+    monkeypatch.setattr(paths, "get_data_root", lambda: tmp_path)
+    monkeypatch.setattr(live_nba_pipeline_v3, "get_run_logger", lambda: object())
+    monkeypatch.setattr(
+        live_nba_pipeline_v3.ownership_selector,
+        "load_ownership_selector",
+        lambda **kwargs: {},
+    )
+
+    runtime_gtv2_path = model_selectors.runtime_gtv2_selector_path(data_root=tmp_path)
+    runtime_gtv2_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_gtv2_path.write_text('{"bundle_dir":"/tmp/bundle"}\n', encoding="utf-8")
+
+    captured: dict[str, Path | None] = {"path": None}
+
+    def _capture_gtv2_config(*, config_path=None):
+        captured["path"] = config_path
+        raise RuntimeError("stop_after_gtv2_selector")
+
+    monkeypatch.setattr(
+        live_nba_pipeline_v3,
+        "_load_gtv2_inference_current_config",
+        _capture_gtv2_config,
+    )
+
+    with pytest.raises(RuntimeError, match="stop_after_gtv2_selector"):
+        live_nba_pipeline_v3.nba_live_pipeline_v3_flow.fn(
+            game_date="2026-01-18",
+            sim_worlds=64,
+            placeholder_mode=True,
+            promote_pointers=True,
+        )
+
+    assert captured["path"] == runtime_gtv2_path
+
+
 def test_nba_live_pipeline_v3_flow_skips_gracefully_when_writer_active(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

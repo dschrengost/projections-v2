@@ -1,4 +1,4 @@
-"""Resolve minutes/rates selector config paths for runtime and repo contexts.
+"""Resolve model selector config paths for runtime and repo contexts.
 
 Runtime selectors live under ``$PROJECTIONS_DATA_ROOT/control_plane/model_selectors``.
 Repo-local config files remain the fallback/default source.
@@ -11,13 +11,14 @@ from typing import Literal
 
 from projections import paths
 
-SelectorName = Literal["minutes", "rates", "ownership"]
+SelectorName = Literal["minutes", "rates", "ownership", "gtv2"]
 
 _RUNTIME_SELECTORS_REL = Path("control_plane") / "model_selectors"
 _SELECTOR_FILENAMES: dict[SelectorName, str] = {
     "minutes": "minutes_current_run.json",
     "rates": "rates_current_run.json",
     "ownership": "ownership_current_run.json",
+    "gtv2": "gtv2_inference_current.json",
 }
 
 
@@ -89,3 +90,19 @@ def active_ownership_selector_path(
     project_root: Path | None = None,
 ) -> Path:
     return active_selector_path("ownership", data_root=data_root, project_root=project_root)
+
+
+def repo_gtv2_selector_path(*, project_root: Path | None = None) -> Path:
+    return repo_selector_path("gtv2", project_root=project_root)
+
+
+def runtime_gtv2_selector_path(*, data_root: Path | None = None) -> Path:
+    return runtime_selector_path("gtv2", data_root=data_root)
+
+
+def active_gtv2_selector_path(
+    *,
+    data_root: Path | None = None,
+    project_root: Path | None = None,
+) -> Path:
+    return active_selector_path("gtv2", data_root=data_root, project_root=project_root)
