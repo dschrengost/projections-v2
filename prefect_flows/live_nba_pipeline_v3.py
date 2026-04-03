@@ -4642,6 +4642,24 @@ def _apply_propless_tail_calibration_to_worlds(
     return out, report
 
 
+def _build_pre_calibration_points_anchor(
+    worlds_df: pd.DataFrame,
+    *,
+    label: str,
+) -> pd.DataFrame:
+    key_cols = ["game_id", "team_id", "player_id"]
+    required_cols = set(key_cols + ["pts"])
+    if worlds_df.empty or not required_cols.issubset(worlds_df.columns):
+        return pd.DataFrame(columns=key_cols + ["pts_pre_calibration_mean"])
+    anchor = _group_mean_by_keys_without_pandas_groupby(
+        worlds_df.loc[:, key_cols + ["pts"]],
+        key_cols=key_cols,
+        value_cols=("pts",),
+        label=label,
+    )
+    return anchor.rename(columns={"pts": "pts_pre_calibration_mean"})
+
+
 def _allocate_bounded_budget(
     *,
     budget: float,
@@ -7445,6 +7463,16 @@ def generate_worlds_gtv2_live_task(
                 logger.info("Applied tree rate world override: %s", tree_rate_override_report)
         else:
             tree_rate_override_report = {"applied": False, "reason": "disabled"}
+        pre_calibration_pts_anchor = (
+            _build_pre_calibration_points_anchor(
+                worlds_df,
+                label="generate_worlds_gtv2_live_task/pre_calibration_points_anchor",
+            )
+            if bool(apply_team_implied_points_reconcile)
+            else pd.DataFrame(
+                columns=["game_id", "team_id", "player_id", "pts_pre_calibration_mean"]
+            )
+        )
         props_uplift_report: dict[str, Any]
         if bool(apply_props_uplift):
             worlds_df, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
@@ -7992,6 +8020,16 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     untouched_worlds = worlds_df.loc[~target_mask].copy()
     target_worlds = worlds_df.loc[target_mask].reset_index(drop=True).copy()
     target_features = _filter_to_target_games(features_df, target_ids)
+    pre_calibration_pts_anchor = (
+        _build_pre_calibration_points_anchor(
+            target_worlds,
+            label="_postprocess_target_world_slice_for_game_scoped_merge/pre_calibration_points_anchor",
+        )
+        if bool(apply_team_implied_points_reconcile)
+        else pd.DataFrame(
+            columns=["game_id", "team_id", "player_id", "pts_pre_calibration_mean"]
+        )
+    )
 
     if bool(apply_props_uplift):
         target_worlds, props_uplift_report = _apply_props_uplift_calibration_to_worlds(
