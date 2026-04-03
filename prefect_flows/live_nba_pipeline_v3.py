@@ -8612,6 +8612,16 @@ def nba_live_pipeline_v3_flow(
             mid_minutes_tail_min_minutes=float(gtv2_mid_minutes_tail_min_minutes),
             mid_minutes_tail_max_minutes=float(gtv2_mid_minutes_tail_max_minutes),
             mid_minutes_tail_boost=float(gtv2_mid_minutes_tail_boost),
+            apply_team_implied_points_reconcile=bool(
+                gtv2_apply_team_implied_points_reconcile
+                and rerun_plan.get("mode") == "full_slate"
+            ),
+            team_implied_points_reconcile_alpha=float(
+                gtv2_team_implied_points_reconcile_alpha
+            ),
+            team_implied_points_reconcile_deadband_points=float(
+                gtv2_team_implied_points_reconcile_deadband_points
+            ),
             apply_world_realism_controls=bool(gtv2_apply_world_realism_controls),
             world_realism_low_minutes_tail_damping_enabled=bool(
                 gtv2_world_realism_low_minutes_tail_damping_enabled
@@ -8807,6 +8817,15 @@ def nba_live_pipeline_v3_flow(
                     gtv2_mid_minutes_tail_max_minutes
                 ),
                 mid_minutes_tail_boost=float(gtv2_mid_minutes_tail_boost),
+                apply_team_implied_points_reconcile=bool(
+                    gtv2_apply_team_implied_points_reconcile
+                ),
+                team_implied_points_reconcile_alpha=float(
+                    gtv2_team_implied_points_reconcile_alpha
+                ),
+                team_implied_points_reconcile_deadband_points=float(
+                    gtv2_team_implied_points_reconcile_deadband_points
+                ),
                 apply_world_realism_controls=bool(gtv2_apply_world_realism_controls),
                 world_realism_low_minutes_tail_damping_enabled=bool(
                     gtv2_world_realism_low_minutes_tail_damping_enabled

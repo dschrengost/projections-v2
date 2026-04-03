@@ -35,6 +35,9 @@ deployments:
     gtv2_props_uplift_scope: all_players
     gtv2_apply_propless_tail_calibration: false
     gtv2_apply_mid_minutes_tail_calibration: false
+    gtv2_apply_team_implied_points_reconcile: true
+    gtv2_team_implied_points_reconcile_alpha: 0.75
+    gtv2_team_implied_points_reconcile_deadband_points: 2.0
     gtv2_apply_world_realism_controls: true
     # Default: auto-select inference backend; `config/gtv2_inference_server.json`
     # controls whether Triton is considered enabled.
