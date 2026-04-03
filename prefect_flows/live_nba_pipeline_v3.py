@@ -5155,6 +5155,200 @@ def _apply_team_implied_points_reconcile_to_worlds(
     return out, report
 
 
+def _apply_team_dk_fpts_correlation_overlay_to_worlds(
+    worlds_df: pd.DataFrame,
+    *,
+    enabled: bool,
+    alpha: float,
+    min_minutes: float = 0.0,
+    weight_power: float = 1.0,
+    target_game_ids: set[int] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Increase same-team dk_fpts covariance while preserving team world totals."""
+    if not enabled:
+        return worlds_df, {"applied": False, "reason": "disabled"}
+    if worlds_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_worlds"}
+
+    required = {"world_idx", "game_id", "team_id", "player_id", "dk_fpts"}
+    missing = sorted(required - set(worlds_df.columns))
+    if missing:
+        return worlds_df, {
+            "applied": False,
+            "reason": f"missing_columns:{','.join(missing)}",
+        }
+
+    alpha_clipped = float(np.clip(float(alpha), 0.0, 1.0))
+    if alpha_clipped <= 0.0:
+        return worlds_df, {"applied": False, "reason": "alpha_zero"}
+
+    out = worlds_df.copy()
+    dk = pd.to_numeric(out["dk_fpts"], errors="coerce").fillna(0.0)
+    minutes = (
+        pd.to_numeric(out["minutes"], errors="coerce").fillna(0.0)
+        if "minutes" in out.columns
+        else pd.Series(1.0, index=out.index, dtype=float)
+    )
+    active = (
+        pd.to_numeric(out["active"], errors="coerce").fillna(0.0).gt(0.0)
+        if "active" in out.columns
+        else pd.Series(True, index=out.index, dtype=bool)
+    )
+    target_mask = pd.Series(True, index=out.index, dtype=bool)
+    if target_game_ids is not None:
+        normalized_target_ids = _normalize_game_ids(target_game_ids)
+        if not normalized_target_ids:
+            return worlds_df, {"applied": False, "reason": "no_target_games"}
+        if "game_id" not in out.columns:
+            return worlds_df, {"applied": False, "reason": "missing_game_id"}
+        target_mask = pd.to_numeric(out["game_id"], errors="coerce").astype("Int64").isin(
+            normalized_target_ids
+        )
+        if not bool(target_mask.any()):
+            return worlds_df, {"applied": False, "reason": "no_target_rows"}
+    eligible = (
+        target_mask
+        & active
+        & minutes.gt(float(min_minutes))
+        & dk.gt(float(_WORLD_CONTRACT_TOL))
+    )
+    eligible_count = int(eligible.sum())
+    if eligible_count <= 0:
+        return worlds_df, {"applied": False, "reason": "no_eligible_rows"}
+
+    team_player_keys = ["game_id", "team_id", "player_id"]
+    world_team_keys = ["world_idx", "game_id", "team_id"]
+
+    player_mean = dk.groupby([out[k] for k in team_player_keys], sort=False).transform(
+        "mean"
+    )
+    weight_base = np.power(
+        np.clip(
+            player_mean.to_numpy(dtype=float, copy=False),
+            a_min=0.0,
+            a_max=None,
+        ),
+        float(weight_power),
+    )
+    weight_base = np.where(np.isfinite(weight_base), weight_base, 0.0)
+    weight_base = np.where(weight_base > float(_WORLD_CONTRACT_TOL), weight_base, 0.0)
+
+    eligible_np = eligible.to_numpy(dtype=bool, copy=False)
+    eligible_float = eligible_np.astype(float, copy=False)
+    dk_np = dk.to_numpy(dtype=float, copy=False)
+    player_mean_np = player_mean.to_numpy(dtype=float, copy=False)
+
+    active_weight = weight_base * eligible_float
+    active_mean_component = player_mean_np * eligible_float
+    active_dk_component = dk_np * eligible_float
+
+    active_weight_sum = (
+        pd.Series(active_weight, index=out.index)
+        .groupby([out[k] for k in world_team_keys], sort=False)
+        .transform("sum")
+        .to_numpy(dtype=float, copy=False)
+    )
+    world_weight = np.divide(
+        active_weight,
+        active_weight_sum,
+        out=np.zeros_like(active_weight),
+        where=active_weight_sum > float(_WORLD_CONTRACT_TOL),
+    )
+
+    active_mean_total = (
+        pd.Series(active_mean_component, index=out.index)
+        .groupby([out[k] for k in world_team_keys], sort=False)
+        .transform("sum")
+        .to_numpy(dtype=float, copy=False)
+    )
+    active_dk_total = (
+        pd.Series(active_dk_component, index=out.index)
+        .groupby([out[k] for k in world_team_keys], sort=False)
+        .transform("sum")
+        .to_numpy(dtype=float, copy=False)
+    )
+    team_total = (
+        dk.groupby([out[k] for k in world_team_keys], sort=False)
+        .transform("sum")
+        .to_numpy(dtype=float, copy=False)
+    )
+    active_residual = active_dk_total - active_mean_total
+    common_component = world_weight * active_residual
+    idio_component = dk_np - player_mean_np - common_component
+
+    updated = dk_np.copy()
+    updated[eligible_np] = (
+        player_mean_np[eligible_np]
+        + common_component[eligible_np]
+        + (1.0 - alpha_clipped) * idio_component[eligible_np]
+    )
+    provisional_negative_rows = int(np.count_nonzero(eligible_np & (updated < 0.0)))
+    updated = np.where(eligible_np, np.maximum(updated, 0.0), updated)
+
+    updated_total = (
+        pd.Series(updated, index=out.index)
+        .groupby([out[k] for k in world_team_keys], sort=False)
+        .transform("sum")
+        .to_numpy(dtype=float, copy=False)
+    )
+    updated = updated + (world_weight * (team_total - updated_total))
+    updated = np.where(eligible_np, np.maximum(updated, 0.0), updated)
+
+    updated_total_final = (
+        pd.Series(updated, index=out.index)
+        .groupby([out[k] for k in world_team_keys], sort=False)
+        .transform("sum")
+        .to_numpy(dtype=float, copy=False)
+    )
+    updated = updated + (world_weight * (team_total - updated_total_final))
+    updated = np.where(eligible_np, updated, dk_np)
+    out["dk_fpts"] = updated
+
+    updated_player_mean = (
+        pd.Series(updated, index=out.index)
+        .groupby([out[k] for k in team_player_keys], sort=False)
+        .transform("mean")
+        .to_numpy(dtype=float, copy=False)
+    )
+    mean_shift = updated_player_mean - player_mean_np
+    team_total_after = (
+        pd.Series(updated, index=out.index)
+        .groupby([out[k] for k in world_team_keys], sort=False)
+        .transform("sum")
+        .to_numpy(dtype=float, copy=False)
+    )
+
+    report = {
+        "applied": True,
+        "alpha": alpha_clipped,
+        "min_minutes": float(min_minutes),
+        "weight_power": float(weight_power),
+        "eligible_rows": eligible_count,
+        "eligible_player_count": int(out.loc[eligible, "player_id"].nunique()),
+        "eligible_team_count": int(
+            out.loc[eligible, ["game_id", "team_id"]].drop_duplicates().shape[0]
+        ),
+        "provisional_negative_rows": provisional_negative_rows,
+        "player_mean_max_abs_shift": float(np.max(np.abs(mean_shift)))
+        if len(mean_shift)
+        else 0.0,
+        "player_mean_mean_abs_shift": float(np.mean(np.abs(mean_shift)))
+        if len(mean_shift)
+        else 0.0,
+        "team_total_max_abs_drift": float(np.max(np.abs(team_total_after - team_total)))
+        if len(team_total_after)
+        else 0.0,
+        "team_total_mean_abs_drift": float(
+            np.mean(np.abs(team_total_after - team_total))
+        )
+        if len(team_total_after)
+        else 0.0,
+    }
+    if target_game_ids is not None:
+        report["target_game_ids"] = sorted(int(gid) for gid in _normalize_game_ids(target_game_ids))
+    return out, report
+
+
 def _apply_mid_minutes_tail_calibration_to_worlds(
     worlds_df: pd.DataFrame,
     *,
@@ -6912,6 +7106,10 @@ def generate_worlds_gtv2_live_task(
     world_realism_low_minutes_min_scale: float = 0.55,
     world_realism_outlier_resample_enabled: bool = True,
     world_realism_outlier_resample_max_passes: int = 1,
+    apply_team_dk_fpts_correlation_overlay: bool = False,
+    team_dk_fpts_correlation_overlay_alpha: float = 0.0,
+    team_dk_fpts_correlation_overlay_min_minutes: float = 0.0,
+    team_dk_fpts_correlation_overlay_weight_power: float = 1.0,
     promotion_hybrid_enabled: bool = False,
     promotion_expert_run_dir: str | None = None,
     promotion_prior_minutes_max: float = 12.0,
@@ -7010,6 +7208,10 @@ def generate_worlds_gtv2_live_task(
                 "reason": "placeholder_mode",
             },
             "mid_minutes_tail_calibration": {
+                "applied": False,
+                "reason": "placeholder_mode",
+            },
+            "team_dk_fpts_correlation_overlay": {
                 "applied": False,
                 "reason": "placeholder_mode",
             },
@@ -7578,6 +7780,20 @@ def generate_worlds_gtv2_live_task(
                 "Applied post-sanitize world contract repair safety pass before publish: %s",
                 world_contract_repair_report_post_sanitize,
             )
+        worlds_df, team_dk_fpts_correlation_overlay_report = (
+            _apply_team_dk_fpts_correlation_overlay_to_worlds(
+                worlds_df,
+                enabled=bool(apply_team_dk_fpts_correlation_overlay),
+                alpha=float(team_dk_fpts_correlation_overlay_alpha),
+                min_minutes=float(team_dk_fpts_correlation_overlay_min_minutes),
+                weight_power=float(team_dk_fpts_correlation_overlay_weight_power),
+            )
+        )
+        if bool(team_dk_fpts_correlation_overlay_report.get("applied")):
+            logger.info(
+                "Applied team dk_fpts correlation overlay: %s",
+                team_dk_fpts_correlation_overlay_report,
+            )
         _atomic_write_validated_parquet(
             worlds_df,
             worlds_path,
@@ -7629,6 +7845,7 @@ def generate_worlds_gtv2_live_task(
             "props_uplift_calibration": props_uplift_report,
             "propless_tail_calibration": propless_tail_report,
             "mid_minutes_tail_calibration": mid_minutes_tail_report,
+            "team_dk_fpts_correlation_overlay": team_dk_fpts_correlation_overlay_report,
             "world_realism_controls": world_realism_report,
             "world_contract_field_repair": world_contract_repair_report,
             "world_contract_field_repair_post_sanitize": (
@@ -7973,6 +8190,9 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
     mid_minutes_tail_min_minutes: float,
     mid_minutes_tail_max_minutes: float,
     mid_minutes_tail_boost: float,
+    apply_team_implied_points_reconcile: bool,
+    team_implied_points_reconcile_alpha: float,
+    team_implied_points_reconcile_deadband_points: float,
     apply_world_realism_controls: bool,
     world_realism_low_minutes_tail_damping_enabled: bool,
     world_realism_low_minutes_threshold: float,
@@ -8129,12 +8349,19 @@ def materialize_unified_run_artifacts_task(
     mid_minutes_tail_min_minutes: float = 12.0,
     mid_minutes_tail_max_minutes: float = 20.0,
     mid_minutes_tail_boost: float = 0.14,
+    apply_team_implied_points_reconcile: bool = False,
+    team_implied_points_reconcile_alpha: float = 0.75,
+    team_implied_points_reconcile_deadband_points: float = 2.0,
     apply_world_realism_controls: bool = True,
     world_realism_low_minutes_tail_damping_enabled: bool = True,
     world_realism_low_minutes_threshold: float = 12.0,
     world_realism_low_minutes_min_scale: float = 0.55,
     world_realism_outlier_resample_enabled: bool = True,
     world_realism_outlier_resample_max_passes: int = 1,
+    apply_team_dk_fpts_correlation_overlay: bool = False,
+    team_dk_fpts_correlation_overlay_alpha: float = 0.0,
+    team_dk_fpts_correlation_overlay_min_minutes: float = 0.0,
+    team_dk_fpts_correlation_overlay_weight_power: float = 1.0,
     random_seed: int = 42,
 ) -> dict[str, Any]:
     target_ids = _normalize_game_ids(target_game_ids)
@@ -8248,6 +8475,11 @@ def materialize_unified_run_artifacts_task(
             mid_minutes_tail_min_minutes=float(mid_minutes_tail_min_minutes),
             mid_minutes_tail_max_minutes=float(mid_minutes_tail_max_minutes),
             mid_minutes_tail_boost=float(mid_minutes_tail_boost),
+            apply_team_implied_points_reconcile=bool(apply_team_implied_points_reconcile),
+            team_implied_points_reconcile_alpha=float(team_implied_points_reconcile_alpha),
+            team_implied_points_reconcile_deadband_points=float(
+                team_implied_points_reconcile_deadband_points
+            ),
             apply_world_realism_controls=bool(apply_world_realism_controls),
             world_realism_low_minutes_tail_damping_enabled=bool(
                 world_realism_low_minutes_tail_damping_enabled
@@ -8287,6 +8519,21 @@ def materialize_unified_run_artifacts_task(
         logger.warning(
             "Applied post-sanitize world contract repair safety pass in materialize: %s",
             world_contract_repair_report_post_sanitize,
+        )
+    merged_worlds, team_dk_fpts_correlation_overlay_report = (
+        _apply_team_dk_fpts_correlation_overlay_to_worlds(
+            merged_worlds,
+            enabled=bool(apply_team_dk_fpts_correlation_overlay),
+            alpha=float(team_dk_fpts_correlation_overlay_alpha),
+            min_minutes=float(team_dk_fpts_correlation_overlay_min_minutes),
+            weight_power=float(team_dk_fpts_correlation_overlay_weight_power),
+            target_game_ids=target_ids,
+        )
+    )
+    if bool(team_dk_fpts_correlation_overlay_report.get("applied")):
+        logger.info(
+            "Applied team dk_fpts correlation overlay in materialize: %s",
+            team_dk_fpts_correlation_overlay_report,
         )
     _atomic_write_validated_parquet(
         merged_worlds,
@@ -8419,6 +8666,7 @@ def materialize_unified_run_artifacts_task(
         "props_uplift_calibration": props_uplift_report,
         "propless_tail_calibration": propless_tail_report,
         "mid_minutes_tail_calibration": mid_minutes_tail_report,
+        "team_dk_fpts_correlation_overlay": team_dk_fpts_correlation_overlay_report,
         "world_realism_controls": world_realism_report,
         "world_contract_field_repair": world_contract_repair_report,
         "world_contract_field_repair_post_sanitize": (
@@ -9215,6 +9463,18 @@ def nba_live_pipeline_v3_flow(
             world_realism_outlier_resample_max_passes=int(
                 gtv2_world_realism_outlier_resample_max_passes
             ),
+            apply_team_dk_fpts_correlation_overlay=bool(
+                gtv2_current_cfg.get("team_dk_fpts_correlation_overlay_enabled", False)
+            ),
+            team_dk_fpts_correlation_overlay_alpha=float(
+                gtv2_current_cfg.get("team_dk_fpts_correlation_overlay_alpha", 0.0)
+            ),
+            team_dk_fpts_correlation_overlay_min_minutes=float(
+                gtv2_current_cfg.get("team_dk_fpts_correlation_overlay_min_minutes", 0.0)
+            ),
+            team_dk_fpts_correlation_overlay_weight_power=float(
+                gtv2_current_cfg.get("team_dk_fpts_correlation_overlay_weight_power", 1.0)
+            ),
             promotion_hybrid_enabled=bool(
                 gtv2_current_cfg.get("promotion_hybrid_enabled", False)
             ),
@@ -9418,6 +9678,26 @@ def nba_live_pipeline_v3_flow(
                 ),
                 world_realism_outlier_resample_max_passes=int(
                     gtv2_world_realism_outlier_resample_max_passes
+                ),
+                apply_team_dk_fpts_correlation_overlay=bool(
+                    gtv2_current_cfg.get(
+                        "team_dk_fpts_correlation_overlay_enabled", False
+                    )
+                ),
+                team_dk_fpts_correlation_overlay_alpha=float(
+                    gtv2_current_cfg.get(
+                        "team_dk_fpts_correlation_overlay_alpha", 0.0
+                    )
+                ),
+                team_dk_fpts_correlation_overlay_min_minutes=float(
+                    gtv2_current_cfg.get(
+                        "team_dk_fpts_correlation_overlay_min_minutes", 0.0
+                    )
+                ),
+                team_dk_fpts_correlation_overlay_weight_power=float(
+                    gtv2_current_cfg.get(
+                        "team_dk_fpts_correlation_overlay_weight_power", 1.0
+                    )
                 ),
                 random_seed=int(gtv2_seed),
             )

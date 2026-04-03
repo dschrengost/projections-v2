@@ -5,6 +5,7 @@ import pytest
 from pandas.core.groupby.generic import DataFrameGroupBy
 
 from prefect_flows.live_nba_pipeline_v3 import (
+    _apply_team_dk_fpts_correlation_overlay_to_worlds,
     _apply_team_implied_points_reconcile_to_worlds,
     _apply_propless_tail_calibration_to_worlds,
     _apply_props_uplift_calibration_to_worlds,
@@ -260,6 +261,68 @@ def test_team_implied_points_reconcile_allocates_positive_residual_to_best_uncov
     assert out.loc[out["player_id"] == 101, "pts"].mean() == pytest.approx(8.0)
     assert out.loc[out["player_id"] == 102, "pts"].mean() == pytest.approx(2.0)
     assert report["total_unresolved_team_gap_mean"] == pytest.approx(0.0)
+
+
+def test_team_dk_fpts_correlation_overlay_preserves_team_totals_and_player_means() -> None:
+    worlds_df = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 1, 1, 2, 2, 3, 3],
+            "game_id": [1] * 8,
+            "team_id": [10] * 8,
+            "player_id": [100, 101] * 4,
+            "minutes": [34.0] * 8,
+            "active": [1] * 8,
+            "dk_fpts": [30.0, 12.0, 10.0, 20.0, 28.0, 10.0, 8.0, 18.0],
+        }
+    )
+
+    before_pivot = worlds_df.pivot(index="world_idx", columns="player_id", values="dk_fpts")
+    before_corr = float(before_pivot.corr().iloc[0, 1])
+    before_team_totals = worlds_df.groupby(["world_idx", "game_id", "team_id"])["dk_fpts"].sum()
+    before_player_means = worlds_df.groupby(["game_id", "team_id", "player_id"])["dk_fpts"].mean()
+
+    out, report = _apply_team_dk_fpts_correlation_overlay_to_worlds(
+        worlds_df,
+        enabled=True,
+        alpha=1.0,
+    )
+
+    assert report["applied"] is True
+    assert report["team_total_max_abs_drift"] <= 1e-6
+    assert report["player_mean_max_abs_shift"] <= 1e-6
+
+    after_pivot = out.pivot(index="world_idx", columns="player_id", values="dk_fpts")
+    after_corr = float(after_pivot.corr().iloc[0, 1])
+    after_team_totals = out.groupby(["world_idx", "game_id", "team_id"])["dk_fpts"].sum()
+    after_player_means = out.groupby(["game_id", "team_id", "player_id"])["dk_fpts"].mean()
+
+    pd.testing.assert_series_equal(before_team_totals, after_team_totals, check_names=False)
+    pd.testing.assert_series_equal(before_player_means, after_player_means, check_names=False)
+    assert after_corr > before_corr
+
+
+def test_team_dk_fpts_correlation_overlay_preserves_inactive_zero_rows() -> None:
+    worlds_df = pd.DataFrame(
+        {
+            "world_idx": [0, 0, 0, 1, 1, 1],
+            "game_id": [1] * 6,
+            "team_id": [10] * 6,
+            "player_id": [100, 101, 102, 100, 101, 102],
+            "minutes": [34.0, 30.0, 0.0, 34.0, 30.0, 0.0],
+            "active": [1, 1, 0, 1, 1, 0],
+            "dk_fpts": [24.0, 16.0, 0.0, 18.0, 12.0, 0.0],
+        }
+    )
+
+    out, report = _apply_team_dk_fpts_correlation_overlay_to_worlds(
+        worlds_df,
+        enabled=True,
+        alpha=0.5,
+    )
+
+    assert report["applied"] is True
+    inactive_rows = out.loc[out["player_id"] == 102].sort_values("world_idx")
+    assert inactive_rows["dk_fpts"].tolist() == [0.0, 0.0]
 
 
 def test_props_uplift_adjusts_stocks_bidirectionally() -> None:

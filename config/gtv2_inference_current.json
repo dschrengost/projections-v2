@@ -23,6 +23,10 @@
   "minutes_uncertainty_apply_minutes_taper": false,
   "minutes_uncertainty_preserve_top_k_per_team": 0,
   "minutes_uncertainty_gaussian_scale": 0.5,
+  "team_dk_fpts_correlation_overlay_enabled": true,
+  "team_dk_fpts_correlation_overlay_alpha": 0.48,
+  "team_dk_fpts_correlation_overlay_min_minutes": 0.0,
+  "team_dk_fpts_correlation_overlay_weight_power": 1.0,
   "model_version": "gtv2_679feat_teamimplied_allheads_20260331",
   "promoted_at": "2026-03-31T11:10:00Z",
   "bundle_hash": "b486002ec152c76aeb656a9957e58d79838a1ea1e471522ce886434d55a39ff1"
