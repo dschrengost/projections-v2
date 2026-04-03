@@ -175,6 +175,9 @@ _WORLD_DERIVED_STAT_CAPS: dict[str, float] = {
     "reb": 45.0,
     "dk_fpts": 150.0,
 }
+_TEAM_IMPLIED_UNCOVERED_ADD_MIN_MINUTES_MEAN = 12.0
+_TEAM_IMPLIED_UNCOVERED_ADD_MIN_PRIOR_PLAY_PROB = 0.35
+_TEAM_IMPLIED_UNCOVERED_MAX_DEPTH_RANK = 9
 _RETRYABLE_SUBPROCESS_EXIT_CODES = frozenset({-11, -7, -6, 134, 135, 139})
 _SUBPROCESS_CRASH_RETRY_ATTEMPTS = max(
     1,
@@ -4639,6 +4642,501 @@ def _apply_propless_tail_calibration_to_worlds(
     return out, report
 
 
+def _allocate_bounded_budget(
+    *,
+    budget: float,
+    weights: np.ndarray,
+    capacity: np.ndarray,
+    max_iter: int = 16,
+) -> np.ndarray:
+    alloc = np.zeros_like(capacity, dtype=float)
+    remaining = float(max(0.0, budget))
+    if remaining <= 0.0:
+        return alloc
+    tol = 1e-9
+    weight_arr = np.clip(
+        np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0),
+        0.0,
+        np.inf,
+    )
+    cap_arr = np.clip(
+        np.nan_to_num(capacity, nan=0.0, posinf=0.0, neginf=0.0),
+        0.0,
+        np.inf,
+    )
+    for _ in range(max_iter):
+        spare = np.clip(cap_arr - alloc, 0.0, np.inf)
+        active = spare > tol
+        if remaining <= tol or not bool(np.any(active)):
+            break
+        active_weights = weight_arr[active]
+        if float(active_weights.sum()) > tol:
+            proposal = remaining * active_weights / float(active_weights.sum())
+        else:
+            proposal = remaining * spare[active] / float(spare[active].sum())
+        delta = np.minimum(proposal, spare[active])
+        if float(delta.sum()) <= tol:
+            break
+        alloc[active] += delta
+        remaining = float(max(0.0, remaining - float(delta.sum())))
+    return np.clip(alloc, 0.0, cap_arr)
+
+
+def _apply_team_implied_points_reconcile_to_worlds(
+    worlds_df: pd.DataFrame,
+    *,
+    features_df: pd.DataFrame,
+    pre_calibration_pts_anchor: pd.DataFrame | None,
+    enabled: bool = False,
+    alpha: float = 0.75,
+    deadband_points: float = 2.0,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if not enabled:
+        return worlds_df, {"applied": False, "reason": "disabled"}
+    if worlds_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_worlds"}
+    if features_df.empty:
+        return worlds_df, {"applied": False, "reason": "empty_features"}
+
+    key_cols = ["game_id", "team_id", "player_id"]
+    required_world_cols = set(key_cols + ["minutes", "pts", "dk_fpts"])
+    missing_world_cols = sorted(required_world_cols - set(worlds_df.columns))
+    if missing_world_cols:
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_world_cols",
+            "missing_world_cols": missing_world_cols,
+        }
+    if "team_implied_total" not in features_df.columns:
+        return worlds_df, {
+            "applied": False,
+            "reason": "missing_team_implied_total",
+        }
+
+    alpha_clipped = float(np.clip(float(alpha), 0.0, 1.0))
+    deadband_clipped = float(max(0.0, deadband_points))
+    if alpha_clipped <= 0.0:
+        return worlds_df, {
+            "applied": False,
+            "reason": "alpha_zero",
+            "alpha": alpha_clipped,
+            "deadband_points": deadband_clipped,
+        }
+
+    current_means = _group_mean_by_keys_without_pandas_groupby(
+        worlds_df.loc[:, key_cols + ["minutes", "pts"]],
+        key_cols=key_cols,
+        value_cols=("minutes", "pts"),
+        label="team_implied_points_reconcile/player_means",
+    ).rename(columns={"minutes": "minutes_mean", "pts": "pts_mean"})
+
+    feat_cols = key_cols + ["team_implied_total"]
+    indicator_cols: list[str] = []
+    if "an_props_market_count" in features_df.columns:
+        indicator_cols.append("an_props_market_count")
+    has_cols = sorted(
+        [col for col in features_df.columns if str(col).startswith("an_has_")]
+    )
+    line_cols = sorted(
+        [
+            col
+            for col in features_df.columns
+            if str(col).startswith("an_") and str(col).endswith("_line")
+        ]
+    )
+    indicator_cols.extend(has_cols)
+    indicator_cols.extend(line_cols)
+    for optional_col in (
+        "player_name",
+        "prior_play_prob",
+        "lineup_role",
+        *indicator_cols,
+    ):
+        if optional_col in features_df.columns:
+            feat_cols.append(optional_col)
+    feat = features_df.loc[:, feat_cols].copy()
+    agg_dict: dict[str, str] = {}
+    for col in feat.columns:
+        if col in key_cols:
+            continue
+        if str(col).startswith("an_has_") or col == "an_props_market_count":
+            agg_dict[col] = "max"
+        else:
+            agg_dict[col] = "first"
+    feat = feat.groupby(key_cols, dropna=False, as_index=False).agg(agg_dict)
+
+    has_any_props = np.zeros(len(feat), dtype=bool)
+    has_explicit_props_indicator = False
+    if "an_has_any_props" in feat.columns:
+        has_explicit_props_indicator = True
+        has_any_props |= (
+            pd.to_numeric(feat["an_has_any_props"], errors="coerce")
+            .fillna(0.0)
+            .ge(0.5)
+            .to_numpy(dtype=bool)
+        )
+    if "an_props_market_count" in feat.columns:
+        has_explicit_props_indicator = True
+        has_any_props |= (
+            pd.to_numeric(feat["an_props_market_count"], errors="coerce")
+            .fillna(0.0)
+            .ge(1.0)
+            .to_numpy(dtype=bool)
+        )
+    for col in has_cols:
+        if col in feat.columns:
+            has_explicit_props_indicator = True
+            has_any_props |= (
+                pd.to_numeric(feat[col], errors="coerce")
+                .fillna(0.0)
+                .ge(0.5)
+                .to_numpy(dtype=bool)
+            )
+    if not has_explicit_props_indicator:
+        for col in line_cols:
+            if col in feat.columns:
+                has_any_props |= (
+                    pd.to_numeric(feat[col], errors="coerce")
+                    .fillna(0.0)
+                    .abs()
+                    .gt(float(_WORLD_CONTRACT_TOL))
+                    .to_numpy(dtype=bool)
+                )
+    feat["has_any_props"] = has_any_props.astype(np.int8)
+
+    meta = current_means.merge(feat, on=key_cols, how="left")
+    meta["pts_mean"] = pd.to_numeric(meta["pts_mean"], errors="coerce").fillna(0.0)
+    meta["minutes_mean"] = pd.to_numeric(meta["minutes_mean"], errors="coerce").fillna(
+        0.0
+    )
+    meta["team_implied_total"] = pd.to_numeric(
+        meta["team_implied_total"], errors="coerce"
+    )
+    meta["has_any_props"] = (
+        pd.to_numeric(meta.get("has_any_props", 0.0), errors="coerce")
+        .fillna(0.0)
+        .ge(0.5)
+    )
+    prior_play_prob_source = (
+        meta["prior_play_prob"]
+        if "prior_play_prob" in meta.columns
+        else pd.Series(1.0, index=meta.index, dtype=float)
+    )
+    prior_play_prob = (
+        pd.to_numeric(prior_play_prob_source, errors="coerce")
+        .fillna(1.0)
+        .clip(lower=0.0, upper=1.0)
+    )
+    role_series = meta.get("lineup_role", "")
+    role_norm = (
+        role_series.astype(str).str.lower().str.strip()
+        if hasattr(role_series, "astype")
+        else pd.Series("", index=meta.index, dtype=str)
+    )
+    role_block = role_norm.isin(
+        {"out", "inactive", "dnp", "dnp-cd", "g_league", "two_way", "two-way"}
+    )
+    depth_rank = (
+        meta.assign(_minutes_mean_rank=meta["minutes_mean"].astype(float))
+        .groupby(["game_id", "team_id"], dropna=False)["_minutes_mean_rank"]
+        .rank(method="first", ascending=False)
+    )
+    minutes_strength = (
+        (
+            meta["minutes_mean"].astype(float)
+            - float(_TEAM_IMPLIED_UNCOVERED_ADD_MIN_MINUTES_MEAN)
+        )
+        / max(1.0, 30.0 - float(_TEAM_IMPLIED_UNCOVERED_ADD_MIN_MINUTES_MEAN))
+    ).clip(lower=0.0, upper=1.0)
+    depth_strength = (
+        1.0
+        - (
+            (
+                pd.to_numeric(depth_rank, errors="coerce")
+                .fillna(float(_TEAM_IMPLIED_UNCOVERED_MAX_DEPTH_RANK + 1))
+                - 1.0
+            )
+            / max(1.0, float(_TEAM_IMPLIED_UNCOVERED_MAX_DEPTH_RANK - 1))
+        )
+    ).clip(lower=0.0, upper=1.0)
+    upside_score = (
+        0.55 * pd.to_numeric(minutes_strength, errors="coerce").fillna(0.0)
+        + 0.30 * pd.to_numeric(prior_play_prob, errors="coerce").fillna(0.0)
+        + 0.15 * pd.to_numeric(depth_strength, errors="coerce").fillna(0.0)
+    ).clip(lower=0.0, upper=1.0)
+
+    meta["is_covered"] = meta["has_any_props"].astype(bool)
+    meta["movable_uncovered"] = (
+        (~meta["is_covered"]) & meta["minutes_mean"].gt(0.0) & (~role_block)
+    )
+    meta["add_eligible_uncovered"] = (
+        meta["movable_uncovered"]
+        & meta["minutes_mean"].ge(float(_TEAM_IMPLIED_UNCOVERED_ADD_MIN_MINUTES_MEAN))
+        & prior_play_prob.ge(float(_TEAM_IMPLIED_UNCOVERED_ADD_MIN_PRIOR_PLAY_PROB))
+        & depth_rank.le(float(_TEAM_IMPLIED_UNCOVERED_MAX_DEPTH_RANK))
+    )
+    meta["upside_score"] = pd.to_numeric(upside_score, errors="coerce").fillna(0.0)
+
+    team_rows: list[dict[str, Any]] = []
+    adjustments: list[pd.DataFrame] = []
+    team_count_with_uncovered_gap = 0
+    team_count_adjusted = 0
+    total_mean_delta = 0.0
+    total_unresolved_team_gap_mean = 0.0
+
+    team_keys = (
+        meta.loc[:, ["game_id", "team_id", "team_implied_total"]]
+        .dropna(subset=["game_id", "team_id"])
+        .drop_duplicates(subset=["game_id", "team_id"], keep="last")
+    )
+    for row in team_keys.itertuples(index=False):
+        game_id = int(float(row.game_id))
+        team_id = int(float(row.team_id))
+        target = pd.to_numeric(row.team_implied_total, errors="coerce")
+        if pd.isna(target):
+            continue
+        team_mask = meta["game_id"].eq(game_id) & meta["team_id"].eq(team_id)
+        team_current = float(meta.loc[team_mask, "pts_mean"].sum())
+        team_gap_pre = float(team_current - float(target))
+        covered_sum = float(meta.loc[team_mask & meta["is_covered"], "pts_mean"].sum())
+        uncovered_locked_sum = float(
+            meta.loc[
+                team_mask & (~meta["is_covered"]) & (~meta["movable_uncovered"]),
+                "pts_mean",
+            ].sum()
+        )
+        movable_mask = team_mask & meta["movable_uncovered"]
+        movable_current = float(meta.loc[movable_mask, "pts_mean"].sum())
+        target_movable_total = float(
+            max(
+                0.0,
+                float(target) - covered_sum - uncovered_locked_sum - deadband_clipped,
+            )
+        )
+        movable_delta_needed = float(target_movable_total - movable_current)
+        unresolved_gap = float(team_gap_pre)
+        moved_mean = 0.0
+
+        if abs(movable_delta_needed) > 1e-9 and bool(movable_mask.any()):
+            team_count_with_uncovered_gap += 1
+            movable = meta.loc[
+                movable_mask,
+                key_cols + ["pts_mean", "upside_score", "add_eligible_uncovered"],
+            ].copy()
+            current_pts = (
+                pd.to_numeric(movable["pts_mean"], errors="coerce")
+                .fillna(0.0)
+                .to_numpy(dtype=float, copy=False)
+            )
+            upside = (
+                pd.to_numeric(movable["upside_score"], errors="coerce")
+                .fillna(0.0)
+                .to_numpy(dtype=float, copy=False)
+            )
+            target_pts = current_pts.copy()
+
+            if movable_delta_needed < 0.0:
+                remove_budget = float(-movable_delta_needed * alpha_clipped)
+                floor_frac = np.clip(0.05 + 0.15 * upside, 0.05, 0.20)
+                remove_capacity = np.clip(current_pts * (1.0 - floor_frac), 0.0, np.inf)
+                remove_weights = np.clip(current_pts * (1.35 - upside), 0.0, np.inf)
+                removed = _allocate_bounded_budget(
+                    budget=remove_budget,
+                    weights=remove_weights,
+                    capacity=remove_capacity,
+                )
+                target_pts = np.clip(current_pts - removed, 0.0, np.inf)
+                moved_mean = float(-removed.sum())
+            else:
+                add_budget = float(movable_delta_needed * alpha_clipped)
+                add_eligible = (
+                    pd.to_numeric(
+                        movable["add_eligible_uncovered"], errors="coerce"
+                    )
+                    .fillna(0.0)
+                    .ge(0.5)
+                    .to_numpy(dtype=bool)
+                )
+                add_capacity = np.zeros_like(current_pts, dtype=float)
+                add_weights = np.zeros_like(current_pts, dtype=float)
+                add_capacity[add_eligible] = current_pts[add_eligible] * (
+                    0.50 + 1.00 * upside[add_eligible]
+                )
+                add_weights[add_eligible] = current_pts[add_eligible] * (
+                    0.25 + upside[add_eligible]
+                )
+                added = _allocate_bounded_budget(
+                    budget=add_budget,
+                    weights=add_weights,
+                    capacity=add_capacity,
+                )
+                target_pts = np.clip(current_pts + added, 0.0, np.inf)
+                moved_mean = float(added.sum())
+
+            delta_pts = target_pts - current_pts
+            if bool(np.any(np.abs(delta_pts) > 1e-9)):
+                team_count_adjusted += 1
+                total_mean_delta += float(np.abs(delta_pts).sum())
+                scale = np.where(current_pts > 1e-9, target_pts / current_pts, 1.0)
+                movable["pts_reconcile_scale"] = np.clip(scale, 0.0, np.inf)
+                movable["pts_reconcile_delta_mean"] = delta_pts
+                movable["pts_reconcile_direction"] = np.where(
+                    delta_pts > 1e-9,
+                    "add",
+                    np.where(delta_pts < -1e-9, "remove", "flat"),
+                )
+                adjustments.append(
+                    movable.loc[
+                        np.abs(
+                            pd.to_numeric(
+                                movable["pts_reconcile_delta_mean"],
+                                errors="coerce",
+                            ).to_numpy(dtype=float, copy=False)
+                        )
+                        > 1e-9,
+                        key_cols
+                        + [
+                            "pts_reconcile_scale",
+                            "pts_reconcile_delta_mean",
+                            "pts_reconcile_direction",
+                        ],
+                    ].copy()
+                )
+                unresolved_gap = float(
+                    covered_sum
+                    + uncovered_locked_sum
+                    + float(target_pts.sum())
+                    + deadband_clipped
+                    - float(target)
+                )
+
+        total_unresolved_team_gap_mean += unresolved_gap
+        team_rows.append(
+            {
+                "game_id": game_id,
+                "team_id": team_id,
+                "team_pts_mean_pre": float(round(team_current, 6)),
+                "team_implied_total": float(round(float(target), 6)),
+                "covered_pts_mean": float(round(covered_sum, 6)),
+                "uncovered_locked_pts_mean": float(round(uncovered_locked_sum, 6)),
+                "uncovered_movable_pts_mean_pre": float(round(movable_current, 6)),
+                "uncovered_target_pts_mean": float(round(target_movable_total, 6)),
+                "team_gap_pre": float(round(team_gap_pre, 6)),
+                "uncovered_delta_needed_mean": float(round(movable_delta_needed, 6)),
+                "uncovered_moved_mean": float(round(moved_mean, 6)),
+                "unresolved_team_gap_mean": float(round(unresolved_gap, 6)),
+            }
+        )
+
+    if not adjustments:
+        return worlds_df, {
+            "applied": False,
+            "reason": "no_adjustable_uncovered_pool",
+            "mode": "uncovered_residual_allocator",
+            "alpha": alpha_clipped,
+            "deadband_points": deadband_clipped,
+            "team_count_with_uncovered_gap": int(team_count_with_uncovered_gap),
+            "team_count_adjusted": 0,
+            "player_count_adjusted": 0,
+            "total_mean_delta": 0.0,
+            "total_unresolved_team_gap_mean": float(
+                round(total_unresolved_team_gap_mean, 6)
+            ),
+            "teams": team_rows,
+        }
+
+    adjustment_df = pd.concat(adjustments, ignore_index=True)
+    adjustment_df = (
+        adjustment_df.groupby(key_cols, dropna=False, as_index=False)
+        .agg(
+            {
+                "pts_reconcile_scale": "prod",
+                "pts_reconcile_delta_mean": "sum",
+                "pts_reconcile_direction": "last",
+            }
+        )
+    )
+
+    out = _left_overlay_from_source_by_keys(
+        worlds_df.copy(),
+        source_df=adjustment_df,
+        key_cols=key_cols,
+        value_cols=("pts_reconcile_scale",),
+        label="team_implied_points_reconcile/scale_overlay",
+    )
+    pts_cap = float(_WORLD_BASE_STAT_CAPS.get("pts", 90.0))
+    pts_vals = pd.to_numeric(out["pts"], errors="coerce").to_numpy(dtype=float, copy=False)
+    pts_vals = np.clip(
+        np.nan_to_num(pts_vals, nan=0.0, posinf=pts_cap, neginf=0.0),
+        0.0,
+        pts_cap,
+    )
+    scale_vals = (
+        pd.to_numeric(out.get("pts_reconcile_scale", 1.0), errors="coerce")
+        .fillna(1.0)
+        .to_numpy(dtype=float, copy=False)
+    )
+    scale_vals = np.clip(scale_vals, 0.0, np.inf)
+    minutes_vals = pd.to_numeric(out["minutes"], errors="coerce").to_numpy(
+        dtype=float, copy=False
+    )
+    active_mask = np.nan_to_num(minutes_vals, nan=0.0, posinf=0.0, neginf=0.0) > 0.0
+    out["pts"] = np.where(
+        active_mask,
+        np.clip(pts_vals * scale_vals, 0.0, pts_cap),
+        pts_vals,
+    )
+    dk_cap = float(_WORLD_DERIVED_STAT_CAPS.get("dk_fpts", 150.0))
+    dk_fpts = _recompute_dk_fpts(out).to_numpy(dtype=float, copy=False)
+    out["dk_fpts"] = np.clip(
+        np.nan_to_num(dk_fpts, nan=0.0, posinf=dk_cap, neginf=0.0),
+        0.0,
+        dk_cap,
+    )
+    out = out.drop(columns=["pts_reconcile_scale"], errors="ignore")
+
+    top_adjustments = adjustment_df.merge(
+        feat.loc[:, [c for c in key_cols + ["player_name"] if c in feat.columns]],
+        on=key_cols,
+        how="left",
+    )
+    top_adjustments = (
+        top_adjustments.assign(
+            abs_pts_reconcile_delta_mean=lambda d: pd.to_numeric(
+                d["pts_reconcile_delta_mean"], errors="coerce"
+            ).abs()
+        )
+        .sort_values("abs_pts_reconcile_delta_mean", ascending=False)
+        .head(12)
+        .drop(columns=["abs_pts_reconcile_delta_mean"], errors="ignore")
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna("")
+    )
+    report = {
+        "applied": True,
+        "mode": "uncovered_residual_allocator",
+        "alpha": alpha_clipped,
+        "deadband_points": deadband_clipped,
+        "team_count_with_uncovered_gap": int(team_count_with_uncovered_gap),
+        "team_count_adjusted": int(team_count_adjusted),
+        "player_count_adjusted": int(len(adjustment_df)),
+        "total_mean_delta": float(round(total_mean_delta, 6)),
+        "total_unresolved_team_gap_mean": float(
+            round(total_unresolved_team_gap_mean, 6)
+        ),
+        "eligible_rules": {
+            "add_min_minutes_mean": float(_TEAM_IMPLIED_UNCOVERED_ADD_MIN_MINUTES_MEAN),
+            "add_min_prior_play_prob": float(
+                _TEAM_IMPLIED_UNCOVERED_ADD_MIN_PRIOR_PLAY_PROB
+            ),
+            "max_depth_rank": int(_TEAM_IMPLIED_UNCOVERED_MAX_DEPTH_RANK),
+        },
+        "teams": team_rows,
+        "top_adjustments": top_adjustments.to_dict(orient="records"),
+    }
+    return out, report
+
+
 def _apply_mid_minutes_tail_calibration_to_worlds(
     worlds_df: pd.DataFrame,
     *,
@@ -6984,6 +7482,21 @@ def generate_worlds_gtv2_live_task(
                 "Applied mid-minutes tail calibration: %s",
                 mid_minutes_tail_report,
             )
+        worlds_df, team_implied_points_reconcile_report = (
+            _apply_team_implied_points_reconcile_to_worlds(
+                worlds_df,
+                features_df=features_df,
+                pre_calibration_pts_anchor=pre_calibration_pts_anchor,
+                enabled=bool(apply_team_implied_points_reconcile),
+                alpha=float(team_implied_points_reconcile_alpha),
+                deadband_points=float(team_implied_points_reconcile_deadband_points),
+            )
+        )
+        if bool(team_implied_points_reconcile_report.get("applied")):
+            logger.info(
+                "Applied team implied points reconcile: %s",
+                team_implied_points_reconcile_report,
+            )
         worlds_df, world_realism_report = _apply_world_realism_controls_to_worlds(
             worlds_df,
             enabled=bool(apply_world_realism_controls),
@@ -7506,6 +8019,16 @@ def _postprocess_target_world_slice_for_game_scoped_merge(
         max_minutes=float(mid_minutes_tail_max_minutes),
         tail_boost=float(mid_minutes_tail_boost),
         target_game_ids=None,
+    )
+    target_worlds, team_implied_points_reconcile_report = (
+        _apply_team_implied_points_reconcile_to_worlds(
+            target_worlds,
+            features_df=target_features,
+            pre_calibration_pts_anchor=pre_calibration_pts_anchor,
+            enabled=bool(apply_team_implied_points_reconcile),
+            alpha=float(team_implied_points_reconcile_alpha),
+            deadband_points=float(team_implied_points_reconcile_deadband_points),
+        )
     )
     target_worlds, world_realism_report = _apply_world_realism_controls_to_worlds(
         target_worlds,

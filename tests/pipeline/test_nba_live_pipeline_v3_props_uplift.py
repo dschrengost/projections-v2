@@ -5,6 +5,7 @@ import pytest
 from pandas.core.groupby.generic import DataFrameGroupBy
 
 from prefect_flows.live_nba_pipeline_v3 import (
+    _apply_team_implied_points_reconcile_to_worlds,
     _apply_propless_tail_calibration_to_worlds,
     _apply_props_uplift_calibration_to_worlds,
 )
@@ -159,6 +160,106 @@ def test_props_uplift_avoids_pandas_groupby_mean(
 
     assert report["applied"] is True
     assert len(out) == len(worlds_df)
+
+
+def test_team_implied_points_reconcile_preserves_covered_players_and_cuts_uncovered() -> None:
+    worlds_df = pd.DataFrame(
+        {
+            "world_idx": [0, 1, 0, 1, 0, 1],
+            "game_id": [1, 1, 1, 1, 2, 2],
+            "team_id": [10, 10, 10, 10, 20, 20],
+            "player_id": [100, 100, 101, 101, 200, 200],
+            "minutes": [32.0, 32.0, 28.0, 28.0, 30.0, 30.0],
+            "pts": [30.0, 32.0, 9.0, 9.0, 18.0, 18.0],
+            "reb": [5.0, 5.0, 4.0, 4.0, 6.0, 6.0],
+            "ast": [4.0, 4.0, 2.0, 2.0, 5.0, 5.0],
+            "stl": [1.0, 1.0, 0.7, 0.7, 1.1, 1.1],
+            "blk": [0.5, 0.5, 0.3, 0.3, 0.6, 0.6],
+            "tov": [2.0, 2.0, 1.0, 1.0, 2.0, 2.0],
+            "dk_fpts": [0.0] * 6,
+        }
+    )
+    features_df = pd.DataFrame(
+        {
+            "game_id": [1, 1, 2],
+            "team_id": [10, 10, 20],
+            "player_id": [100, 101, 200],
+            "player_name": ["Prop A", "Bench B", "Other Team"],
+            "team_implied_total": [34.0, 34.0, 18.0],
+            "an_has_pts": [1.0, 0.0, 1.0],
+            "an_pts_line": [30.5, pd.NA, 18.0],
+            "an_props_market_count": [5.0, 0.0, 5.0],
+        }
+    )
+
+    out, report = _apply_team_implied_points_reconcile_to_worlds(
+        worlds_df,
+        features_df=features_df,
+        pre_calibration_pts_anchor=None,
+        enabled=True,
+        alpha=1.0,
+        deadband_points=0.0,
+    )
+
+    assert report["applied"] is True
+    assert report["team_count_adjusted"] == 1
+    assert report["player_count_adjusted"] == 1
+    team_10_total = out.loc[out["team_id"] == 10].groupby("player_id")["pts"].mean().sum()
+    assert team_10_total == pytest.approx(34.0)
+    prop_pts = out.loc[out["player_id"] == 100, "pts"].reset_index(drop=True)
+    pd.testing.assert_series_equal(
+        prop_pts,
+        worlds_df.loc[worlds_df["player_id"] == 100, "pts"].reset_index(drop=True),
+        check_names=False,
+    )
+    assert out.loc[out["player_id"] == 101, "pts"].mean() == pytest.approx(3.0)
+
+
+def test_team_implied_points_reconcile_allocates_positive_residual_to_best_uncovered() -> None:
+    worlds_df = pd.DataFrame(
+        {
+            "world_idx": [0, 1, 0, 1, 0, 1],
+            "game_id": [1, 1, 1, 1, 1, 1],
+            "team_id": [10, 10, 10, 10, 10, 10],
+            "player_id": [100, 100, 101, 101, 102, 102],
+            "minutes": [34.0, 34.0, 26.0, 26.0, 10.0, 10.0],
+            "pts": [30.0, 30.0, 4.0, 4.0, 2.0, 2.0],
+            "reb": [5.0, 5.0, 4.0, 4.0, 2.0, 2.0],
+            "ast": [4.0, 4.0, 2.0, 2.0, 1.0, 1.0],
+            "stl": [1.0, 1.0, 0.7, 0.7, 0.3, 0.3],
+            "blk": [0.5, 0.5, 0.3, 0.3, 0.1, 0.1],
+            "tov": [2.0, 2.0, 1.0, 1.0, 1.0, 1.0],
+            "dk_fpts": [0.0] * 6,
+        }
+    )
+    features_df = pd.DataFrame(
+        {
+            "game_id": [1, 1, 1],
+            "team_id": [10, 10, 10],
+            "player_id": [100, 101, 102],
+            "player_name": ["Prop A", "Upside B", "Low C"],
+            "team_implied_total": [40.0, 40.0, 40.0],
+            "an_has_pts": [1.0, 0.0, 0.0],
+            "an_pts_line": [30.0, pd.NA, pd.NA],
+            "an_props_market_count": [5.0, 0.0, 0.0],
+            "prior_play_prob": [1.0, 0.9, 0.2],
+        }
+    )
+
+    out, report = _apply_team_implied_points_reconcile_to_worlds(
+        worlds_df,
+        features_df=features_df,
+        pre_calibration_pts_anchor=None,
+        enabled=True,
+        alpha=1.0,
+        deadband_points=0.0,
+    )
+
+    assert report["applied"] is True
+    assert out.loc[out["player_id"] == 100, "pts"].mean() == pytest.approx(30.0)
+    assert out.loc[out["player_id"] == 101, "pts"].mean() == pytest.approx(8.0)
+    assert out.loc[out["player_id"] == 102, "pts"].mean() == pytest.approx(2.0)
+    assert report["total_unresolved_team_gap_mean"] == pytest.approx(0.0)
 
 
 def test_props_uplift_adjusts_stocks_bidirectionally() -> None:
