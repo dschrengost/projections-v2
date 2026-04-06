@@ -7,7 +7,7 @@ import pandas as pd
 from projections.api import optimizer_service
 
 
-def test_build_player_pool_derives_is_out_and_is_active_without_overrides(
+def test_build_player_pool_ignores_dk_salary_status_for_out_flags(
     monkeypatch,
 ) -> None:
     proj_df = pd.DataFrame(
@@ -81,6 +81,11 @@ def test_build_player_pool_derives_is_out_and_is_active_without_overrides(
         "load_salaries_for_date",
         lambda *args, **kwargs: sal_df,
     )
+    monkeypatch.setattr(
+        optimizer_service,
+        "_load_live_out_indicators",
+        lambda *args, **kwargs: (set(), set()),
+    )
 
     pool = optimizer_service.build_player_pool(
         game_date="2026-01-10",
@@ -91,14 +96,74 @@ def test_build_player_pool_derives_is_out_and_is_active_without_overrides(
     )
 
     by_id = {p["player_id"]: p for p in pool}
-    assert by_id["p1"]["is_out"] is True
-    assert by_id["p1"]["is_active"] is False
+    assert by_id["p1"]["is_out"] is False
+    assert by_id["p1"]["is_active"] is True
 
     assert by_id["p2"]["is_out"] is False
     assert by_id["p2"]["is_active"] is True
 
     assert by_id["p3"]["is_out"] is False
     assert by_id["p3"]["is_active"] is False
+
+
+def test_build_player_pool_still_respects_projection_status_for_out_flags(
+    monkeypatch,
+) -> None:
+    proj_df = pd.DataFrame(
+        [
+            {
+                "player_id": "p1",
+                "player_name": "Player One",
+                "team_tricode": "AAA",
+                "proj_fpts": 30.0,
+                "status": "OUT",
+            }
+        ]
+    )
+
+    sal_df = pd.DataFrame(
+        [
+            {
+                "dk_player_id": 101,
+                "display_name": "Player One",
+                "positions": ["PG"],
+                "salary": 7000,
+                "team_abbrev": "AAA",
+                "status": None,
+                "is_disabled": False,
+                "game_matchup": "AAA@BBB",
+                "game_start_utc": datetime(2026, 1, 10, 0, 0, tzinfo=timezone.utc),
+            }
+        ]
+    )
+
+    monkeypatch.setattr(
+        optimizer_service,
+        "load_projections_for_date",
+        lambda *args, **kwargs: proj_df,
+    )
+    monkeypatch.setattr(
+        optimizer_service,
+        "load_salaries_for_date",
+        lambda *args, **kwargs: sal_df,
+    )
+    monkeypatch.setattr(
+        optimizer_service,
+        "_load_live_out_indicators",
+        lambda *args, **kwargs: (set(), set()),
+    )
+
+    pool = optimizer_service.build_player_pool(
+        game_date="2026-01-10",
+        draft_group_id=12345,
+        site="dk",
+        use_user_overrides=False,
+        exclude_inactive_players=False,
+    )
+
+    assert len(pool) == 1
+    assert pool[0]["is_out"] is True
+    assert pool[0]["is_active"] is False
 
 
 def test_build_player_pool_canonicalizes_numeric_player_ids(monkeypatch) -> None:

@@ -1659,7 +1659,14 @@ def build_player_pool(
     # Game info columns (prefer _sal suffix from merge)
     matchup_col = "game_matchup_sal" if "game_matchup_sal" in merged.columns else "game_matchup"
     start_col = "game_start_utc_sal" if "game_start_utc_sal" in merged.columns else "game_start_utc"
-    status_cols = [c for c in ("status", "status_sal") if c in merged.columns]
+    # DK salary status is known to lag and can incorrectly mark playable users as OUT.
+    # For DK, only trust projection-side availability fields (plus official/Rotowire signals below).
+    if site_norm == "dk":
+        status_cols = ["status"] if ("status" in proj_df.columns and "status" in merged.columns) else []
+        is_out_cols = ["is_out"] if ("is_out" in proj_df.columns and "is_out" in merged.columns) else []
+    else:
+        status_cols = [c for c in ("status", "status_sal") if c in merged.columns]
+        is_out_cols = [c for c in ("is_out", "is_out_sal") if c in merged.columns]
     disabled_col = "is_disabled_sal" if "is_disabled_sal" in merged.columns else "is_disabled"
 
     for _, row in merged.iterrows():
@@ -1795,11 +1802,7 @@ def build_player_pool(
         status_out = any(_is_out_status(value) for value in status_vals)
         disabled = _coerce_bool(disabled_val, default=False)
         # Legacy overrides may publish explicit activity fields.
-        row_is_out = any(
-            _coerce_bool(row.get(col), default=False)
-            for col in ("is_out", "is_out_sal")
-            if col in row.index
-        )
+        row_is_out = any(_coerce_bool(row.get(col), default=False) for col in is_out_cols if col in row.index)
         row_is_active = _coerce_bool(row.get("is_active") if "is_active" in row.index else True, default=True)
         is_out = bool(row_is_out or status_out or source_out)
         is_active = bool(row_is_active and (not disabled) and (not is_out))
