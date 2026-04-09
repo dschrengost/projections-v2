@@ -1,0 +1,201 @@
+Task: Scaffold the new NBA DFS repo (Phase 2)
+You completed Phase 1 (the inventory at `INVENTORY.md` in the existing `projections-v2` repo). Phase 1 has been reviewed and approved. Now scaffold a new, separate repo that will host the simplified stack: GTv2 transformer for minutes/rotations, GBMs for rates, manual edit layer, copula-based sim, and a new frontend.
+Important context from Phase 1 that shapes this scaffold:
+The minimum file set for standalone deterministic GTv2 minutes inference is 14 Python files plus the bundle artifact, requiring only `numpy`, `pandas`, and `torch`.
+The data layer in the old repo is decentralized: 339 modules touch the data root directly, there is no enforced data access boundary, and `projections/paths.py` is "the closest thing" to a shared interface. The new repo will not inherit this — it will have a single enforced data access module.
+Live feature build in the old repo has hidden coupling: `gtv2_live_features.py` imports from a script module (`scripts/rotation/build_joint_rotation_rates_dataset_v1.py`), which transitively pulls in older minutes code. The decision on whether to port this wholesale or rebuild from contract is deferred — the scaffold should be set up so either path is possible.
+The promoted model bundle lives at `/home/daniel/projections-data/artifacts/game_transformer_v2/bundle_current` and is conceptually distinct from the data root.
+The old repo has Python venvs at 3.11 and 3.13. The bundle was trained under 3.11. The new repo pins to 3.11 to avoid torch ABI issues.
+`tabula-py`, `jpype1`, and Java/PDFBox are explicitly NOT to be carried forward. They were responsible for native crashes in the old repo.
+The new repo path will be: `/home/daniel/projects/nba-dfs-v2` (create it if it does not exist; do not initialize inside the existing `projections-v2` repo).
+Repo Structure
+Create the following structure:
+```
+nba-dfs-v2/
+├── README.md
+├── pyproject.toml
+├── .gitignore
+├── .python-version
+├── docs/
+│   └── PORT_NOTES.md
+├── src/
+│   └── nba_dfs/
+│       ├── __init__.py
+│       ├── config.py
+│       ├── data/
+│       │   ├── __init__.py
+│       │   └── README.md
+│       ├── features/
+│       │   ├── __init__.py
+│       │   └── README.md
+│       ├── minutes/
+│       │   ├── __init__.py
+│       │   └── README.md
+│       ├── rates/
+│       │   ├── __init__.py
+│       │   └── README.md
+│       ├── edits/
+│       │   ├── __init__.py
+│       │   └── README.md
+│       └── sim/
+│           ├── __init__.py
+│           └── README.md
+├── tests/
+│   ├── __init__.py
+│   ├── README.md
+│   └── fixtures/
+│       └── .gitkeep
+├── notebooks/
+│   └── .gitkeep
+└── scripts/
+    └── .gitkeep
+```
+File Requirements
+`pyproject.toml`
+uv-compatible setup
+Python pinned to 3.11 specifically, not `>=3.11`. Use `requires-python = "==3.11.*"`.
+Project name: `nba-dfs-v2`
+Dependencies: only what the GTv2 minutes head minimum file set actually imports, per Phase 1 section 5:
+`numpy>=1.26,<2.0`
+`pandas>=2.2,<2.3`
+`torch>=2.2`
+Dev dependencies:
+`pytest>=8.2`
+`ruff>=0.5`
+Configure pytest with the `requires_data` marker registered under `[tool.pytest.ini_options]` so it doesn't warn:
+```toml
+  [tool.pytest.ini_options]
+  addopts = "-ra"
+  testpaths = ["tests"]
+  markers = [
+      "requires_data: integration tests that read from NBA_DFS_DATA_DIR; skipped in CI",
+  ]
+  ```
+Hatchling build backend, package layout `src/nba_dfs`.
+Do not include `lightgbm`, `scikit-learn`, `pyarrow`, `prefect`, `fastapi`, `tabula-py`, `jpype1`, or any other dependency from the old repo's `pyproject.toml` that isn't in the GTv2 minimum import set. Future modules will add their own deps when they're built.
+`.python-version`
+Single line: `3.11`
+`.gitignore`
+Cover:
+Python standard (`__pycache__/`, `*.pyc`, `*.pyo`, `*.egg-info/`, `build/`, `dist/`)
+Virtualenvs (`.venv/`, `.venv*/`, `venv/`)
+uv lockfile cache directories
+Notebook checkpoints (`.ipynb_checkpoints/`)
+Editor/OS files (`.vscode/`, `.idea/`, `.DS_Store`)
+Model artifacts and data: `models/`, `data/`, `artifacts/`, `runs/`, `mlruns/`, `lightning_logs/`
+Logs: `*.log`
+Pytest cache: `.pytest_cache/`
+Ruff cache: `.ruff_cache/`
+`src/nba_dfs/config.py`
+Loads `NBA_DFS_DATA_DIR` from the environment. Default: `/home/daniel/projections-data`.
+Loads `NBA_DFS_BUNDLE_DIR` from the environment. Default: `/home/daniel/projections-data/artifacts/game_transformer_v2/bundle_current`.
+These two are intentionally separate. Do not derive one from the other and do not collapse them into a single setting.
+Both are exposed as module-level constants (e.g., `DATA_DIR: Path`, `BUNDLE_DIR: Path`) computed at import time using `pathlib.Path`.
+On import, raise a clear `FileNotFoundError` with a helpful message if either path does not exist. The error should mention the env var name and the expected path so the user knows how to fix it.
+Add a short module docstring explaining that this is the only place env vars are read.
+`src/nba_dfs/data/__init__.py`
+Stub module with a `load_slate(date: str)` function.
+The function takes a date string (`YYYY-MM-DD`) and is documented to return a structured object representing all data needed to score a slate.
+Body: `raise NotImplementedError(...)` with a message indicating this is the next thing to implement by hand.
+Module docstring must state the architectural rule explicitly: all reads and writes against `NBA_DFS_DATA_DIR` go through this module. No `pd.read_parquet` or `open()` calls against the data root from anywhere else in the package.
+`src/nba_dfs/data/README.md`
+Document:
+The role of this module: single typed interface to the medallion data lake at `NBA_DFS_DATA_DIR`.
+The medallion layout it will read from, copied verbatim from Phase 1 section 3 (bronze/silver/gold/live/labels/artifacts/training/control_plane).
+The hard rule: nothing else in `nba_dfs` reads from disk.
+A starter list of functions to implement, even if just as TODOs:
+`load_slate(date)` — top-level slate bundle
+`load_minutes_features(date, run_id)` — live minutes feature parquet
+`load_rotation_priors(date)` — silver rotation priors
+`load_tracking_roles(date)` — gold tracking roles
+`load_dnp_history(date, lookback_days)` — historical DNP context
+`load_box_score_labels(date_range)` — labels for backtesting
+`write_projections(date, run_id, df)` — write projections back to artifacts
+A note that the actual function signatures and return types will be designed when the first real consumer needs them.
+`src/nba_dfs/features/__init__.py`
+Empty package init. The module is intentionally empty to start.
+`src/nba_dfs/features/README.md`
+Document:
+The role: build the GTv2 feature DataFrame from raw medallion data, matching the bundle's `config.json` feature contract (`feature_columns`, `game_feature_columns`, `team_feature_columns`).
+Reference the source of truth for the contract:
+`docs/joint_rotation_rates_v1/GAME_TRANSFORMER_SPEC.md` in the old repo
+`projections/minutes_v1/schemas.py` in the old repo
+The bundle's own `config.json` (the runtime source of truth)
+State the open decision explicitly: "We have not yet decided whether to port `gtv2_live_features.py` and its transitive dependencies wholesale (Option A) or rebuild from contract (Option B). Option B is preferred but requires more upfront work. This decision blocks the first real implementation in this module."
+Note that this module reads from `nba_dfs.data` only — never directly from disk.
+`src/nba_dfs/minutes/__init__.py`
+Empty package init.
+`src/nba_dfs/minutes/README.md`
+Document:
+The role: deterministic and stochastic GTv2 minutes/rotation inference.
+The 14-file minimum port list from Phase 1 section 4, verbatim:
+`projections/pipeline/gtv2_inference_runtime.py`
+`projections/rotation/game_transformer_v2.py`
+`projections/rotation/joint_active_set.py`
+`projections/rotation/joint_minutes.py`
+`projections/rotation/joint_game_flow.py`
+`projections/rotation/assist_heads.py`
+`projections/rotation/rebound_heads.py`
+`projections/rotation/usage_share_head.py`
+`projections/rotation/team_budget_heads.py`
+`projections/rotation/efficiency_head.py`
+`projections/rotation/possession_backbone.py`
+`projections/rotation/set_model.py`
+`projections/rotation/utils.py`
+`projections/rotation/alloc_mask.py`
+Note that the bundle artifact (`config.json` + `model.pt`) is read from `NBA_DFS_BUNDLE_DIR` via `nba_dfs.config`, not vendored into this repo.
+Note the hidden coupling Phase 1 surfaced: the deterministic scoring path is clean, but live feature parity depends on `nba_dfs.features`, which has its own open decision (see that module's README).
+State that the port is not yet performed — this README is a checklist, not a record. When the port happens, this README gets updated to reflect what was actually copied and any deviations from the minimum list.
+`src/nba_dfs/rates/__init__.py`
+Empty package init.
+`src/nba_dfs/rates/README.md`
+One paragraph: this module will hold per-minute stat rate models, planned as LightGBM (or similar GBM) trained against the `labels_rates.parquet` produced by the joint rotation/rates training dataset. Not yet implemented. Will add `lightgbm` to dependencies when first model is built.
+`src/nba_dfs/edits/__init__.py`
+Empty package init.
+`src/nba_dfs/edits/README.md`
+Document:
+The role: first-class manual edit layer that sits between model outputs and the sim.
+Open design questions to answer when the module is built:
+Cascading edits (e.g., bumping one player's minutes auto-rebalances the other team members to preserve the 240-minute constraint)
+Per-slate versioning of edits
+Saved edit presets (e.g., "Spurs tank mode")
+State that this module is intentionally the design pivot point of the new architecture and deserves explicit thought before implementation.
+`src/nba_dfs/sim/__init__.py`
+Empty package init.
+`src/nba_dfs/sim/README.md`
+One paragraph: this module will sample player worlds from edited rate distributions using a copula for cross-stat and cross-player correlation, with calibrated marginal distributions per stat (not Gaussian noise). Copula choice (Gaussian vs t vs vine) is an open decision. Not yet implemented.
+`tests/README.md`
+Document the two test patterns:
+Fast unit tests that load from `tests/fixtures/` and run in CI. Use these for testing transformations, edit logic, sim sampling shape, data loader behavior against small synthetic parquet files.
+Integration tests marked with `@pytest.mark.requires_data` that read from `NBA_DFS_DATA_DIR`. These are skipped in CI and run locally before pushing. Use these for end-to-end smoke tests against real slates.
+State that the two patterns must be obvious from the start to avoid retrofitting later. Include a one-line example of each pattern.
+`docs/PORT_NOTES.md`
+Empty-ish file with a single header `# Port Notes` and a brief paragraph stating that this file will accumulate decisions, deviations, and reasoning as the port progresses. Future-self should be able to read this and understand why specific choices were made.
+`README.md`
+Top-level README. Sections:
+What this is — A clean rebuild of the NBA DFS pipeline with simplified architecture: GTv2 transformer for minutes/rotations, GBMs for rates, manual edit layer as a first-class citizen, copula-based sim. Frontend planned but not yet scaffolded.
+Relationship to the old repo — This repo lives alongside `projections-v2` (which is now frozen for new development). It reuses the existing data directory at `NBA_DFS_DATA_DIR` and the existing promoted GTv2 bundle at `NBA_DFS_BUNDLE_DIR`. The old repo continues to scrape, train, and promote bundles; this repo consumes them. Old repo is the producer, new repo is the consumer.
+Architecture intent — Brief diagram or list:
+`nba_dfs.data` — single typed interface to medallion data lake
+`nba_dfs.features` — build GTv2 feature contract from raw data
+`nba_dfs.minutes` — GTv2 deterministic + stochastic inference
+`nba_dfs.rates` — GBM per-minute rate models
+`nba_dfs.edits` — first-class manual override layer
+`nba_dfs.sim` — copula sampling with calibrated marginals
+Setup — uv venv with Python 3.11, `uv sync`, set `NBA_DFS_DATA_DIR` and `NBA_DFS_BUNDLE_DIR` env vars.
+Current state — A table of each module directory and its state: `data` stubbed, `features` empty (open Option A vs B decision), `minutes` empty (port pending, file list documented), `rates` empty, `edits` empty, `sim` empty.
+Architectural disciplines — Two non-negotiable rules, stated explicitly:
+No script-module imports from the package, ever. `scripts/` may import from `src/nba_dfs/`, but `src/nba_dfs/` may never import from `scripts/`. If a helper is needed in both, it lives in the package.
+One data access module, no exceptions. All reads and writes against `NBA_DFS_DATA_DIR` go through `nba_dfs.data`. No `pd.read_parquet` or `open()` calls against the data root from anywhere else.
+What's intentionally not here yet — Frontend, orchestration (no Prefect for now; CLI/notebook driven until the modeling layer settles), GitHub Actions workflow (will add when there are real tests to protect).
+Final steps
+Initialize git in `/home/daniel/projects/nba-dfs-v2`.
+Make one initial commit with the message: `Initial scaffold — empty stack, data layer stub, minutes port pending`.
+Do not install dependencies, do not run uv sync, do not attempt to import from the old repo, do not copy any files from `projections-v2`. The scaffold must be inert and reviewable before anything is run.
+Working notes for you (Codex)
+If `/home/daniel/projects/nba-dfs-v2` already exists and is non-empty, stop and report rather than overwriting.
+Do not create the `web/` or frontend scaffolding yet — that's a separate phase after this one is reviewed.
+Do not write a GitHub Actions workflow file yet.
+Do not create empty placeholder Python files beyond `__init__.py` — every other file should have real content per the requirements above.
+If anything in this prompt is ambiguous or conflicts with what you found in Phase 1, stop and ask before improvising.
+The whole scaffold should be reviewable in five minutes. If you find yourself adding more than what's specified, you're overreaching.
